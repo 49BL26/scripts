@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Word Board</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px;
+            background-color: #f0f2f5;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .controls-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            padding: 10px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 600px;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        button, select {
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 8px;
+            border: 1px solid #ccd0d5;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        button:active, select:active {
+            background: #f0f2f5;
+        }
+        #board {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 5px;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .cell {
+            background: #ffffff;
+            border: 2px solid #ccd0d5;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            cursor: pointer;
+            user-select: none;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+            aspect-ratio: 4 / 3;
+            transition: background-color 0.2s, border-color 0.2s, aspect-ratio 0.3s;
+            padding: 4px;
+        }
+        #board.flipped .cell {
+            aspect-ratio: 3 / 4;
+        }
+        .cell-text {
+            font-size: 3vw;
+            font-weight: bold;
+            text-align: center;
+            transition: transform 0.2s ease;
+            white-space: normal;
+            word-break: break-word;
+            display: block;
+            width: 100%;
+        }
+        @media (min-width: 600px) {
+            .cell-text {
+                font-size: 13px;
+            }
+            #board {
+                gap: 8px;
+            }
+            .cell {
+                border-radius: 8px;
+            }
+        }
+        
+        /* Base Colors */
+        .cell.red { background-color: #ffcdd2 !important; color: #b71c1c !important; border-color: #ef5350; }
+        .cell.blue { background-color: #bbdefb !important; color: #0d47a1 !important; border-color: #42a5f5; }
+        .cell.black { background-color: #cfd8dc !important; color: #212121 !important; border-color: #78909c; }
+        .cell.white { background-color: #ffffff !important; color: #757575 !important; border-color: #e0e0e0; }
+
+        /* Bright Play Mode Highlight Overrides */
+        .cell.play-active.red { background-color: #d32f2f !important; color: #ffffff !important; border-color: #b71c1c; }
+        .cell.play-active.blue { background-color: #1976d2 !important; color: #ffffff !important; border-color: #0d47a1; }
+        .cell.play-active.black { background-color: #212121 !important; color: #000000 !important; border-color: #000000; }
+        .cell.play-active.white { background-color: #555555 !important; color: #ffffff !important; border-color: #424242 !important; }
+    </style>
+</head>
+<body>
+
+    <div class="controls-container">
+        <div class="control-group">
+            <label for="mode-select" style="font-size: 13px; font-weight: bold; color: #4b4b4b;">Mode:</label>
+            <select id="mode-select" onchange="handleModeChange()">
+                <option value="text">Edit Text</option>
+                <option value="color">Color Painting</option>
+                <option value="play">Play Mode</option>
+                <option value="dataIO">Import/Export Data</option>
+            </select>
+        </div>
+        
+        <div class="control-group" id="color-select-group" style="display: none;">
+            <label for="color-select" style="font-size: 13px; font-weight: bold; color: #4b4b4b;">Color:</label>
+            <select id="color-select">
+                <option value="red">Red</option>
+                <option value="blue">Blue</option>
+                <option value="black">Black</option>
+                <option value="white">White</option>
+            </select>
+        </div>
+
+        <div class="control-group" id="data-buttons-group" style="display: none;">
+            <button onclick="exportDataString()">Export Board Setup</button>
+            <button onclick="importDataString()">Import Board Setup</button>
+        </div>
+
+        <button class="action-btn" onclick="toggleCellFlip()">Flip Cards</button>
+        <button class="action-btn" onclick="rotateWordsClockwise()">Rotate Words</button>
+        <button class="action-btn" onclick="rotateBoardOuterRing()">Rotate Board</button>
+        <button class="action-btn" onclick="importWordsPrompt()">Import Words</button>
+        <button class="action-btn" onclick="addWordPrompt()">Add Word</button>
+        <button class="action-btn" onclick="clearBoard()">Clear Board</button>
+    </div>
+
+    <div id="board"></div>
+    <script>
+        const board = document.getElementById('board');
+        let currentRotation = 0;
+        let isFlipped = false;
+
+        const outerRingIndices = [0, 1, 2, 3, 4, 9, 14, 19, 24, 23, 22, 21, 20, 15, 10, 5];
+        const innerRingIndices = [6, 7, 8, 13, 18, 17, 16, 11];
+
+
+        const degToCompass = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
+        const compassToDeg = { 'N': 0, 'E': 90, 'S': 180, 'W': 270 };
+
+        function loadSavedState() {
+            const savedData = localStorage.getItem('wordBoardState');
+            if (savedData) {
+                try {
+                    const parsed = JSON.parse(savedData);
+                    currentRotation = parsed.currentRotation || 0;
+                    isFlipped = parsed.isFlipped || false;
+                    
+                    if (isFlipped) {
+                        board.classList.add('flipped');
+                    }
+                    
+                    initBoard(parsed.cellsData);
+                    return;
+                } catch (e) {
+                    console.error("Error pulling local layout data configurations", e);
+                }
+            }
+            
+            const defaultCells = Array.from({length: 25}, (_, i) => ({
+                text: `Card ${i + 1}`,
+                colorClass: 'white',
+                isPlayFlipped: false
+            }));
+            initBoard(defaultCells);
+        }
+
+        function saveCurrentState() {
+            const cells = Array.from(board.getElementsByClassName('cell'));
+            const cellsData = cells.map(cell => ({
+                text: cell.querySelector('.cell-text').textContent,
+                colorClass: Array.from(cell.classList).find(c => ['red', 'blue', 'black', 'white'].includes(c)) || 'white',
+                isPlayFlipped: cell.classList.contains('play-active')
+            }));
+            
+            const stateToSave = {
+                currentRotation,
+                isFlipped,
+                cellsData
+            };
+            localStorage.setItem('wordBoardState', JSON.stringify(stateToSave));
+        }
+
+        function initBoard(cellsData) {
+            board.innerHTML = '';
+            cellsData.forEach((cellData, i) => {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                if (cellData.colorClass) {
+                    cell.classList.add(cellData.colorClass);
+                } else {
+                    cell.classList.add('white');
+                }
+                if (cellData.isPlayFlipped) {
+                    cell.classList.add('play-active');
+                }
+                cell.dataset.index = i;
+                
+                const textSpan = document.createElement('span');
+                textSpan.className = 'cell-text';
+                textSpan.textContent = cellData.text;
+                textSpan.style.transform = `rotate(${currentRotation}deg)`;
+                
+                cell.appendChild(textSpan);
+                cell.addEventListener('click', () => handleCellClick(cell));
+                board.appendChild(cell);
+            });
+            handleModeChange();
+            updateStats();
+        }
+        function handleCellClick(cell) {
+            const mode = document.getElementById('mode-select').value;
+            const index = parseInt(cell.dataset.index);
+
+            if (mode === 'play') {
+                cell.classList.toggle('play-active');
+                updateStats();
+                saveCurrentState();
+            } else if (mode === 'color') {
+                const selectedColor = document.getElementById('color-select').value;
+                cell.classList.remove('red', 'blue', 'black', 'white', 'play-active');
+                cell.classList.add(selectedColor);
+                updateStats();
+                saveCurrentState();
+            } else if (mode === 'text') {
+                const currentText = cell.querySelector('.cell-text').textContent;
+                const newText = prompt(`Edit text for cell ${index + 1}:`, currentText);
+                if (newText !== null && newText.trim() !== "") {
+                    cell.querySelector('.cell-text').textContent = newText.trim();
+                    saveCurrentState();
+                }
+            }
+        }
+
+        function handleModeChange() {
+            const mode = document.getElementById('mode-select').value;
+            const colorGroup = document.getElementById('color-select-group');
+            const dataGroup = document.getElementById('data-buttons-group');
+            const actionButtons = document.querySelectorAll('.action-btn');
+
+            colorGroup.style.display = (mode === 'color') ? 'flex' : 'none';
+            dataGroup.style.display = (mode === 'dataIO') ? 'flex' : 'none';
+
+            if (mode === 'play' || mode === 'color' || mode === 'dataIO') {
+                actionButtons.forEach(btn => btn.style.display = 'none');
+            } else {
+                actionButtons.forEach(btn => btn.style.display = 'inline-block');
+            }
+        }
+
+        function toggleCellFlip() {
+            isFlipped = !isFlipped;
+            board.classList.toggle('flipped', isFlipped);
+            saveCurrentState();
+        }
+
+        function rotateWordsClockwise() {
+            currentRotation = (currentRotation + 90) % 360;
+            const wrappers = board.querySelectorAll('.cell-text');
+            wrappers.forEach(wrapper => {
+                wrapper.style.transform = `rotate(${currentRotation}deg)`;
+            });
+            saveCurrentState();
+        }
+
+        function rotateRingClockwise(indexArray, shiftSteps) {
+            const cells = board.getElementsByClassName('cell');
+            const len = indexArray.length;
+            
+            const extractedData = indexArray.map(idx => ({
+                text: cells[idx].querySelector('.cell-text').textContent,
+                color: Array.from(cells[idx].classList).find(c => ['red', 'blue', 'black', 'white'].includes(c)) || 'white',
+                playActive: cells[idx].classList.contains('play-active')
+            }));
+
+            const shiftedData = new Array(len);
+            for (let i = 0; i < len; i++) {
+                let targetPos = (i + shiftSteps) % len;
+                shiftedData[targetPos] = extractedData[i];
+            }
+
+            indexArray.forEach((idx, i) => {
+                cells[idx].querySelector('.cell-text').textContent = shiftedData[i].text;
+                cells[idx].className = 'cell';
+                if (isFlipped) cells[idx].classList.add('flipped');
+                if (shiftedData[i].color) cells[idx].classList.add(shiftedData[i].color);
+                if (shiftedData[i].playActive) cells[idx].classList.add('play-active');
+            });
+        }
+
+        function rotateBoardOuterRing() {
+            rotateRingClockwise(outerRingIndices, 4);
+            rotateRingClockwise(innerRingIndices, 2);
+            updateStats();
+            saveCurrentState();
+        }
+
+        function importWordsPrompt() {
+            const rawInput = prompt("Paste your words separated by commas, newlines or spaces:");
+            if (!rawInput) return;
+
+            const cleanedWords = rawInput.split(/,|\n|\s+/).map(w => w.trim()).filter(w => w.length > 0);
+            if (cleanedWords.length === 0) return;
+
+            const cells = Array.from(board.getElementsByClassName('cell'));
+            let dataIndex = 0;
+
+            cells.forEach((cell, idx) => {
+                if (dataIndex < cleanedWords.length) {
+                    cell.querySelector('.cell-text').textContent = cleanedWords[dataIndex];
+                    dataIndex++;
+                }
+            });
+
+            saveCurrentState();
+        }
+
+        function addWordPrompt() {
+            const cells = Array.from(board.getElementsByClassName('cell'));
+            const targetCell = cells.find(cell => cell.querySelector('.cell-text').textContent.trim() === "");
+
+            if (!targetCell) {
+                alert("The board is completely full!");
+                return;
+            }
+
+            const newText = prompt("Enter word for the next empty cell:");
+            if (newText !== null && newText.trim() !== "") {
+                targetCell.querySelector('.cell-text').textContent = newText.trim();
+                saveCurrentState();
+            }
+        }
+
+        function clearBoard() {
+            if (confirm("Are you sure you want to completely clear the board?")) {
+                const cells = board.getElementsByClassName('cell');
+                for (let i = 0; i < cells.length; i++) {
+                    cells[i].className = 'cell white'; 
+                    cells[i].querySelector('.cell-text').textContent = `Card ${i + 1}`;
+                }
+                currentRotation = 0;
+                const wrappers = board.querySelectorAll('.cell-text');
+                wrappers.forEach(w => w.style.transform = 'rotate(0deg)');
+                if (isFlipped) board.classList.add('flipped');
+                updateStats();
+                saveCurrentState();
+            }
+        }
+
+        function updateStats() {
+            const cells = board.getElementsByClassName('cell');
+            let totalRed = 0;
+            let totalBlue = 0;
+            let selectedRed = 0;
+            let selectedBlue = 0;
+
+            for (let i = 0; i < cells.length; i++) {
+                const isRed = cells[i].classList.contains('red');
+                const isBlue = cells[i].classList.contains('blue');
+                const isSelected = cells[i].classList.contains('play-active');
+
+                if (isRed) {
+                    totalRed++;
+                    if (isSelected) selectedRed++;
+                } else if (isBlue) {
+                    totalBlue++;
+                    if (isSelected) selectedBlue++;
+                }
+            }
+
+            document.getElementById('red-count').textContent = `${selectedRed} / ${totalRed}`;
+            document.getElementById('blue-count').textContent = `${selectedBlue} / ${totalBlue}`;
+        }
+
+        function exportDataString() {
+            const cells = Array.from(board.getElementsByClassName('cell'));
+            const shapeParam = isFlipped ? 'L' : 'W';
+            const orientationParam = degToCompass[currentRotation] || 'N';
+            const globalSettingsPrefix = `${shapeParam}${orientationParam}`;
+
+            const dataArr = cells.map(cell => {
+                const text = cell.querySelector('.cell-text').textContent || " ";
+                let colorChar = 'W';
+                if (cell.classList.contains('red')) colorChar = 'R';
+                if (cell.classList.contains('blue')) colorChar = 'B';
+                if (cell.classList.contains('black')) colorChar = 'D';
+                
+                const played = cell.classList.contains('play-active') ? 'true' : 'false';
+                return `${text}|${colorChar}|${played}`;
+            });
+            
+            const outString = `${globalSettingsPrefix}::${dataArr.join(';;')}`;
+            prompt("Copy this configuration data string setup state:", outString);
+        }
+
+        function importDataString() {
+            const input = prompt("Paste your layout setting data string code here:");
+            if (!input) return;
+
+            const mainSplit = input.split('::');
+            if (mainSplit.length !== 2) {
+                alert("Incorrect data format structure config layout profile.");
+                return;
+            }
+
+            const globalSettings = mainSplit[0];
+            const boardChunks = mainSplit[1].split(';;');
+
+            if (boardChunks.length !== 25 || globalSettings.length !== 2) {
+                alert("Data profiles must match parameters accurately.");
+                return;
+            }
+
+            isFlipped = (globalSettings[0] === 'L');
+            board.classList.toggle('flipped', isFlipped);
+
+            currentRotation = compassToDeg[globalSettings[1]] !== undefined ? compassToDeg[globalSettings[1]] : 0;
+
+            const parsedCells = boardChunks.map(chunk => {
+                const parts = chunk.split('|');
+                let colorClass = 'white';
+                if (parts[1] === 'R') colorClass = 'red';
+                if (parts[1] === 'B') colorClass = 'blue';
+                if (parts[1] === 'D') colorClass = 'black';
+
+                return {
+                    text: parts[0],
+                    colorClass: colorClass,
+                    isPlayFlipped: (parts[2] === 'true')
+                };
+            });
+
+            initBoard(parsedCells);
+            saveCurrentState();
+        }
+
+        window.addEventListener('beforeunload', (event) => {
+            event.preventDefault();
+            event.returnValue = "Would you like to export your game configuration data string first before reloading?";
+        });
+
+        loadSavedState();
+    </script>
+    <!-- Stats Blurb Section -->
+    <div id="stats-blurb" style="margin: 12px auto 10px auto; padding: 12px; background-color: white; border-radius: 12px; text-align: center; font-family: sans-serif; box-shadow: 0 4px 6px rgba(0,0,0,0.05); width: 100%; max-width: 600px; box-sizing: border-box;">
+        <h3 style="margin: 0 0 6px 0; color: #333; font-size: 15px;">Tile Statistics</h3>
+        <div style="display: flex; justify-content: center; gap: 20px; font-weight: bold; font-size: 14px;">
+            <span style="color: #e53935;">Selected Red: <span id="red-count">0 / 0</span></span>
+            <span style="color: #1e88e5;">Selected Blue: <span id="blue-count">0 / 0</span></span>
+        </div>
+    </div>
+</body>
+</html>
