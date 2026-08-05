@@ -273,6 +273,7 @@
         }
 
         function toggleCellFlip() {
+            rotateWordsClockwise();
             isFlipped = !isFlipped;
             board.classList.toggle('flipped', isFlipped);
             saveCurrentState();
