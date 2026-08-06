@@ -187,6 +187,8 @@
     <button class="action-btn" onclick="importWordsPrompt()">Import Words</button>
     <button class="action-btn" onclick="addWordPrompt()">Add Word</button>
     <button class="action-btn" onclick="clearBoard()">Clear Board</button>
+    <button class="action-btn" onclick="clearBoardColors()">Clear Colors</button>
+    <button class="action-btn" onclick="clearBoardSelections()">Clear Selection</button>
 </div>
 
 <!-- ================= BOARD ================= -->
@@ -598,6 +600,24 @@ async function clearBoard() {
     updateStats(); saveCurrentState();
 }
 
+async function clearBoardColors() {
+    if (!await uiConfirm('Clear every color?', 'Clear colors')) return;
+    Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
+        cell.className = 'cell white';
+    });
+    updateStats(); saveCurrentState();
+}
+
+async function clearBoardSelections() {
+    if (!await uiConfirm('Clear every selection on the board?', 'Clear board')) return;
+    
+    board.querySelectorAll('.cell.play-active').forEach(cell => {
+        cell.classList.remove('play-active');
+    });
+
+    updateStats(); saveCurrentState();
+}
+
 /* ============================================================
    STATS + CLUE NOTES
    ============================================================ */
@@ -758,6 +778,5 @@ function parseLegacy(s) {                            // old  WN::word|C|true;;â€
 
 loadSavedState();
 </script>
-
 </body>
 </html>
