@@ -1,478 +1,762 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Word Board</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 8px;
-            background-color: #f0f2f5;
-            margin: 0;
-            min-height: 100vh;
-        }
-        .controls-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 12px;
-            align-items: center;
-            justify-content: center;
-            background: white;
-            padding: 10px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            width: 100%;
-            max-width: 600px;
-        }
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        button, select {
-            padding: 8px 12px;
-            font-size: 13px;
-            font-weight: 500;
-            border-radius: 8px;
-            border: 1px solid #ccd0d5;
-            background: white;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            -webkit-tap-highlight-color: transparent;
-        }
-        button:active, select:active {
-            background: #f0f2f5;
-        }
-        #board {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 5px;
-            width: 100%;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        .cell {
-            background: #ffffff;
-            border: 2px solid #ccd0d5;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            cursor: pointer;
-            user-select: none;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-            aspect-ratio: 4 / 3;
-            transition: background-color 0.2s, border-color 0.2s, aspect-ratio 0.3s;
-            padding: 4px;
-        }
-        #board.flipped .cell {
-            aspect-ratio: 3 / 4;
-        }
-        .cell-text {
-            font-size: 3vw;
-            font-weight: bold;
-            text-align: center;
-            transition: transform 0.2s ease;
-            white-space: normal;
-            word-break: break-word;
-            display: block;
-            width: 100%;
-        }
-        @media (min-width: 600px) {
-            .cell-text {
-                font-size: 13px;
-            }
-            #board {
-                gap: 8px;
-            }
-            .cell {
-                border-radius: 8px;
-            }
-        }
-        
-        /* Base Colors */
-        .cell.red { background-color: #ffcdd2 !important; color: #b71c1c !important; border-color: #ef5350; }
-        .cell.blue { background-color: #bbdefb !important; color: #0d47a1 !important; border-color: #42a5f5; }
-        .cell.black { background-color: #cfd8dc !important; color: #212121 !important; border-color: #78909c; }
-        .cell.white { background-color: #ffffff !important; color: #757575 !important; border-color: #e0e0e0; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dynamic Word Board</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        display: flex; flex-direction: column; align-items: center;
+        padding: 8px; background-color: #f0f2f5; margin: 0; min-height: 100vh;
+    }
+    body.modal-open { overflow: hidden; }
 
-        /* Bright Play Mode Highlight Overrides */
-        .cell.play-active.red { background-color: #d32f2f !important; color: #ffffff !important; border-color: #b71c1c; }
-        .cell.play-active.blue { background-color: #1976d2 !important; color: #ffffff !important; border-color: #0d47a1; }
-        .cell.play-active.black { background-color: #212121 !important; color: #000000 !important; border-color: #000000; }
-        .cell.play-active.white { background-color: #DFD1A5 !important; color: #ffffff !important; border-color: #DFD1A5 !important; }
-    </style>
+    .panel {
+        background: #fff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        width: 100%; max-width: 600px;
+    }
+    .controls-container {
+        display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+        align-items: center; justify-content: center; padding: 10px;
+    }
+    .control-group { display: flex; align-items: center; gap: 6px; }
+    .control-group label { font-size: 13px; font-weight: bold; color: #4b4b4b; }
+    button, select {
+        padding: 8px 12px; font-size: 13px; font-weight: 500; border-radius: 8px;
+        border: 1px solid #ccd0d5; background: #fff; cursor: pointer;
+        transition: all 0.15s ease; -webkit-tap-highlight-color: transparent;
+    }
+    button:active, select:active { background: #f0f2f5; }
+
+    /* ---------- BOARD ---------- */
+    #board {
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
+        width: 100%; max-width: 600px; margin: 0 auto;
+    }
+    .cell {
+        background: #fff; border: 2px solid #ccd0d5; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        position: relative; cursor: pointer; user-select: none; overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02); aspect-ratio: 4 / 3;
+        transition: background-color .2s, border-color .2s, aspect-ratio .3s; padding: 4px;
+    }
+    #board.flipped .cell { aspect-ratio: 3 / 4; }
+    .cell-text {
+        font-size: 3vw; font-weight: bold; text-align: center;
+        transition: transform .2s ease; white-space: normal; word-break: break-word;
+        display: block; width: 100%;
+    }
+    @media (min-width: 600px) {
+        .cell-text { font-size: 13px; }
+        #board { gap: 8px; }
+        .cell { border-radius: 8px; }
+    }
+
+    /* Base colours */
+    .cell.red   { background-color:#ffcdd2 !important; color:#b71c1c !important; border-color:#ef5350; }
+    .cell.blue  { background-color:#bbdefb !important; color:#0d47a1 !important; border-color:#42a5f5; }
+    .cell.black { background-color:#cfd8dc !important; color:#212121 !important; border-color:#78909c; }
+    .cell.white { background-color:#ffffff !important; color:#757575 !important; border-color:#e0e0e0; }
+
+    /* Revealed / flipped cards */
+    .cell.play-active.red   { background-color:#d32f2f !important; color:#fff !important; border-color:#b71c1c; }
+    .cell.play-active.blue  { background-color:#1976d2 !important; color:#fff !important; border-color:#0d47a1; }
+    .cell.play-active.black { background-color:#212121 !important; color:#000 !important; border-color:#000; }
+    .cell.play-active.white { background-color:#DFD1A5 !important; color:#fff !important; border-color:#DFD1A5 !important; }
+
+    /* "Think" marking (tentative spymaster note) */
+    .cell.think { outline: 3px dashed #6a1b9a; outline-offset: -5px; }
+    .cell.think::after {
+        content: attr(data-seq); position: absolute; top: 1px; right: 3px;
+        font-size: 10px; font-weight: bold; color: #6a1b9a;
+        background: rgba(255,255,255,.85); border-radius: 4px; padding: 0 3px; line-height: 1.5;
+    }
+
+    /* ---------- THINK PANEL ---------- */
+    #think-panel { margin-top: 12px; padding: 10px; display: none; }
+    #think-panel.open { display: block; }
+    .think-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; }
+    .think-head h3 { margin:0; font-size:15px; color:#333; }
+    .think-summary { font-size:12px; color:#555; }
+    .think-cols { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .think-col { border:2px solid #ddd; border-radius:8px; padding:6px; min-height:64px; }
+    .think-col h4 { margin:0 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+    .think-col ul { margin:0; padding-left:16px; font-size:13px; font-weight:600; }
+    .think-col li { margin-bottom:2px; word-break:break-word; }
+    .think-col .empty { font-size:12px; font-weight:400; color:#999; font-style:italic; }
+    .tc-red   { border-color:#ef5350; background:#fff5f5; } .tc-red h4   { color:#b71c1c; }
+    .tc-blue  { border-color:#42a5f5; background:#f3f9ff; } .tc-blue h4  { color:#0d47a1; }
+    .tc-beige { border-color:#DFD1A5; background:#fffdf5; } .tc-beige h4 { color:#8d7333; }
+    .think-col.mine { box-shadow: 0 0 0 3px #ffca28; }
+
+    /* ---------- ASSASSIN BANNER (unique slot above the statistics) ---------- */
+    #assassin-banner {
+        display:none; margin-top:12px; padding:12px; border-radius:12px;
+        background:#111; color:#fff; text-align:center; width:100%; max-width:600px;
+        box-shadow:0 4px 10px rgba(0,0,0,.35); border:2px solid #444;
+    }
+    #assassin-banner.open { display:block; }
+    #assassin-banner .lbl { font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#ff8a80; }
+    #assassin-banner .wrd { font-size:20px; font-weight:800; margin-top:2px; word-break:break-word; }
+
+    /* ---------- STATS ---------- */
+    #stats-blurb { margin:12px auto 24px; padding:12px; text-align:center; }
+    #stats-blurb h3 { margin:0 0 6px; color:#333; font-size:15px; }
+    .stat-row { display:flex; justify-content:center; gap:20px; font-weight:bold; font-size:14px; flex-wrap:wrap; }
+    .stat.team-mine { text-decoration:underline; text-decoration-thickness:3px; text-underline-offset:3px; }
+
+    /* ---------- MODAL ---------- */
+    .modal-overlay {
+        position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000;
+        display:none; align-items:center; justify-content:center; padding:16px;
+    }
+    .modal-overlay.open { display:flex; }
+    .modal {
+        background:#fff; border-radius:14px; padding:16px; width:100%; max-width:440px;
+        box-shadow:0 12px 34px rgba(0,0,0,.3); animation: pop .12s ease-out;
+    }
+    @keyframes pop { from { transform:scale(.95); opacity:.4; } to { transform:scale(1); opacity:1; } }
+    .modal h2 { margin:0 0 6px; font-size:16px; color:#222; }
+    .modal p { margin:0 0 10px; font-size:14px; color:#444; white-space:pre-wrap; }
+    .modal input[type=text], .modal textarea {
+        width:100%; font-size:14px; font-family:inherit; padding:9px 10px;
+        border:1px solid #ccd0d5; border-radius:8px; margin-bottom:12px; display:none;
+    }
+    .modal textarea { min-height:110px; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+    .modal-buttons { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+    .modal-btn { min-width:76px; }
+    .modal-btn.primary { background:#1976d2; color:#fff; border-color:#1565c0; }
+    .modal-btn.c-red   { background:#d32f2f; color:#fff; border-color:#b71c1c; }
+    .modal-btn.c-blue  { background:#1976d2; color:#fff; border-color:#0d47a1; }
+    .modal-btn.c-white { background:#DFD1A5; color:#fff; border-color:#c9b98d; }
+    .modal-btn.c-black { background:#212121; color:#fff; border-color:#000; }
+    .modal-btn.danger  { background:#c62828; color:#fff; border-color:#8e0000; }
+</style>
 </head>
 <body>
 
-    <div class="controls-container">
-        <div class="control-group">
-            <label for="mode-select" style="font-size: 13px; font-weight: bold; color: #4b4b4b;">Mode:</label>
-            <select id="mode-select" onchange="handleModeChange()">
-                <option value="text">Manual Edit</option>
-                <option value="color">Assign Colors</option>
-                <option value="play">Play Mode</option>
-                <option value="dataIO">Import/Export Data</option>
-            </select>
-        </div>
-        
-        <div class="control-group" id="color-select-group" style="display: none;">
-            <label for="color-select" style="font-size: 13px; font-weight: bold; color: #4b4b4b;">Color:</label>
-            <select id="color-select">
-                <option value="red">Red</option>
-                <option value="blue">Blue</option>
-                <option value="black">Black</option>
-                <option value="white">White</option>
-            </select>
-        </div>
-
-        <div class="control-group" id="data-buttons-group" style="display: none;">
-            <button onclick="exportDataString()">Export Board Setup</button>
-            <button onclick="importDataString()">Import Board Setup</button>
-        </div>
-
-        <button class="action-btn" onclick="toggleCellFlip()">Flip Cards</button>
-        <button class="action-btn" onclick="rotateWordsClockwise()">Rotate Words</button>
-        <button class="action-btn" onclick="rotateBoardOuterRing()">Rotate Board</button>
-        <button class="action-btn" onclick="importWordsPrompt()">Import Words</button>
-        <button class="action-btn" onclick="addWordPrompt()">Add Word</button>
-        <button class="action-btn" onclick="clearBoard()">Clear Board</button>
+<!-- ================= CONTROLS ================= -->
+<div class="panel controls-container">
+    <div class="control-group">
+        <label for="mode-select">Mode:</label>
+        <select id="mode-select" onchange="handleModeChange()">
+            <option value="text">Manual Edit</option>
+            <option value="color">Assign Colors</option>
+            <option value="spymaster">Spymaster</option>
+            <option value="player">Player</option>
+            <option value="dataIO">Import/Export Data</option>
+        </select>
     </div>
 
-    <div id="board"></div>
-    <script>
-        const board = document.getElementById('board');
-        let currentRotation = 0;
-        let isFlipped = false;
+    <div class="control-group" id="color-select-group" style="display:none;">
+        <label for="color-select">Color:</label>
+        <select id="color-select">
+            <option value="red">Red</option>
+            <option value="blue">Blue</option>
+            <option value="black">Black</option>
+            <option value="white">White</option>
+        </select>
+    </div>
 
-        const outerRingIndices = [0, 1, 2, 3, 4, 9, 14, 19, 24, 23, 22, 21, 20, 15, 10, 5];
-        const innerRingIndices = [6, 7, 8, 13, 18, 17, 16, 11];
+    <div class="control-group" id="spy-action-group" style="display:none;">
+        <label for="spy-action">Action:</label>
+        <select id="spy-action" onchange="updateStats()">
+            <option value="think">Think</option>
+            <option value="flip">Flip</option>
+        </select>
+    </div>
 
+    <div class="control-group" id="spy-team-group" style="display:none;">
+        <label for="spy-team">Team:</label>
+        <select id="spy-team" onchange="updateStats()">
+            <option value="red">Red</option>
+            <option value="blue">Blue</option>
+        </select>
+    </div>
 
-        const degToCompass = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
-        const compassToDeg = { 'N': 0, 'E': 90, 'S': 180, 'W': 270 };
+    <div class="control-group" id="data-buttons-group" style="display:none;">
+        <button onclick="exportDataString()">Export Board Setup</button>
+        <button onclick="importDataString()">Import Board Setup</button>
+    </div>
 
-        function loadSavedState() {
-            const savedData = localStorage.getItem('wordBoardState');
-            if (savedData) {
-                try {
-                    const parsed = JSON.parse(savedData);
-                    currentRotation = parsed.currentRotation || 0;
-                    isFlipped = parsed.isFlipped || false;
-                    
-                    if (isFlipped) {
-                        board.classList.add('flipped');
-                    }
-                    
-                    initBoard(parsed.cellsData);
-                    return;
-                } catch (e) {
-                    console.error("Error pulling local layout data configurations", e);
-                }
-            }
-            
-            const defaultCells = Array.from({length: 25}, (_, i) => ({
-                text: `Card ${i + 1}`,
-                colorClass: 'white',
-                isPlayFlipped: false
-            }));
-            initBoard(defaultCells);
+    <button class="action-btn" onclick="toggleCellFlip()">Flip Cards</button>
+    <button class="action-btn" onclick="rotateWordsClockwise()">Rotate Words</button>
+    <button class="action-btn" onclick="rotateBoardOuterRing()">Rotate Board</button>
+    <button class="action-btn" onclick="importWordsPrompt()">Import Words</button>
+    <button class="action-btn" onclick="addWordPrompt()">Add Word</button>
+    <button class="action-btn" onclick="clearBoard()">Clear Board</button>
+</div>
+
+<!-- ================= BOARD ================= -->
+<div id="board"></div>
+
+<!-- ================= THINK PANEL ================= -->
+<div class="panel" id="think-panel">
+    <div class="think-head">
+        <h3>Clue Notes <span style="font-weight:400;font-size:12px;color:#777;">(cards touched)</span></h3>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span class="think-summary" id="think-summary"></span>
+            <button onclick="clearThoughts()">Clear</button>
+        </div>
+    </div>
+    <div class="think-cols">
+        <div class="think-col tc-red"   id="tc-red">
+            <h4 id="tc-red-h">Red</h4><ul id="list-red"></ul>
+        </div>
+        <div class="think-col tc-blue"  id="tc-blue">
+            <h4 id="tc-blue-h">Blue</h4><ul id="list-blue"></ul>
+        </div>
+        <div class="think-col tc-beige" id="tc-beige">
+            <h4>Beige</h4><ul id="list-beige"></ul>
+        </div>
+    </div>
+</div>
+
+<!-- ================= ASSASSIN SLOT ================= -->
+<div id="assassin-banner">
+    <div class="lbl">&#9760; Assassin touched</div>
+    <div class="wrd" id="assassin-word"></div>
+</div>
+
+<!-- ================= STATS ================= -->
+<div class="panel" id="stats-blurb">
+    <h3>Tile Statistics</h3>
+    <div class="stat-row">
+        <span class="stat" id="stat-red"  style="color:#e53935;">Selected Red: <span id="red-count">0 / 0</span></span>
+        <span class="stat" id="stat-blue" style="color:#1e88e5;">Selected Blue: <span id="blue-count">0 / 0</span></span>
+    </div>
+</div>
+
+<!-- ================= MODAL ================= -->
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true">
+        <h2 id="modal-title"></h2>
+        <p id="modal-message"></p>
+        <input type="text" id="modal-input">
+        <textarea id="modal-area" spellcheck="false"></textarea>
+        <div class="modal-buttons" id="modal-buttons"></div>
+    </div>
+</div>
+
+<script>
+/* ============================================================
+   MODAL SYSTEM (replaces alert / confirm / prompt)
+   ============================================================ */
+const overlay      = document.getElementById('modal-overlay');
+const modalTitle   = document.getElementById('modal-title');
+const modalMessage = document.getElementById('modal-message');
+const modalInput   = document.getElementById('modal-input');
+const modalArea    = document.getElementById('modal-area');
+const modalButtons = document.getElementById('modal-buttons');
+
+let modalResolve = null;
+let modalField = null;
+let modalDismissValue = null;
+
+function showModal(cfg) {
+    if (modalResolve) settleModal(null);            // never stack dialogs
+    return new Promise(resolve => {
+        modalResolve = resolve;
+        modalTitle.textContent = cfg.title || '';
+        modalMessage.textContent = cfg.message || '';
+        modalMessage.style.display = cfg.message ? 'block' : 'none';
+
+        modalInput.style.display = 'none';
+        modalArea.style.display  = 'none';
+        modalField = null;
+        if (cfg.input === 'text') modalField = modalInput;
+        if (cfg.input === 'area') modalField = modalArea;
+        if (modalField) {
+            modalField.style.display = 'block';
+            modalField.value = cfg.value || '';
+            modalField.readOnly = !!cfg.readonly;
         }
 
-        function saveCurrentState() {
-            const cells = Array.from(board.getElementsByClassName('cell'));
-            const cellsData = cells.map(cell => ({
-                text: cell.querySelector('.cell-text').textContent,
-                colorClass: Array.from(cell.classList).find(c => ['red', 'blue', 'black', 'white'].includes(c)) || 'white',
-                isPlayFlipped: cell.classList.contains('play-active')
-            }));
-            
-            const stateToSave = {
-                currentRotation,
-                isFlipped,
-                cellsData
-            };
-            localStorage.setItem('wordBoardState', JSON.stringify(stateToSave));
-        }
-
-        function initBoard(cellsData) {
-            board.innerHTML = '';
-            cellsData.forEach((cellData, i) => {
-                const cell = document.createElement('div');
-                cell.className = 'cell';
-                if (cellData.colorClass) {
-                    cell.classList.add(cellData.colorClass);
-                } else {
-                    cell.classList.add('white');
-                }
-                if (cellData.isPlayFlipped) {
-                    cell.classList.add('play-active');
-                }
-                cell.dataset.index = i;
-                
-                const textSpan = document.createElement('span');
-                textSpan.className = 'cell-text';
-                textSpan.textContent = cellData.text;
-                textSpan.style.transform = `rotate(${currentRotation}deg)`;
-                
-                cell.appendChild(textSpan);
-                cell.addEventListener('click', () => handleCellClick(cell));
-                board.appendChild(cell);
+        modalButtons.innerHTML = '';
+        (cfg.buttons || [{label:'OK', value:true, primary:true}]).forEach(b => {
+            const btn = document.createElement('button');
+            btn.textContent = b.label;
+            btn.className = 'modal-btn'
+                + (b.primary ? ' primary' : '')
+                + (b.danger  ? ' danger'  : '')
+                + (b.swatch  ? ' c-' + b.swatch : '');
+            btn.addEventListener('click', () => {
+                if (b.action) b.action(btn, modalField);
+                if (!b.keepOpen) settleModal(b.value === '@input' ? (modalField ? modalField.value : null) : b.value);
             });
-            handleModeChange();
-            updateStats();
-        }
-        function handleCellClick(cell) {
-            const mode = document.getElementById('mode-select').value;
-            const index = parseInt(cell.dataset.index);
-
-            if (mode === 'play') {
-                cell.classList.toggle('play-active');
-                updateStats();
-                saveCurrentState();
-            } else if (mode === 'color') {
-                const selectedColor = document.getElementById('color-select').value;
-                cell.classList.remove('red', 'blue', 'black', 'white', 'play-active');
-                cell.classList.add(selectedColor);
-                updateStats();
-                saveCurrentState();
-            } else if (mode === 'text') {
-                const currentText = cell.querySelector('.cell-text').textContent;
-                const newText = prompt(`Edit text for cell ${index + 1}:`, currentText);
-                if (newText !== null && newText.trim() !== "") {
-                    cell.querySelector('.cell-text').textContent = newText.trim();
-                    saveCurrentState();
-                }
-            }
-        }
-
-        function handleModeChange() {
-            const mode = document.getElementById('mode-select').value;
-            const colorGroup = document.getElementById('color-select-group');
-            const dataGroup = document.getElementById('data-buttons-group');
-            const actionButtons = document.querySelectorAll('.action-btn');
-
-            colorGroup.style.display = (mode === 'color') ? 'flex' : 'none';
-            dataGroup.style.display = (mode === 'dataIO') ? 'flex' : 'none';
-
-            if (mode === 'play' || mode === 'color' || mode === 'dataIO') {
-                actionButtons.forEach(btn => btn.style.display = 'none');
-            } else {
-                actionButtons.forEach(btn => btn.style.display = 'inline-block');
-            }
-        }
-
-        function toggleCellFlip() {
-            rotateWordsClockwise();
-            isFlipped = !isFlipped;
-            board.classList.toggle('flipped', isFlipped);
-            saveCurrentState();
-        }
-
-        function rotateWordsClockwise() {
-            currentRotation = (currentRotation + 90) % 360;
-            const wrappers = board.querySelectorAll('.cell-text');
-            wrappers.forEach(wrapper => {
-                wrapper.style.transform = `rotate(${currentRotation}deg)`;
-            });
-            saveCurrentState();
-        }
-
-        function rotateRingClockwise(indexArray, shiftSteps) {
-            const cells = board.getElementsByClassName('cell');
-            const len = indexArray.length;
-            
-            const extractedData = indexArray.map(idx => ({
-                text: cells[idx].querySelector('.cell-text').textContent,
-                color: Array.from(cells[idx].classList).find(c => ['red', 'blue', 'black', 'white'].includes(c)) || 'white',
-                playActive: cells[idx].classList.contains('play-active')
-            }));
-
-            const shiftedData = new Array(len);
-            for (let i = 0; i < len; i++) {
-                let targetPos = (i + shiftSteps) % len;
-                shiftedData[targetPos] = extractedData[i];
-            }
-
-            indexArray.forEach((idx, i) => {
-                cells[idx].querySelector('.cell-text').textContent = shiftedData[i].text;
-                cells[idx].className = 'cell';
-                if (isFlipped) cells[idx].classList.add('flipped');
-                if (shiftedData[i].color) cells[idx].classList.add(shiftedData[i].color);
-                if (shiftedData[i].playActive) cells[idx].classList.add('play-active');
-            });
-        }
-
-        function rotateBoardOuterRing() {
-            rotateRingClockwise(outerRingIndices, 4);
-            rotateRingClockwise(innerRingIndices, 2);
-            updateStats();
-            saveCurrentState();
-        }
-
-        function importWordsPrompt() {
-            const rawInput = prompt("Paste your words separated by commas, newlines or spaces:");
-            if (!rawInput) return;
-
-            const cleanedWords = rawInput.split(/,|\n|\s+/).map(w => w.trim()).filter(w => w.length > 0);
-            if (cleanedWords.length === 0) return;
-
-            const cells = Array.from(board.getElementsByClassName('cell'));
-            let dataIndex = 0;
-
-            cells.forEach((cell, idx) => {
-                if (dataIndex < cleanedWords.length) {
-                    cell.querySelector('.cell-text').textContent = cleanedWords[dataIndex];
-                    dataIndex++;
-                }
-            });
-
-            saveCurrentState();
-        }
-
-        function addWordPrompt() {
-            const cells = Array.from(board.getElementsByClassName('cell'));
-            const targetCell = cells.find(cell => cell.querySelector('.cell-text').textContent.trim() === "");
-
-            if (!targetCell) {
-                alert("The board is completely full!");
-                return;
-            }
-
-            const newText = prompt("Enter word for the next empty cell:");
-            if (newText !== null && newText.trim() !== "") {
-                targetCell.querySelector('.cell-text').textContent = newText.trim();
-                saveCurrentState();
-            }
-        }
-
-        function clearBoard() {
-            if (confirm("Are you sure you want to completely clear the board?")) {
-                const cells = board.getElementsByClassName('cell');
-                for (let i = 0; i < cells.length; i++) {
-                    cells[i].className = 'cell white'; 
-                    cells[i].querySelector('.cell-text').textContent = `Card ${i + 1}`;
-                }
-                currentRotation = 0;
-                const wrappers = board.querySelectorAll('.cell-text');
-                wrappers.forEach(w => w.style.transform = 'rotate(0deg)');
-                if (isFlipped) board.classList.add('flipped');
-                updateStats();
-                saveCurrentState();
-            }
-        }
-
-        function updateStats() {
-            const cells = board.getElementsByClassName('cell');
-            let totalRed = 0;
-            let totalBlue = 0;
-            let selectedRed = 0;
-            let selectedBlue = 0;
-
-            for (let i = 0; i < cells.length; i++) {
-                const isRed = cells[i].classList.contains('red');
-                const isBlue = cells[i].classList.contains('blue');
-                const isSelected = cells[i].classList.contains('play-active');
-
-                if (isRed) {
-                    totalRed++;
-                    if (isSelected) selectedRed++;
-                } else if (isBlue) {
-                    totalBlue++;
-                    if (isSelected) selectedBlue++;
-                }
-            }
-
-            document.getElementById('red-count').textContent = `${selectedRed} / ${totalRed}`;
-            document.getElementById('blue-count').textContent = `${selectedBlue} / ${totalBlue}`;
-        }
-
-        function exportDataString() {
-            const cells = Array.from(board.getElementsByClassName('cell'));
-            const shapeParam = isFlipped ? 'L' : 'W';
-            const orientationParam = degToCompass[currentRotation] || 'N';
-            const globalSettingsPrefix = `${shapeParam}${orientationParam}`;
-
-            const dataArr = cells.map(cell => {
-                const text = cell.querySelector('.cell-text').textContent || " ";
-                let colorChar = 'W';
-                if (cell.classList.contains('red')) colorChar = 'R';
-                if (cell.classList.contains('blue')) colorChar = 'B';
-                if (cell.classList.contains('black')) colorChar = 'D';
-                
-                const played = cell.classList.contains('play-active') ? 'true' : 'false';
-                return `${text}|${colorChar}|${played}`;
-            });
-            
-            const outString = `${globalSettingsPrefix}::${dataArr.join(';;')}`;
-            prompt("Copy this configuration data string setup state:", outString);
-        }
-
-        function importDataString() {
-            const input = prompt("Paste your layout setting data string code here:");
-            if (!input) return;
-
-            const mainSplit = input.split('::');
-            if (mainSplit.length !== 2) {
-                alert("Incorrect data format structure config layout profile.");
-                return;
-            }
-
-            const globalSettings = mainSplit[0];
-            const boardChunks = mainSplit[1].split(';;');
-
-            if (boardChunks.length !== 25 || globalSettings.length !== 2) {
-                alert("Data profiles must match parameters accurately.");
-                return;
-            }
-
-            isFlipped = (globalSettings[0] === 'L');
-            board.classList.toggle('flipped', isFlipped);
-
-            currentRotation = compassToDeg[globalSettings[1]] !== undefined ? compassToDeg[globalSettings[1]] : 0;
-
-            const parsedCells = boardChunks.map(chunk => {
-                const parts = chunk.split('|');
-                let colorClass = 'white';
-                if (parts[1] === 'R') colorClass = 'red';
-                if (parts[1] === 'B') colorClass = 'blue';
-                if (parts[1] === 'D') colorClass = 'black';
-
-                return {
-                    text: parts[0],
-                    colorClass: colorClass,
-                    isPlayFlipped: (parts[2] === 'true')
-                };
-            });
-
-            initBoard(parsedCells);
-            saveCurrentState();
-        }
-
-        window.addEventListener('beforeunload', (event) => {
-            event.preventDefault();
-            event.returnValue = "Would you like to export your game configuration data string first before reloading?";
+            modalButtons.appendChild(btn);
         });
 
-        loadSavedState();
-    </script>
-    <!-- Stats Blurb Section -->
-    <div id="stats-blurb" style="margin: 12px auto 10px auto; padding: 12px; background-color: white; border-radius: 12px; text-align: center; font-family: sans-serif; box-shadow: 0 4px 6px rgba(0,0,0,0.05); width: 100%; max-width: 600px; box-sizing: border-box;">
-        <h3 style="margin: 0 0 6px 0; color: #333; font-size: 15px;">Tile Statistics</h3>
-        <div style="display: flex; justify-content: center; gap: 20px; font-weight: bold; font-size: 14px;">
-            <span style="color: #e53935;">Selected Red: <span id="red-count">0 / 0</span></span>
-            <span style="color: #1e88e5;">Selected Blue: <span id="blue-count">0 / 0</span></span>
-        </div>
-    </div>
+        modalDismissValue = ('dismiss' in cfg) ? cfg.dismiss : null;
+        overlay.classList.add('open');
+        document.body.classList.add('modal-open');
+        setTimeout(() => {
+            if (modalField) { modalField.focus(); modalField.select(); }
+            else { const f = modalButtons.querySelector('button'); if (f) f.focus(); }
+        }, 30);
+    });
+}
+
+function settleModal(value) {
+    overlay.classList.remove('open');
+    document.body.classList.remove('modal-open');
+    const r = modalResolve;
+    modalResolve = null;
+    if (r) r(value);
+}
+
+overlay.addEventListener('mousedown', e => { if (e.target === overlay) settleModal(modalDismissValue); });
+document.addEventListener('keydown', e => {
+    if (!modalResolve) return;
+    if (e.key === 'Escape') { e.preventDefault(); settleModal(modalDismissValue); }
+    if (e.key === 'Enter' && modalField === modalInput) {
+        e.preventDefault();
+        const primary = modalButtons.querySelector('.primary');
+        if (primary) primary.click();
+    }
+});
+
+function uiAlert(message, title = 'Notice') {
+    return showModal({ title, message, buttons: [{label:'OK', value:true, primary:true}], dismiss:true });
+}
+function uiConfirm(message, title = 'Please confirm') {
+    return showModal({ title, message, dismiss:false, buttons: [
+        {label:'Cancel', value:false},
+        {label:'Yes',    value:true, primary:true}
+    ]});
+}
+function uiPrompt(message, defaultValue = '', opts = {}) {
+    return showModal({
+        title: opts.title || 'Input',
+        message,
+        input: opts.multiline ? 'area' : 'text',
+        value: defaultValue,
+        buttons: [
+            {label:'Cancel', value:null},
+            {label: opts.okLabel || 'OK', value:'@input', primary:true}
+        ]
+    });
+}
+function uiShowText(message, text, title = 'Data string') {
+    return showModal({
+        title, message, input:'area', value:text, readonly:true, dismiss:null,
+        buttons: [
+            {label:'Copy', keepOpen:true, action:(btn, field) => copyToClipboard(field, btn)},
+            {label:'Close', value:null, primary:true}
+        ]
+    });
+}
+function copyToClipboard(field, btn) {
+    const done = () => { const t = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = t, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(field.value).then(done).catch(() => { field.select(); document.execCommand('copy'); done(); });
+    } else { field.select(); document.execCommand('copy'); done(); }
+}
+
+/* ============================================================
+   BOARD STATE
+   ============================================================ */
+const board = document.getElementById('board');
+const COLORS = ['red','blue','black','white'];
+let currentRotation = 0;
+let isFlipped = false;
+let thinkCounter = 1;
+
+const outerRingIndices = [0,1,2,3,4,9,14,19,24,23,22,21,20,15,10,5];
+const innerRingIndices = [6,7,8,13,18,17,16,11];
+
+const degToCompass = {0:'N', 90:'E', 180:'S', 270:'W'};
+const compassToDeg = {N:0, E:90, S:180, W:270};
+
+const colorToCode = {red:'R', blue:'B', black:'D', white:'W'};
+const codeToColor = {R:'red', B:'blue', D:'black', W:'white'};
+
+const getColor    = cell => COLORS.find(c => cell.classList.contains(c)) || 'white';
+const getText     = cell => cell.querySelector('.cell-text').textContent;
+const isPlaceholder = (txt, i) => txt.trim() === '' || txt.trim() === 'Card ' + (i + 1);
+
+/* ---------- persistence ---------- */
+function loadSavedState() {
+    const savedData = localStorage.getItem('wordBoardState');
+    if (savedData) {
+        try {
+            const parsed = JSON.parse(savedData);
+            currentRotation = parsed.currentRotation || 0;
+            isFlipped = !!parsed.isFlipped;
+            if (isFlipped) board.classList.add('flipped');
+            thinkCounter = 1 + parsed.cellsData.reduce((m, c) => Math.max(m, c.seq || 0), 0);
+            initBoard(parsed.cellsData);
+            return;
+        } catch (e) { console.error('Error pulling local layout data configurations', e); }
+    }
+    initBoard(Array.from({length:25}, (_, i) => ({ text:`Card ${i+1}`, colorClass:'white', isPlayFlipped:false })));
+}
+
+function saveCurrentState() {
+    const cellsData = Array.from(board.getElementsByClassName('cell')).map(cell => ({
+        text: getText(cell),
+        colorClass: getColor(cell),
+        isPlayFlipped: cell.classList.contains('play-active'),
+        isThink: cell.classList.contains('think'),
+        seq: +cell.dataset.seq || 0
+    }));
+    localStorage.setItem('wordBoardState', JSON.stringify({ currentRotation, isFlipped, cellsData }));
+}
+
+function initBoard(cellsData) {
+    board.innerHTML = '';
+    cellsData.forEach((cellData, i) => {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.classList.add(cellData.colorClass || 'white');
+        if (cellData.isPlayFlipped) cell.classList.add('play-active');
+        if (cellData.isThink) { cell.classList.add('think'); cell.dataset.seq = cellData.seq || thinkCounter++; }
+        cell.dataset.index = i;
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'cell-text';
+        textSpan.textContent = cellData.text;
+        textSpan.style.transform = `rotate(${currentRotation}deg)`;
+
+        cell.appendChild(textSpan);
+        cell.addEventListener('click', () => handleCellClick(cell));
+        board.appendChild(cell);
+    });
+    handleModeChange();
+    updateStats();
+}
+
+/* ============================================================
+   INTERACTION
+   ============================================================ */
+async function handleCellClick(cell) {
+    const mode = document.getElementById('mode-select').value;
+
+    if (mode === 'spymaster') {
+        const action = document.getElementById('spy-action').value;
+        if (action === 'flip') {
+            const nowRevealed = !cell.classList.contains('play-active');
+            cell.classList.toggle('play-active', nowRevealed);
+            if (nowRevealed) unthink(cell);
+        } else {
+            toggleThink(cell);
+        }
+        updateStats(); saveCurrentState();
+
+    } else if (mode === 'player') {
+        const word = getText(cell) || 'this card';
+        const choice = await showModal({
+            title: 'Reveal card',
+            message: `“${word}” — which colour was it?`,
+            dismiss: null,
+            buttons: [
+                {label:'Red',   value:'red',   swatch:'red'},
+                {label:'Blue',  value:'blue',  swatch:'blue'},
+                {label:'White', value:'white', swatch:'white'},
+                {label:'Black', value:'black', swatch:'black'},
+                {label:'Cancel', value:null}
+            ]
+        });
+        if (!choice) return;
+        paintCell(cell, choice, true);          // colour it AND select/reveal it
+        updateStats(); saveCurrentState();
+
+    } else if (mode === 'color') {
+        paintCell(cell, document.getElementById('color-select').value, false);
+        updateStats(); saveCurrentState();
+
+    } else if (mode === 'text') {
+        const idx = parseInt(cell.dataset.index);
+        const newText = await uiPrompt(`Text for cell ${idx + 1}:`, getText(cell), { title:'Edit card' });
+        if (newText !== null && newText.trim() !== '') {
+            cell.querySelector('.cell-text').textContent = newText.trim();
+            updateStats(); saveCurrentState();
+        }
+    }
+}
+
+function paintCell(cell, color, reveal) {
+    unthink(cell);
+    cell.classList.remove(...COLORS, 'play-active');
+    cell.classList.add(color);
+    if (reveal) cell.classList.add('play-active');
+}
+
+function toggleThink(cell) {
+    if (cell.classList.contains('think')) unthink(cell);
+    else { cell.classList.add('think'); cell.dataset.seq = thinkCounter++; }
+}
+function unthink(cell) { cell.classList.remove('think'); delete cell.dataset.seq; }
+
+function clearThoughts() {
+    Array.from(board.getElementsByClassName('cell')).forEach(unthink);
+    thinkCounter = 1;
+    updateStats(); saveCurrentState();
+}
+
+function handleModeChange() {
+    const mode = document.getElementById('mode-select').value;
+    document.getElementById('color-select-group').style.display = (mode === 'color') ? 'flex' : 'none';
+    document.getElementById('data-buttons-group').style.display = (mode === 'dataIO') ? 'flex' : 'none';
+    document.getElementById('spy-action-group').style.display   = (mode === 'spymaster') ? 'flex' : 'none';
+    document.getElementById('spy-team-group').style.display     = (mode === 'spymaster') ? 'flex' : 'none';
+    document.querySelectorAll('.action-btn').forEach(btn => btn.style.display = (mode === 'text') ? 'inline-block' : 'none');
+    updateStats();
+}
+
+/* ============================================================
+   FLIP / ROTATE
+   ============================================================ */
+function toggleCellFlip() {
+    rotateWordsClockwise();
+    isFlipped = !isFlipped;
+    board.classList.toggle('flipped', isFlipped);
+    saveCurrentState();
+}
+
+function rotateWordsClockwise() {
+    currentRotation = (currentRotation + 90) % 360;
+    board.querySelectorAll('.cell-text').forEach(w => w.style.transform = `rotate(${currentRotation}deg)`);
+    saveCurrentState();
+}
+
+function rotateRingClockwise(indexArray, shiftSteps) {
+    const cells = board.getElementsByClassName('cell');
+    const len = indexArray.length;
+
+    const extracted = indexArray.map(idx => ({
+        text: getText(cells[idx]),
+        color: getColor(cells[idx]),
+        playActive: cells[idx].classList.contains('play-active'),
+        think: cells[idx].classList.contains('think'),
+        seq: cells[idx].dataset.seq
+    }));
+
+    const shifted = new Array(len);
+    for (let i = 0; i < len; i++) shifted[(i + shiftSteps) % len] = extracted[i];
+
+    indexArray.forEach((idx, i) => {
+        const cell = cells[idx], d = shifted[i];
+        cell.querySelector('.cell-text').textContent = d.text;
+        cell.className = 'cell';
+        cell.classList.add(d.color);
+        if (d.playActive) cell.classList.add('play-active');
+        if (d.think) { cell.classList.add('think'); cell.dataset.seq = d.seq; } else delete cell.dataset.seq;
+    });
+}
+
+function rotateBoardOuterRing() {
+    rotateRingClockwise(outerRingIndices, 4);
+    rotateRingClockwise(innerRingIndices, 2);
+    updateStats();
+    saveCurrentState();
+}
+
+/* ============================================================
+   WORD ENTRY
+   ============================================================ */
+async function importWordsPrompt() {
+    const rawInput = await uiPrompt('Paste your words, separated by commas, newlines or spaces:', '', {
+        title: 'Import words', multiline: true, okLabel: 'Import'
+    });
+    if (!rawInput) return;
+
+    const words = rawInput.split(/[,\n\s]+/).map(w => w.trim()).filter(Boolean);
+    if (!words.length) return;
+
+    Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
+        if (i < words.length) cell.querySelector('.cell-text').textContent = words[i];
+    });
+    updateStats(); saveCurrentState();
+}
+
+async function addWordPrompt() {
+    const cells = Array.from(board.getElementsByClassName('cell'));
+    const target = cells.find((cell, i) => isPlaceholder(getText(cell), i));
+    if (!target) { await uiAlert('The board is completely full!', 'No room'); return; }
+
+    const newText = await uiPrompt('Enter the word for the next empty cell:', '', { title:'Add word', okLabel:'Add' });
+    if (newText !== null && newText.trim() !== '') {
+        target.querySelector('.cell-text').textContent = newText.trim();
+        updateStats(); saveCurrentState();
+    }
+}
+
+async function clearBoard() {
+    if (!await uiConfirm('Clear every word, colour and selection on the board?', 'Clear board')) return;
+    Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
+        cell.className = 'cell white';
+        delete cell.dataset.seq;
+        cell.querySelector('.cell-text').textContent = `Card ${i + 1}`;
+    });
+    currentRotation = 0;
+    thinkCounter = 1;
+    board.querySelectorAll('.cell-text').forEach(w => w.style.transform = 'rotate(0deg)');
+    board.classList.toggle('flipped', isFlipped);
+    updateStats(); saveCurrentState();
+}
+
+/* ============================================================
+   STATS + CLUE NOTES
+   ============================================================ */
+function updateStats() {
+    const cells = Array.from(board.getElementsByClassName('cell'));
+    let totalRed = 0, totalBlue = 0, selRed = 0, selBlue = 0;
+
+    cells.forEach(cell => {
+        const c = getColor(cell), sel = cell.classList.contains('play-active');
+        if (c === 'red')  { totalRed++;  if (sel) selRed++; }
+        if (c === 'blue') { totalBlue++; if (sel) selBlue++; }
+    });
+
+    document.getElementById('red-count').textContent  = `${selRed} / ${totalRed}`;
+    document.getElementById('blue-count').textContent = `${selBlue} / ${totalBlue}`;
+
+    const mode = document.getElementById('mode-select').value;
+    const team = document.getElementById('spy-team').value;
+    const teamActive = (mode === 'spymaster');
+    document.getElementById('stat-red').classList.toggle('team-mine',  teamActive && team === 'red');
+    document.getElementById('stat-blue').classList.toggle('team-mine', teamActive && team === 'blue');
+
+    renderThinkPanel(cells, mode, team);
+}
+
+function renderThinkPanel(cells, mode, team) {
+    const picked = cells.filter(c => c.classList.contains('think'))
+                        .sort((a, b) => (+a.dataset.seq || 0) - (+b.dataset.seq || 0));
+
+    const groups = { red: [], blue: [], white: [], black: [] };
+    picked.forEach(c => groups[getColor(c)].push(getText(c)));
+
+    const fill = (id, arr) => {
+        const ul = document.getElementById(id);
+        ul.innerHTML = arr.length
+            ? arr.map(w => `<li>${escapeHTML(w)}</li>`).join('')
+            : '<li class="empty" style="list-style:none;margin-left:-16px;">— none —</li>';
+    };
+    fill('list-red',   groups.red);
+    fill('list-blue',  groups.blue);
+    fill('list-beige', groups.white);
+
+    const other = team === 'red' ? 'blue' : 'red';
+    document.getElementById('tc-red-h').textContent  = 'Red'  + (team === 'red'  ? ' (yours)' : '');
+    document.getElementById('tc-blue-h').textContent = 'Blue' + (team === 'blue' ? ' (yours)' : '');
+    document.getElementById('tc-red').classList.toggle('mine',  team === 'red');
+    document.getElementById('tc-blue').classList.toggle('mine', team === 'blue');
+
+    document.getElementById('think-summary').textContent =
+        `${groups[team].length} yours · ${groups[other].length} theirs · ${groups.white.length} bystander · ${groups.black.length} assassin`;
+
+    const showPanel = picked.length > 0 ||
+        (mode === 'spymaster' && document.getElementById('spy-action').value === 'think');
+    document.getElementById('think-panel').classList.toggle('open', showPanel);
+
+    const banner = document.getElementById('assassin-banner');
+    banner.classList.toggle('open', groups.black.length > 0);
+    document.getElementById('assassin-word').textContent = groups.black.join('  ·  ');
+}
+
+function escapeHTML(s) {
+    return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+/* ============================================================
+   COMPACT EXPORT / IMPORT
+   Format:  <shape><orient><25 colour codes>:<word;word;...>
+     shape  : W = wide (4:3)   L = tall (3:4)
+     orient : N E S W  (word rotation)
+     colour : R B D W  — UPPER = hidden, lower = revealed
+     words  : ';'-separated; blank = default "Card n"; trailing blanks dropped
+   Example: WNWWWWRRRRRBBBBBDWWWWWWWW:apple;pear;kite
+   ============================================================ */
+function buildDataString() {
+    const cells = Array.from(board.getElementsByClassName('cell'));
+    const flags = (isFlipped ? 'L' : 'W') + (degToCompass[currentRotation] || 'N');
+
+    const codes = cells.map(cell => {
+        const ch = colorToCode[getColor(cell)] || 'W';
+        return cell.classList.contains('play-active') ? ch.toLowerCase() : ch;
+    }).join('');
+
+    const words = cells.map((cell, i) => {
+        const t = getText(cell).trim();
+        return isPlaceholder(t, i) ? '' : t.replace(/;/g, ',');
+    });
+    while (words.length && words[words.length - 1] === '') words.pop();
+
+    return flags + codes + ':' + words.join(';');
+}
+
+async function exportDataString() {
+    await uiShowText('Copy this string to move the board elsewhere:', buildDataString(), 'Export board setup');
+}
+
+async function importDataString() {
+    const input = await uiPrompt('Paste a board setup string:', '', {
+        title: 'Import board setup', multiline: true, okLabel: 'Load'
+    });
+    if (!input) return;
+
+    const s = input.trim();
+    const parsed = s.includes('::') ? parseLegacy(s) : parseCompact(s);
+    if (!parsed) { await uiAlert('That string could not be read. Check that it is complete.', 'Bad data'); return; }
+
+    isFlipped = parsed.isFlipped;
+    board.classList.toggle('flipped', isFlipped);
+    currentRotation = parsed.rotation;
+    thinkCounter = 1;
+    initBoard(parsed.cells);
+    saveCurrentState();
+}
+
+function parseCompact(s) {
+    const cut = s.indexOf(':');
+    if (cut < 27) return null;                       // 2 flags + 25 codes
+    const flags = s.slice(0, 2);
+    const codes = s.slice(2, cut);
+    if (codes.length !== 25) return null;
+
+    const words = s.slice(cut + 1).split(';');
+    while (words.length < 25) words.push('');
+
+    return {
+        isFlipped: flags[0].toUpperCase() === 'L',
+        rotation: compassToDeg[flags[1].toUpperCase()] ?? 0,
+        cells: Array.from({length:25}, (_, i) => {
+            const ch = codes[i];
+            const color = codeToColor[ch.toUpperCase()] || 'white';
+            const w = (words[i] || '').trim();
+            return {
+                text: w === '' ? `Card ${i+1}` : w,
+                colorClass: color,
+                isPlayFlipped: ch === ch.toLowerCase()
+            };
+        })
+    };
+}
+
+function parseLegacy(s) {                            // old  WN::word|C|true;;…
+    const [flags, body] = s.split('::');
+    if (!body || flags.length !== 2) return null;
+    const chunks = body.split(';;');
+    if (chunks.length !== 25) return null;
+    return {
+        isFlipped: flags[0] === 'L',
+        rotation: compassToDeg[flags[1]] ?? 0,
+        cells: chunks.map((chunk, i) => {
+            const p = chunk.split('|');
+            return {
+                text: (p[0] || '').trim() || `Card ${i+1}`,
+                colorClass: codeToColor[(p[1] || 'W').toUpperCase()] || 'white',
+                isPlayFlipped: p[2] === 'true' || p[2] === '1'
+            };
+        })
+    };
+}
+
+loadSavedState();
+</script>
 </body>
 </html>
