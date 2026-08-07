@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spongirobertalizer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f6eedb;
+            color: #333;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #d4a373;
+            text-align: center;
+        }
+        .container {
+            background-color: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 8px;
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 10px;
+            box-sizing: border-box;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 16px;
+            resize: vertical;
+        }
+        textarea:focus {
+            border-color: #d4a373;
+            outline: none;
+        }
+        button {
+            width: 100%;
+            background-color: #d4a373;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #bc8a5f;
+        }
+        .output-box {
+            margin-top: 25px;
+            padding: 15px;
+            background-color: #fefae0;
+            border-left: 5px solid #e9d8a6;
+            border-radius: 4px;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Spongirobertalizer</h1>
+        
+        <form id="converterForm">
+            <label for="inputText">Enter Text:</label>
+            <textarea id="inputText" placeholder="Type something sarcastic here..."></textarea>
+            <button type="submit">Spongirobertalize It!</button>
+        </form>
+
+        <div class="output-box">
+            <label>Output (Spongirobertal Case):</label>
+            <p id="outputText"><em>YoUr TeXt WiLl ApPeAr HeRe...</em></p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('converterForm').addEventListener('submit', function(event) {
+            // Prevent the form from refreshing the page
+            event.preventDefault();
+            
+            // Get the source text
+            const srcText = document.getElementById('inputText').value;
+            
+            // Transform the text into alternating case
+            let result = '';
+            for (let i = 0; i < srcText.length; i++) {
+                if (i % 2 === 0) {
+                    result += srcText[i].toUpperCase();
+                } else {
+                    result += srcText[i].toLowerCase();
+                }
+            }
+            
+            // Display the output while retaining the source in the textarea
+            document.getElementById('outputText').innerText = result || 'Please enter some text first!';
+        });
+    </script>
+
+</body>
+</html>
