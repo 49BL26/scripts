@@ -226,13 +226,6 @@
         <option value="r">Red</option>
         <option value="b">Blue</option>
     </select>
-    <label for="key-paint">Mark:</label>
-    <select id="key-paint">
-        <option value="d">Assassin</option>
-        <option value="r">Red</option>
-        <option value="b">Blue</option>
-        <option value="w">Bystander</option>
-    </select>
 </div>
 
     <button class="action-btn" onclick="toggleCellFlip()">Flip Cards</button>
@@ -558,14 +551,35 @@ function keyCands() {
     return KEY_POOL.filter(k => k.maj === maj && fx.every(([i, c]) => k.g[i] === c));
 }
 
-function keyCellClick(cell) {
-    const i = +cell.dataset.index, code = document.getElementById('key-paint').value;
-    if (keyFixed.get(i) === code) keyFixed.delete(i);
-    else {
-        if (code === 'd') [...keyFixed].forEach(([j, c]) => { if (c === 'd') keyFixed.delete(j); });
-        if (keyFixed.size >= 25) keyFixed.clear();          // was locked in — start over
-        keyFixed.set(i, code);
+async function keyCellClick(cell) {
+    const i = +cell.dataset.index;
+
+    // No assassin yet → this click IS the assassin (first expected action)
+    if (![...keyFixed.values()].includes('d')) {
+        [...keyFixed].forEach(([j, c]) => { if (c === 'd') keyFixed.delete(j); });
+        keyFixed.set(i, 'd');
+        keyUpdate();
+        return;
     }
+
+    // Assassin already set → ask for this cell's true colour
+    const word = getText(cell);
+    const choice = await showModal({
+        title: 'Mark cell',
+        message: `What colour is “${word}”?`,
+        dismiss: null,
+        buttons: [
+            { label: 'Red',       value: 'r', swatch: 'red' },
+            { label: 'Blue',      value: 'b', swatch: 'blue' },
+            { label: 'Bystander', value: 'w', swatch: 'white' },
+            { label: 'Cancel',    value: null }
+        ]
+    });
+    if (!choice) return;
+
+    if (keyFixed.get(i) === choice) keyFixed.delete(i);
+    else keyFixed.set(i, choice);
+
     keyUpdate();
 }
 
@@ -648,9 +662,11 @@ function keyUpdate() {
             }).then(v => {
                 if (v !== 'lock') return;
                 for (let i = 0; i < 25; i++) keyFixed.set(i, k.g[i]);
+				board.querySelectorAll('.cell').forEach(c => c.classList.remove('key-fixed'));
                 document.getElementById('mode-select').value = 'spymaster';
                 handleModeChange();
                 saveCurrentState();
+				keyReset(); 
             });
         }
     } else {
@@ -1123,6 +1139,7 @@ async function clearBoard() {
         delete cell.dataset.seq;
         cell.querySelector('.cell-text').textContent = `Card ${i + 1}`;
     });
+	keyReset();  
     currentRotation = 0;
     thinkCounter = 1;
     board.querySelectorAll('.cell-text').forEach(w => w.style.transform = 'rotate(0deg)');
@@ -1135,6 +1152,7 @@ async function clearBoardColors() {
     Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
         cell.className = 'cell white';
     });
+	keyReset(); 
     updateStats(); saveCurrentState();
 }
 
