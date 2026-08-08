@@ -133,6 +133,43 @@
     .modal-btn.c-white { background:#DFD1A5; color:#fff; border-color:#c9b98d; }
     .modal-btn.c-black { background:#212121; color:#fff; border-color:#000; }
     .modal-btn.danger  { background:#c62828; color:#fff; border-color:#8e0000; }
+    
+/* ---------- WORD INPUT ASSISTANT ---------- */
+.assist-list {
+    display: none; margin: -4px 0 12px; background: #fff;
+    border: 1px solid #ccd0d5; border-radius: 8px;
+    max-height: 220px; overflow-y: auto;
+}
+.assist-list.open { display: block; }
+.assist-item {
+    display: flex; justify-content: space-between; gap: 10px; align-items: center;
+    padding: 8px 10px; font-size: 14px; cursor: pointer;
+    border-bottom: 1px solid #f0f2f5;
+}
+.assist-item:last-child { border-bottom: none; }
+.assist-item.active, .assist-item:hover { background: #e3f2fd; }
+.assist-item b { color: #0d47a1; }
+.assist-item .pair { font-size: 11px; color: #9aa0a6; white-space: nowrap; }
+.assist-empty { padding: 8px 10px; font-size: 13px; color: #999; font-style: italic; }
+
+/* ---------- KEY ASSISTANT ---------- */
+.cell.key-fixed::before {
+    content:''; position:absolute; left:4px; top:4px; width:7px; height:7px;
+    border-radius:50%; background:#6a1b9a; box-shadow:0 0 0 1.5px #fff;
+}
+.cell.key-hint { outline:3px solid #ff9800; outline-offset:-5px; animation:keyPulse 1s infinite; }
+@keyframes keyPulse { 50% { outline-color:#ffe0b2; } }
+
+#key-panel { margin-top:12px; padding:10px; display:none; }
+#key-panel.open { display:block; }
+.key-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
+.key-head h3 { margin:0; font-size:15px; color:#333; }
+#key-status { font-size:13px; color:#444; line-height:1.5; }
+#key-status .ok   { color:#2e7d32; font-weight:bold; }
+#key-status .bad  { color:#c62828; font-weight:bold; }
+#key-status .hint { color:#e65100; font-weight:bold; }
+#key-count { font-size:12px; color:#777; }
+    
 </style>
 </head>
 <body>
@@ -147,6 +184,7 @@
             <option value="spymaster">Spymaster</option>
             <option value="player">Player</option>
             <option value="dataIO">Import/Export Data</option>
+			<option value="keyassist">Key Assist</option>
         </select>
     </div>
 
@@ -178,8 +216,24 @@
 
     <div class="control-group" id="data-buttons-group" style="display:none;">
         <button onclick="exportDataString()">Export Board Setup</button>
+		<button onclick="shareBoardUrl()">Copy Share Link</button>
         <button onclick="importDataString()">Import Board Setup</button>
     </div>
+
+<div class="control-group" id="key-assist-group" style="display:none;">
+    <label for="key-majority">Majority:</label>
+    <select id="key-majority" onchange="keyUpdate()">
+        <option value="r">Red</option>
+        <option value="b">Blue</option>
+    </select>
+    <label for="key-paint">Mark:</label>
+    <select id="key-paint">
+        <option value="d">Assassin</option>
+        <option value="r">Red</option>
+        <option value="b">Blue</option>
+        <option value="w">Bystander</option>
+    </select>
+</div>
 
     <button class="action-btn" onclick="toggleCellFlip()">Flip Cards</button>
     <button class="action-btn" onclick="rotateWordsClockwise()">Rotate Words</button>
@@ -189,10 +243,24 @@
     <button class="action-btn" onclick="clearBoard()">Clear Board</button>
     <button class="action-btn" onclick="clearBoardColors()">Clear Colors</button>
     <button class="action-btn" onclick="clearBoardSelections()">Clear Selection</button>
+	<button class="action-btn" onclick="switchPairs()">Switch Pairs</button>
+	<button onclick="randomizeBoard()">Randomize Board</button>
 </div>
 
 <!-- ================= BOARD ================= -->
 <div id="board"></div>
+
+<!-- ================= KEY PANEL ================= -->
+<div class="panel" id="key-panel">
+    <div class="key-head">
+        <h3>Key Assistant</h3>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span id="key-count"></span>
+            <button onclick="keyReset()">Reset</button>
+        </div>
+    </div>
+    <div id="key-status"></div>
+</div>
 
 <!-- ================= THINK PANEL ================= -->
 <div class="panel" id="think-panel">
@@ -241,6 +309,10 @@
         <div class="modal-buttons" id="modal-buttons"></div>
     </div>
 </div>
+
+<script src="keycards.js"></script>
+
+<script src="wordpairs.js"></script>
 
 <script>
 /* ============================================================
@@ -357,6 +429,394 @@ function copyToClipboard(field, btn) {
     } else { field.select(); document.execCommand('copy'); done(); }
 }
 
+/* Random whole-board generator + random word filler */
+function randomizeBoard() {
+    const cells = [...board.getElementsByClassName('cell')];
+    const start = Math.random() < .5 ? 'red' : 'blue';
+    const other = start === 'red' ? 'blue' : 'red';
+    const pool = [...Array(9).fill(start), ...Array(8).fill(other), ...Array(7).fill('white'), 'black'];
+    const roll = 1 + Math.floor(Math.random() * 40);
+    let colors;
+    for (let tries = 0; tries < 5000; tries++) {
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        colors = pool.slice();
+        if (validBoard(colors, roll)) break;
+    }
+    const words = randomWords(25);
+    cells.forEach((cell, i) => {
+        cell.className = 'cell ' + colors[i];
+        delete cell.dataset.seq;
+        cell.querySelector('.cell-text').textContent = words[i];
+    });
+    updateStats();
+    saveCurrentState();
+}
+
+function validBoard(a, roll) {
+    const g = [0,1,2,3,4].map(r => a.slice(r * 5, r * 5 + 5));
+    const line = c => Math.max(
+        ...g.map(r => r.filter(x => x === c).length),
+        ...[0,1,2,3,4].map(col => g.map(r => r[col]).filter(x => x === c).length)
+    );
+    const mr = line('red'), mb = line('blue');
+    if (roll <= 4) return mr === 4 && mb <= 3;
+    if (roll <= 7) return mb === 4 && mr <= 3;
+    if (roll <= 15) return (mr === 4 && mb <= 3) || (mb === 4 && mr <= 3);
+    if (mr > 3 || mb > 3) return false;
+    return maxCluster(a) <= 5 && assassinOk(a);
+}
+
+function maxCluster(a) {
+    const seen = Array(25).fill(0);
+    let best = 0;
+    for (let i = 0; i < 25; i++) {
+        if (seen[i] || a[i] === 'black') continue;
+        const q = [i]; seen[i] = 1;
+        for (let k = 0; k < q.length; k++) {
+            const p = q[k];
+            for (const d of [-5, 5, -1, 1]) {
+                const j = p + d;
+                if (j >= 0 && j < 25 && Math.abs(p % 5 - j % 5) === Math.abs(d) && !seen[j] && a[j] === a[p]) {
+                    seen[j] = 1;
+                    q.push(j);
+                }
+            }
+        }
+        best = Math.max(best, q.length);
+    }
+    return best;
+}
+
+function assassinOk(a) {
+    const i = a.indexOf('black');
+    if (i === 12) return false;              // never center
+    const r = (i / 5) | 0, c = i % 5;
+    let n = 0;
+    for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < 5 && cc >= 0 && cc < 5 && (a[rr*5+cc] === 'red' || a[rr*5+cc] === 'blue')) n++;
+    }
+    return n <= 3;
+}
+
+function randomWords(n = 25) {
+    const idx = WORD_PAIRS.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    return idx.slice(0, n).map(i => WORD_PAIRS[i][Math.random() < .5 ? 0 : 1]);
+}
+
+function addRandomWord() {
+    const cells = [...board.getElementsByClassName('cell')];
+    const target = cells.find((c, i) => !c.querySelector('.cell-text').textContent.trim() || c.querySelector('.cell-text').textContent.trim() === `Card ${i + 1}`);
+    if (!target) { uiAlert('Board is full'); return; }
+    const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const used = new Set(cells.map(c => norm(c.querySelector('.cell-text').textContent)));
+    const free = WORD_PAIRS.flat().filter(w => !used.has(norm(w)));
+    target.querySelector('.cell-text').textContent = free.length ? free[Math.random() * free.length | 0] : 'word';
+    updateStats();
+    saveCurrentState();
+}
+
+/* ============================================================
+   KEY CARD ASSISTANT — deduce the whole grid from a few cells
+   ============================================================ */
+const KEY_CLS = { r:'red', b:'blue', w:'white', d:'black' };
+let KEY_POOL = [], keyFixed = new Map(), keyPrompted = '';
+
+const keyRot90 = s => Array.from({length:25}, (_, i) => s[(4 - i % 5) * 5 + (i / 5 | 0)]).join('');
+
+function keyInit() {
+    if (typeof KEY_CARDS === 'undefined') { console.warn('keycards.js not loaded'); return; }
+    const seen = new Set();
+    Object.entries(KEY_CARDS).forEach(([tag, raw]) => {
+        const maj = tag.slice(-1) === 'b' ? 'b' : 'r', min = maj === 'r' ? 'b' : 'r';
+        const s = String(raw).toLowerCase().replace(/[^drbw]/g, '');
+        if (s.length % 25) console.warn('Key group', tag, 'length', s.length, '— not a multiple of 25');
+        for (let p = 0; p + 25 <= s.length; p += 25) {
+            let g = s.slice(p, p + 25);
+            const n = c => g.split(c).length - 1;
+            if (n('d') !== 1 || n(maj) !== 9 || n(min) !== 8 || n('w') !== 7)
+                console.warn('Bad key card', tag, '#' + (p / 25 + 1), g);
+            for (let rot = 0; rot < 4; rot++) {
+                if (!seen.has(g)) { seen.add(g); KEY_POOL.push({ tag, maj, rot, g }); }
+                g = keyRot90(g);
+            }
+        }
+    });
+    try { keyFixed = new Map(JSON.parse(localStorage.getItem('keyFixed') || '[]')); } catch (e) {}
+}
+
+function keyCands() {
+    const maj = document.getElementById('key-majority').value;
+    const fx = [...keyFixed];
+    return KEY_POOL.filter(k => k.maj === maj && fx.every(([i, c]) => k.g[i] === c));
+}
+
+function keyCellClick(cell) {
+    const i = +cell.dataset.index, code = document.getElementById('key-paint').value;
+    if (keyFixed.get(i) === code) keyFixed.delete(i);
+    else {
+        if (code === 'd') [...keyFixed].forEach(([j, c]) => { if (c === 'd') keyFixed.delete(j); });
+        if (keyFixed.size >= 25) keyFixed.clear();          // was locked in — start over
+        keyFixed.set(i, code);
+    }
+    keyUpdate();
+}
+
+function keyReset() { keyFixed.clear(); keyPrompted = ''; keyUpdate(); }
+
+function keyUpdate() {
+    if (document.getElementById('mode-select').value !== 'keyassist') return;
+    const cands = keyCands(), cells = [...board.getElementsByClassName('cell')];
+
+    const cons = Array(25).fill(null);
+    if (cands.length) for (let i = 0; i < 25; i++) {
+        const c = cands[0].g[i];
+        if (cands.every(k => k.g[i] === c)) cons[i] = c;
+    }
+
+    let hint = -1, hs = 1e9;
+    if (cands.length > 1) for (let i = 0; i < 25; i++) {
+        if (keyFixed.has(i) || cons[i]) continue;
+        const t = {};
+        cands.forEach(k => t[k.g[i]] = (t[k.g[i]] || 0) + 1);
+        const m = Math.max(...Object.values(t));
+        if (m < hs) { hs = m; hint = i; }
+    }
+
+    cells.forEach((cell, i) => {
+        const code = keyFixed.get(i) || cons[i] || 'w';
+        cell.classList.remove('red','blue','black','white','play-active','think','key-fixed','key-hint');
+        cell.classList.add(KEY_CLS[code]);
+        delete cell.dataset.seq;
+        if (keyFixed.has(i) && keyFixed.size < 25) cell.classList.add('key-fixed');
+        if (i === hint) cell.classList.add('key-hint');
+    });
+
+    const st = document.getElementById('key-status');
+    document.getElementById('key-count').textContent =
+        `${cands.length} of ${KEY_POOL.length} layouts · ${keyFixed.size} marked`;
+
+    if (!cands.length) {
+        st.innerHTML = '<span class="bad">No key matches.</span> A marked cell or the majority colour is wrong — click a cell again to unmark it, or press Reset.';
+    } else if (cands.length === 1) {
+        const k = cands[0];
+        st.innerHTML = `<span class="ok">Key identified — board filled.</span> Card <b>${k.tag}</b>, rotated ${k.rot * 90}&deg;.`;
+        if (keyPrompted !== k.g) {
+            keyPrompted = k.g;
+            showModal({
+                title: 'Key identified',
+                message: `Unique match: card ${k.tag} rotated ${k.rot * 90}°.\nThe board has been coloured in full.`,
+                dismiss: null,
+                buttons: [
+                    { label:'Keep editing', value:null },
+                    { label:'Lock in', value:'lock', primary:true }
+                ]
+            }).then(v => {
+                if (v !== 'lock') return;
+                for (let i = 0; i < 25; i++) keyFixed.set(i, k.g[i]);
+                document.getElementById('mode-select').value = 'spymaster';
+                handleModeChange();
+                saveCurrentState();
+            });
+        }
+    } else {
+        const settled = cons.filter(Boolean).length;
+        st.innerHTML = `${cands.length} layouts still possible. `
+            + (settled ? `<b>${settled}</b> cells are already certain (shown in colour). ` : '')
+            + (hint >= 0 ? `<span class="hint">Next best cell: the highlighted one</span> — mark its true colour to cut the list to about ${hs}.` : '');
+    }
+
+    localStorage.setItem('keyFixed', JSON.stringify([...keyFixed]));
+    updateStats();
+    saveCurrentState();
+}
+
+/* ============================================================
+   WORD INPUT ASSISTANT
+   Each row of WORD_PAIRS in wordpairs.js = the two words printed on ONE card.
+   Placing either word blocks BOTH from further suggestions.
+   ============================================================ */
+
+const ASSIST_MAX = 10;
+
+/* ---- index build ---- */
+const wnorm = s => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+const WORD_POOL = [];                 // normalised keys, deduped
+const WORD_DISPLAY = new Map();       // key -> display form
+const WORD_PARTNERS = new Map();      // key -> Set(partner keys)
+
+(function buildWordIndex() {
+    WORD_PAIRS.forEach(pair => pair.forEach(w => {
+        const k = wnorm(w);
+        if (!k) return;
+        if (!WORD_PARTNERS.has(k)) {
+            WORD_PARTNERS.set(k, new Set());
+            WORD_DISPLAY.set(k, w);
+            WORD_POOL.push(k);
+        }
+        pair.forEach(o => {
+            const ok = wnorm(o);
+            if (ok && ok !== k) WORD_PARTNERS.get(k).add(ok);
+        });
+    }));
+})();
+
+/* ---- what is already spoken for ---- */
+function assistBlockedKeys(ignoreIndex) {
+    const blocked = new Set();
+    document.querySelectorAll('#board .cell').forEach((cell, i) => {
+        if (i === ignoreIndex) return;                       // the cell being edited
+        const t = (cell.querySelector('.cell-text').textContent || '').trim();
+        if (!t || t === 'Card ' + (i + 1)) return;           // placeholder = empty
+        const k = wnorm(t);
+        if (!k) return;
+        blocked.add(k);
+        (WORD_PARTNERS.get(k) || []).forEach(p => blocked.add(p));
+    });
+    return blocked;
+}
+
+/* ---- ranking: prefix > substring > fuzzy subsequence ---- */
+function assistScore(key, q) {
+    const p = key.indexOf(q);
+    if (p === 0) return 1000 - key.length;
+    if (p > 0)   return 700 - p * 10 - key.length;
+    let qi = 0, last = -1, spread = 0;
+    for (let i = 0; i < key.length && qi < q.length; i++) {
+        if (key[i] === q[qi]) {
+            if (last >= 0) spread += i - last - 1;
+            last = i; qi++;
+        }
+    }
+    if (qi < q.length) return -1;
+    return 400 - spread * 4 - key.length;
+}
+
+function assistSuggest(query, ignoreIndex) {
+    const q = wnorm(query);
+    if (!q) return [];
+    const blocked = assistBlockedKeys(ignoreIndex);
+    return WORD_POOL
+        .filter(k => !blocked.has(k))
+        .map(k => ({ key: k, score: assistScore(k, q) }))
+        .filter(o => o.score > 0)
+        .sort((a, b) => b.score - a.score ||
+              WORD_DISPLAY.get(a.key).localeCompare(WORD_DISPLAY.get(b.key)))
+        .slice(0, ASSIST_MAX);
+}
+
+/* ---- UI ---- */
+const assist = { box:null, input:null, items:[], active:-1, ignoreIndex:-1, on:false };
+const assistEsc = s => String(s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function assistInit() {
+    const input = document.getElementById('modal-input');
+    if (!input) return;
+    const box = document.createElement('div');
+    box.className = 'assist-list';
+    input.insertAdjacentElement('afterend', box);
+    assist.input = input;
+    assist.box = box;
+
+    input.addEventListener('input',   () => { if (assist.on) assistRefresh(); });
+    input.addEventListener('keydown', assistKeydown);
+    input.addEventListener('blur',    () => setTimeout(assistClose, 120));
+    box.addEventListener('mousedown', e => {
+        const row = e.target.closest('.assist-item');
+        if (!row) return;
+        e.preventDefault();                                  // keep focus in the field
+        assistApply(+row.dataset.i);
+    });
+}
+
+function assistOn(ignoreIndex = -1) { assist.on = true; assist.ignoreIndex = ignoreIndex; }
+function assistOff() { assist.on = false; assist.ignoreIndex = -1; assistClose(); }
+function assistClose() {
+    assist.items = []; assist.active = -1;
+    if (assist.box) { assist.box.classList.remove('open'); assist.box.innerHTML = ''; }
+}
+
+function assistRefresh() {
+    const raw = assist.input.value;
+    if (!raw.trim()) { assistClose(); return; }               // fires from 1 character up
+    assist.items = assistSuggest(raw, assist.ignoreIndex);
+    assist.active = assist.items.length ? 0 : -1;
+    assistRender(wnorm(raw));
+}
+
+function assistRender(q) {
+    const box = assist.box;
+    if (!assist.items.length) {
+        box.innerHTML = '<div class="assist-empty">no free card matches</div>';
+        box.classList.add('open');
+        return;
+    }
+    box.innerHTML = assist.items.map((it, i) => {
+        const disp = WORD_DISPLAY.get(it.key);
+        const partners = [...(WORD_PARTNERS.get(it.key) || [])]
+            .map(p => WORD_DISPLAY.get(p)).join(', ');
+        return `<div class="assist-item${i === assist.active ? ' active' : ''}" data-i="${i}">`
+             + `<span>${assistMark(disp, q)}</span>`
+             + (partners ? `<span class="pair">pairs with ${assistEsc(partners)}</span>` : '')
+             + `</div>`;
+    }).join('');
+    box.classList.add('open');
+    const act = box.querySelector('.assist-item.active');
+    if (act) act.scrollIntoView({ block: 'nearest' });
+}
+
+function assistMark(display, q) {
+    const i = display.toLowerCase().indexOf(q);
+    if (i < 0) return assistEsc(display);
+    return assistEsc(display.slice(0, i))
+         + '<b>' + assistEsc(display.slice(i, i + q.length)) + '</b>'
+         + assistEsc(display.slice(i + q.length));
+}
+
+function assistKeydown(e) {
+    if (!assist.on) return;
+    const open = assist.box.classList.contains('open') && assist.items.length > 0;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!open) { if (e.key === 'ArrowDown') assistRefresh(); return; }
+        e.preventDefault(); e.stopPropagation();
+        const step = e.key === 'ArrowDown' ? 1 : assist.items.length - 1;
+        assist.active = (assist.active + step) % assist.items.length;
+        assistRender(wnorm(assist.input.value));
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && open && assist.active >= 0) {
+        e.preventDefault(); e.stopPropagation();              // 1st Enter fills, 2nd submits
+        assistApply(assist.active);
+    } else if (e.key === 'Escape' && open) {
+        e.preventDefault(); e.stopPropagation();              // closes list, not the modal
+        assistClose();
+    }
+}
+
+function assistApply(i) {
+    const it = assist.items[i];
+    if (!it) return;
+    assist.input.value = WORD_DISPLAY.get(it.key);
+    assistClose();
+    assist.input.focus();
+}
+
+/* ---- assisted prompt wrapper (no changes needed inside showModal) ---- */
+async function uiPromptWord(message, defaultValue = '', opts = {}) {
+    assistOn(opts.ignoreIndex === undefined ? -1 : opts.ignoreIndex);
+    try { return await uiPrompt(message, defaultValue, opts); }
+    finally { assistOff(); }
+}
+
+
+
 /* ============================================================
    BOARD STATE
    ============================================================ */
@@ -435,7 +895,8 @@ function initBoard(cellsData) {
    ============================================================ */
 async function handleCellClick(cell) {
     const mode = document.getElementById('mode-select').value;
-
+	
+    if (mode === 'keyassist') { keyCellClick(cell); return; }
     if (mode === 'spymaster') {
         const action = document.getElementById('spy-action').value;
         if (action === 'flip') {
@@ -471,7 +932,8 @@ async function handleCellClick(cell) {
 
     } else if (mode === 'text') {
         const idx = parseInt(cell.dataset.index);
-        const newText = await uiPrompt(`Text for cell ${idx + 1}:`, getText(cell), { title:'Edit card' });
+        const newText = await uiPromptWord(`Text for cell ${idx + 1}:`, getText(cell),
+                                   { title: 'Edit card', ignoreIndex: idx });
         if (newText !== null && newText.trim() !== '') {
             cell.querySelector('.cell-text').textContent = newText.trim();
             updateStats(); saveCurrentState();
@@ -500,6 +962,9 @@ function clearThoughts() {
 
 function handleModeChange() {
     const mode = document.getElementById('mode-select').value;
+	document.getElementById('key-assist-group').style.display = (mode === 'keyassist') ? 'flex' : 'none';
+	document.getElementById('key-panel').classList.toggle('open', mode === 'keyassist');
+	if (mode === 'keyassist') keyUpdate();
     document.getElementById('color-select-group').style.display = (mode === 'color') ? 'flex' : 'none';
     document.getElementById('data-buttons-group').style.display = (mode === 'dataIO') ? 'flex' : 'none';
     document.getElementById('spy-action-group').style.display   = (mode === 'spymaster') ? 'flex' : 'none';
@@ -578,8 +1043,9 @@ async function addWordPrompt() {
     const cells = Array.from(board.getElementsByClassName('cell'));
     const target = cells.find((cell, i) => isPlaceholder(getText(cell), i));
     if (!target) { await uiAlert('The board is completely full!', 'No room'); return; }
-
-    const newText = await uiPrompt('Enter the word for the next empty cell:', '', { title:'Add word', okLabel:'Add' });
+    const newText = await uiPromptWord('Enter the word for the next empty cell:', '',
+                                   { title: 'Add word', okLabel: 'Add',
+                                     ignoreIndex: cells.indexOf(target) });
     if (newText !== null && newText.trim() !== '') {
         target.querySelector('.cell-text').textContent = newText.trim();
         updateStats(); saveCurrentState();
@@ -776,7 +1242,47 @@ function parseLegacy(s) {                            // old  WN::word|C|true;;�
     };
 }
 
+function switchPairs() {
+    const pair = new Map();
+    WORD_PAIRS.forEach(([a, b]) => {
+        const n = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
+        pair.set(n(a), b);
+        if (!pair.has(n(b))) pair.set(n(b), a);
+    });
+    [...board.getElementsByClassName('cell')].forEach((cell, i) => {
+        const t = cell.querySelector('.cell-text').textContent.trim();
+        if (!t || t === `Card ${i+1}`) return;
+        const p = pair.get(t.toLowerCase().replace(/[^a-z0-9]+/g, ''));
+        if (p) cell.querySelector('.cell-text').textContent = p;
+    });
+    updateStats();
+    saveCurrentState();
+}
+
+function shareBoardUrl() {
+    const url = location.origin + location.pathname + '#' + encodeURIComponent(buildDataString());
+    uiShowText('Copy this link to share the current board:', url, 'Share URL');
+}
+
+assistInit();
+
+keyInit();
+
 loadSavedState();
+
+(function autoImportFromUrl() {
+    const raw = decodeURIComponent(location.hash.slice(1));
+    if (!raw) return;
+    const parsed = raw.includes('::') ? parseLegacy(raw) : parseCompact(raw);
+    if (!parsed) return;
+    isFlipped = parsed.isFlipped;
+    board.classList.toggle('flipped', isFlipped);
+    currentRotation = parsed.rotation;
+    thinkCounter = 1;
+    initBoard(parsed.cells);
+    saveCurrentState();
+})();
+
 </script>
 </body>
 </html>
