@@ -527,7 +527,7 @@ function addRandomWord() {
    KEY CARD ASSISTANT — deduce the whole grid from a few cells
    ============================================================ */
 const KEY_CLS = { r:'red', b:'blue', w:'white', d:'black' };
-let KEY_POOL = [], keyFixed = new Map(), keyPrompted = '';
+let KEY_POOL = [], keyFixed = new Map(), keyPrompted = '', keyAskedMajority = false, keyAskedAssassin = false;
 
 const keyRot90 = s => Array.from({length:25}, (_, i) => s[(4 - i % 5) * 5 + (i / 5 | 0)]).join('');
 
@@ -569,12 +569,40 @@ function keyCellClick(cell) {
     keyUpdate();
 }
 
-function keyReset() { keyFixed.clear(); keyPrompted = ''; keyUpdate(); }
+function keyReset() { keyFixed.clear(); keyPrompted = ''; keyAskedMajority = false; keyAskedAssassin = false; keyUpdate(); }
 
 function keyUpdate() {
     if (document.getElementById('mode-select').value !== 'keyassist') return;
     const cands = keyCands(), cells = [...board.getElementsByClassName('cell')];
+    const hasAssassin = [...keyFixed.values()].includes('d');
+    const st = document.getElementById('key-status');
 
+    /* ----- STEP 1: no assassin yet — force assassin first ----- */
+    if (!hasAssassin) {
+        document.getElementById('key-count').textContent =
+            `${cands.length} layouts matching what’s marked · ${keyFixed.size} marked`;
+        st.innerHTML = keyFixed.size === 0
+            ? 'Choose <b>Majority</b> above, then <b>click the black Assassin cell</b>. Its position alone cuts the field from 160 to about 6.'
+            : 'Now <b>click the black Assassin cell</b>. Marked so far: '
+              + [...keyFixed].map(([i,c]) => `<b>${KEY_CLS[c]}</b>@${+i+1}`).join(', ')
+              + ' — backtrack by clicking a marked cell again.';
+
+        cells.forEach((cell, i) => {
+            const code = keyFixed.get(i) || 'w';
+            cell.classList.remove('red','blue','black','white','play-active','think','key-fixed','key-hint');
+            cell.classList.add(KEY_CLS[code]);
+            delete cell.dataset.seq;
+            if (keyFixed.has(i) && keyFixed.size < 25) cell.classList.add('key-fixed');
+        });
+
+        if (keyAskedAssassin === false) keyAskAssassin();
+        localStorage.setItem('keyFixed', JSON.stringify([...keyFixed]));
+        updateStats();
+        saveCurrentState();
+        return;
+    }
+
+    /* ----- STEP 2: assassin placed — use the original hint logic ----- */
     const cons = Array(25).fill(null);
     if (cands.length) for (let i = 0; i < 25; i++) {
         const c = cands[0].g[i];
@@ -599,7 +627,6 @@ function keyUpdate() {
         if (i === hint) cell.classList.add('key-hint');
     });
 
-    const st = document.getElementById('key-status');
     document.getElementById('key-count').textContent =
         `${cands.length} of ${KEY_POOL.length} layouts · ${keyFixed.size} marked`;
 
@@ -637,6 +664,43 @@ function keyUpdate() {
     updateStats();
     saveCurrentState();
 }
+
+function keyEnter() {
+    if (document.getElementById('mode-select').value !== 'keyassist') return;
+    if (!KEY_POOL.length) {
+        document.getElementById('key-status').innerHTML = '<span class="bad">keycards.js not loaded — check the <script> tag order.</span>';
+        return;
+    }
+    if (keyFixed.size || keyAskedMajority) { keyUpdate(); return; }
+    showModal({
+        title: 'Key Assistant — majority colour?',
+        message: 'Which team has the 9 cards (Red or Blue)?',
+        dismiss: null,
+        buttons: [
+            { label:'Red',  value:'r', swatch:'red'},
+            { label:'Blue', value:'b', swatch:'blue'},
+            { label:'Cancel', value:null }
+        ]
+    }).then(v => {
+        if (!v) return;
+        keyAskedMajority = true;
+        document.getElementById('key-majority').value = v;
+        keyAskAssassin();
+        keyUpdate();
+    });
+}
+
+function keyAskAssassin() {
+    if (keyAskedAssassin || [...keyFixed.values()].includes('d')) return;
+    keyAskedAssassin = true;
+    showModal({
+        title: 'Key Assistant — assassin',
+        message: 'Now click the black (Assassin) cell on the board.\n\nThen press Done and mark the orange-highlighted cell.',
+        dismiss: null,
+        buttons: [{ label:'Done', value:true, primary:true }]
+    });
+}
+
 
 /* ============================================================
    WORD INPUT ASSISTANT
@@ -964,7 +1028,7 @@ function handleModeChange() {
     const mode = document.getElementById('mode-select').value;
 	document.getElementById('key-assist-group').style.display = (mode === 'keyassist') ? 'flex' : 'none';
 	document.getElementById('key-panel').classList.toggle('open', mode === 'keyassist');
-	if (mode === 'keyassist') keyUpdate();
+	if (mode === 'keyassist') keyEnter();
     document.getElementById('color-select-group').style.display = (mode === 'color') ? 'flex' : 'none';
     document.getElementById('data-buttons-group').style.display = (mode === 'dataIO') ? 'flex' : 'none';
     document.getElementById('spy-action-group').style.display   = (mode === 'spymaster') ? 'flex' : 'none';
