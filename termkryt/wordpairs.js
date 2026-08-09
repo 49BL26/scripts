@@ -126,7 +126,7 @@ const WORD_PAIRS = [
 ['row','pistol'],
 ['genius','eagle'],
 ['comic','mammoth'],
-['jet','microscopic'],
+['jet','microscope'],
 ['chocolate','suit'],
 ['death','stocks'],
 ['hospital','saturn'],
