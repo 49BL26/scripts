@@ -237,7 +237,7 @@
     <button class="action-btn" onclick="clearBoardColors()">Clear Colors</button>
     <button class="action-btn" onclick="clearBoardSelections()">Clear Selection</button>
 	<button class="action-btn" onclick="switchPairs()">Switch Pairs</button>
-	<button onclick="randomizeBoard()">Randomize Board</button>
+	<button class="action-btn" onclick="randomizeBoard()">Randomize Board</button>
 </div>
 
 <!-- ================= BOARD ================= -->
@@ -424,29 +424,23 @@ function copyToClipboard(field, btn) {
 
 /* Random whole-board generator + random word filler */
 function randomizeBoard() {
-    const cells = [...board.getElementsByClassName('cell')];
-    const start = Math.random() < .5 ? 'red' : 'blue';
-    const other = start === 'red' ? 'blue' : 'red';
-    const pool = [...Array(9).fill(start), ...Array(8).fill(other), ...Array(7).fill('white'), 'black'];
-    const roll = 1 + Math.floor(Math.random() * 40);
-    let colors;
-    for (let tries = 0; tries < 5000; tries++) {
-        for (let i = pool.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [pool[i], pool[j]] = [pool[j], pool[i]];
-        }
-        colors = pool.slice();
-        if (validBoard(colors, roll)) break;
+    if (!KEY_POOL.length) {
+        uiAlert('keycards.js not loaded — check script order.');
+        return;
     }
+    const cells = [...board.getElementsByClassName('cell')];
+    const layout = KEY_POOL[Math.floor(Math.random() * KEY_POOL.length)];
     const words = randomWords(25);
     cells.forEach((cell, i) => {
-        cell.className = 'cell ' + colors[i];
+        const c = layout.g[i];
+        cell.className = 'cell ' + (c === 'd' ? 'black' : c === 'r' ? 'red' : c === 'b' ? 'blue' : 'white');
         delete cell.dataset.seq;
         cell.querySelector('.cell-text').textContent = words[i];
     });
     updateStats();
     saveCurrentState();
 }
+
 
 function validBoard(a, roll) {
     const g = [0,1,2,3,4].map(r => a.slice(r * 5, r * 5 + 5));
@@ -793,7 +787,7 @@ function assistSuggest(query, ignoreIndex) {
 }
 
 /* ---- UI ---- */
-const assist = { box:null, input:null, items:[], active:-1, ignoreIndex:-1, on:false };
+const assist = { box:null, input:null, items:[], active:-1, ignoreIndex:-1, on:false, autoApply:false, mode:'replace' };
 const assistEsc = s => String(s).replace(/[&<>"']/g,
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -817,19 +811,32 @@ function assistInit() {
     });
 }
 
-function assistOn(ignoreIndex = -1) { assist.on = true; assist.ignoreIndex = ignoreIndex; }
+function assistOn(ignoreIndex = -1, mode = 'replace') {
+    assist.on = true;
+    assist.ignoreIndex = ignoreIndex;
+    assist.mode = mode;
+}
 function assistOff() { assist.on = false; assist.ignoreIndex = -1; assistClose(); }
 function assistClose() {
     assist.items = []; assist.active = -1;
     if (assist.box) { assist.box.classList.remove('open'); assist.box.innerHTML = ''; }
 }
 
+function assistQueryFromInput() {
+    const raw = assist.input.value || '';
+    if (assist.mode === 'append') {
+        const idx = raw.lastIndexOf(',');
+        return raw.slice(idx + 1);      // text after the last comma
+    }
+    return raw;
+}
+
 function assistRefresh() {
-    const raw = assist.input.value;
-    if (!raw.trim()) { assistClose(); return; }               // fires from 1 character up
-    assist.items = assistSuggest(raw, assist.ignoreIndex);
+    const q = assistQueryFromInput().trim();
+    if (!q) { assistClose(); return; }
+    assist.items = assistSuggest(q, assist.ignoreIndex);
     assist.active = assist.items.length ? 0 : -1;
-    assistRender(wnorm(raw));
+    assistRender(wnorm(q));
 }
 
 function assistRender(q) {
@@ -863,19 +870,28 @@ function assistMark(display, q) {
 
 function assistKeydown(e) {
     if (!assist.on) return;
-    const open = assist.box.classList.contains('open') && assist.items.length > 0;
+    const open = assist.box && assist.box.classList.contains('open') && assist.items.length > 0;
 
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (!open) { if (e.key === 'ArrowDown') assistRefresh(); return; }
-        e.preventDefault(); e.stopPropagation();
-        const step = e.key === 'ArrowDown' ? 1 : assist.items.length - 1;
-        assist.active = (assist.active + step) % assist.items.length;
-        assistRender(wnorm(assist.input.value));
-    } else if ((e.key === 'Enter' || e.key === 'Tab') && open && assist.active >= 0) {
-        e.preventDefault(); e.stopPropagation();              // 1st Enter fills, 2nd submits
+        if (open) {
+            e.preventDefault();
+            const step = e.key === 'ArrowDown' ? 1 : -1;
+            assist.active = (assist.active + step + assist.items.length) % assist.items.length;
+            assistRender(wnorm(assistQueryFromInput().trim()));
+        } else if (e.key === 'ArrowDown') {
+            assistRefresh();
+        }
+        return;
+    }
+    if (e.key === 'Enter' && open && assist.active >= 0) {
+        e.preventDefault();
+        e.stopPropagation();
         assistApply(assist.active);
-    } else if (e.key === 'Escape' && open) {
-        e.preventDefault(); e.stopPropagation();              // closes list, not the modal
+        return;
+    }
+    if (e.key === 'Escape' && open) {
+        e.preventDefault();
+        e.stopPropagation();
         assistClose();
     }
 }
@@ -883,17 +899,50 @@ function assistKeydown(e) {
 function assistApply(i) {
     const it = assist.items[i];
     if (!it) return;
+
+    if (assist.mode === 'append') {
+        const raw = assist.input.value || '';
+        const idx = raw.lastIndexOf(',');
+        const before = idx >= 0 ? raw.slice(0, idx + 1) + ' ' : '';
+        assist.input.value = before + WORD_DISPLAY.get(it.key) + ', ';
+        assist.input.focus();
+        assistClose();
+        // Re-run the assistant on the new text after the comma
+        assist.input.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+    }
+
     assist.input.value = WORD_DISPLAY.get(it.key);
     assistClose();
-    assist.input.focus();
+    if (assist.autoApply) {
+        assist.autoApply = false;
+        settleModal(assist.input.value);
+    } else {
+        assist.input.focus();
+    }
+
+    assist.input.value = before + ' ' + WORD_DISPLAY.get(it.key);
+    assistClose();
+    if (assist.autoApply) {
+        assist.autoApply = false;
+        settleModal(assist.input.value);
+    } else {
+        assist.input.focus();
+    }
 }
+
+
 
 /* ---- assisted prompt wrapper (no changes needed inside showModal) ---- */
 async function uiPromptWord(message, defaultValue = '', opts = {}) {
-    assistOn(opts.ignoreIndex === undefined ? -1 : opts.ignoreIndex);
+    assistOn(
+        opts.ignoreIndex === undefined ? -1 : opts.ignoreIndex,
+        opts.assistMode || 'replace'
+    );
     try { return await uiPrompt(message, defaultValue, opts); }
     finally { assistOff(); }
 }
+
 
 
 
@@ -1105,30 +1154,46 @@ function rotateBoardOuterRing() {
    WORD ENTRY
    ============================================================ */
 async function importWordsPrompt() {
-    const rawInput = await uiPrompt('Paste your words, separated by commas, newlines or spaces:', '', {
-        title: 'Import words', multiline: true, okLabel: 'Import'
-    });
+    const rawInput = await uiPromptWord(
+        'Type words — pick a suggestion to add it to the comma-separated list:',
+        '',
+        {
+            title: 'Import words',
+            okLabel: 'Import',
+            assistMode: 'append'          // keep the modal open, append + comma
+        }
+    );
     if (!rawInput) return;
 
-    const words = rawInput.split(/[,\n\s]+/).map(w => w.trim()).filter(Boolean);
+    const words = rawInput.split(/[,\n\r\t]+/).map(w => w.trim()).filter(Boolean);
     if (!words.length) return;
 
     Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
         if (i < words.length) cell.querySelector('.cell-text').textContent = words[i];
     });
-    updateStats(); saveCurrentState();
+    updateStats();
+    saveCurrentState();
 }
 
 async function addWordPrompt() {
-    const cells = Array.from(board.getElementsByClassName('cell'));
-    const target = cells.find((cell, i) => isPlaceholder(getText(cell), i));
-    if (!target) { await uiAlert('The board is completely full!', 'No room'); return; }
-    const newText = await uiPromptWord('Enter the word for the next empty cell:', '',
-                                   { title: 'Add word', okLabel: 'Add',
-                                     ignoreIndex: cells.indexOf(target) });
-    if (newText !== null && newText.trim() !== '') {
+    while (true) {
+        const cells = Array.from(board.getElementsByClassName('cell'));
+        const target = cells.find((cell, i) => isPlaceholder(getText(cell), i));
+        if (!target) { await uiAlert('The board is completely full!', 'No room'); return; }
+        const idx = cells.indexOf(target);
+
+        assist.autoApply = true;                 // picking from the dropdown auto-submits
+        const newText = await uiPromptWord('Enter the word for the next empty cell:', '',
+            { title: 'Add word — pick to auto-advance', okLabel: 'Add',
+              ignoreIndex: idx });
+        assist.autoApply = false;
+
+        if (newText === null) return;            // Cancel / Esc → stop the flow
+        if (!newText.trim()) continue;           // blank OK → stay on the same cell
         target.querySelector('.cell-text').textContent = newText.trim();
-        updateStats(); saveCurrentState();
+        updateStats();
+        saveCurrentState();
+        // loop continues → opens the prompt for the next empty cell
     }
 }
 
