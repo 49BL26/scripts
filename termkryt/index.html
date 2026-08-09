@@ -211,6 +211,9 @@
 [id^="g-"] { display:none; }
 [id^="g-"].shown { display:flex; }
 
+.control-group.shown {
+    flex-wrap: wrap;
+}
 
 </style>
 </head>
@@ -303,6 +306,15 @@
         <button onclick="rotateWordsClockwise()">Rotate Words</button>
         <button onclick="rotateBoardOuterRing()">Rotate Board</button>
         <button onclick="switchPairs()">Switch Pairs</button>
+		<button onclick="invertColors()">Invert Red/Blue</button>
+		<button onclick="flipBoardH()">Flip Horizontally</button>
+		<button onclick="flipBoardV()">Flip Vertically</button>
+		<button onclick="flipBoardUR()">Flip Diag Up-Right</button>
+		<button onclick="flipBoardUL()">Flip Diag Up-Left</button>
+		<button onclick="shiftUp()">Shift Up</button>
+		<button onclick="shiftDown()">Shift Down</button>
+		<button onclick="shiftLeft()">Shift Left</button>
+		<button onclick="shiftRight()">Shift Right</button>
     </div>
 
     <div class="control-group" id="g-clear">
@@ -626,6 +638,55 @@ function addRandomWord() {
     updateStats();
     saveCurrentState();
 }
+
+/* ===== COMMAND PALETTE (press ` to open) ===== */
+function executeCommand(raw) {
+    const args = raw.trim().split(/\s+/);
+    const name = args[0].toLowerCase();
+    const arg = args.slice(1).join(' ');
+
+    const commands = {
+        'invert':          () => invertColors(),
+        'flip-h':          () => flipBoardH(),
+        'flip-v':          () => flipBoardV(),
+        'flip-ur':         () => flipBoardUR(),
+        'flip-ul':         () => flipBoardUL(),
+        'shift-up':        () => shiftUp(),
+        'shift-down':      () => shiftDown(),
+        'shift-left':      () => shiftLeft(),
+        'shift-right':     () => shiftRight(),
+        'rotate':          () => rotateBoardOuterRing(),
+        'rot-words':       () => rotateWordsClockwise(),
+        'flip-cards':      () => toggleCellFlip(),
+        'clear':           () => clearBoard(),
+        'randomize':       () => randomizeBoard(),
+        'add-word':        () => addWordPrompt(),
+        'import-words':    () => importWordsPrompt(),
+        'help':            () => uiAlert('Commands: invert, flip-h, flip-v, flip-ur, flip-ul, shift-up, shift-down, shift-left, shift-right, rotate, rot-words, flip-cards, clear, randomize, add-word, import-words'),
+    };
+
+    const fn = commands[name];
+    if (fn) {
+        fn();
+    } else {
+        uiAlert(`Unknown command: "${name}"\nType help for the full list.`);
+    }
+}
+
+document.addEventListener('keydown', e => {
+    // backtick key, ignore if typing in a field
+    if (e.key !== '`' && e.code !== 'Backquote') return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+    e.preventDefault();
+    uiPrompt('Enter a command:', '', { title: 'Command palette', okLabel: 'Run' })
+        .then(cmd => {
+            if (cmd !== null && cmd.trim() !== '') executeCommand(cmd);
+        });
+});
+
+
 
 /* ============================================================
    KEY CARD ASSISTANT — deduce the whole grid from a few cells
@@ -1687,6 +1748,82 @@ function uiSync() {
     handleModeChange();
 }
 
+
+/* ===== COLOR INVERT ===== */
+function invertColors() {
+    [...board.getElementsByClassName('cell')].forEach(cell => {
+        if (cell.classList.contains('red')) {
+            cell.classList.remove('red');
+            cell.classList.add('blue');
+        } else if (cell.classList.contains('blue')) {
+            cell.classList.remove('blue');
+            cell.classList.add('red');
+        }
+    });
+    updateStats();
+    saveCurrentState();
+}
+
+/* ===== BOARD TRANSFORM HELPER ===== */
+function boardTransform(mapping) {
+    const cells = [...board.getElementsByClassName('cell')];
+    const data = cells.map(cell => ({
+        text: getText(cell),
+        color: getColor(cell),
+        playActive: cell.classList.contains('play-active'),
+        think: cell.classList.contains('think'),
+        seq: cell.dataset.seq || 0
+    }));
+    mapping.forEach((from, i) => {
+        const d = data[from];
+        const cell = cells[i];
+        cell.querySelector('.cell-text').textContent = d.text;
+        cell.className = 'cell';
+        cell.classList.add(d.color);
+        if (d.playActive) cell.classList.add('play-active');
+        if (d.think) { cell.classList.add('think'); cell.dataset.seq = d.seq; }
+        else delete cell.dataset.seq;
+    });
+    updateStats();
+    saveCurrentState();
+}
+
+/* ===== FLIP MAPPINGS ===== */
+function flipBoardH() {                     // mirror left-right
+    const m = Array.from({length:25}, (_, i) => 5 * Math.floor(i / 5) + (4 - i % 5));
+    boardTransform(m);
+}
+
+function flipBoardV() {                     // mirror up-down
+    const m = Array.from({length:25}, (_, i) => 5 * (4 - Math.floor(i / 5)) + i % 5);
+    boardTransform(m);
+}
+
+function flipBoardUR() {                    // diagonal up-right (bottom-left to top-right)
+    const m = Array.from({length:25}, (_, i) => 24 - Math.floor(i / 5) - 5 * (i % 5));
+    boardTransform(m);
+}
+
+function flipBoardUL() {                    // diagonal up-left (bottom-right to top-left)
+    const m = Array.from({length:25}, (_, i) => 5 * (i % 5) + Math.floor(i / 5));
+    boardTransform(m);
+}
+
+function shiftUp() {
+    boardTransform(Array.from({ length: 25 }, (_, i) => (i + 5) % 25));
+}
+
+function shiftDown() {
+    boardTransform(Array.from({ length: 25 }, (_, i) => (i + 20) % 25));
+}
+
+function shiftRight() {
+    boardTransform(Array.from({ length: 25 }, (_, i) => 5 * Math.floor(i / 5) + (i % 5 + 4) % 5));
+}
+
+function shiftLeft() {
+    boardTransform(Array.from({ length: 25 }, (_, i) => 5 * Math.floor(i / 5) + (i % 5 + 1) % 5));
+}
 
 document.addEventListener('click', e => { if (!e.target.closest('#mbar')) menuCloseAll(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') menuCloseAll(); });
