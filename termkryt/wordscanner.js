@@ -102,23 +102,84 @@
     }
 
     /* ---------- OCR harvest + correction ---------- */
-    function harvest(data, W, H) {
-        const out = [];
-        (data.words || []).forEach(w => {
-            if (w.confidence < MIN_CONFIDENCE) return;
-            const raw = (w.text || '').toUpperCase().trim();
-            const word = correctWord(raw);
-            if (!word) return;
-            out.push({
-                word,
-                conf: w.confidence,
-                x: (w.bbox.x0 + w.bbox.x1) / 2 / W,
-                y: (w.bbox.y0 + w.bbox.y1) / 2 / H
-            });
+function harvest(data, W, H) {
+    const out = [];
+    (data.words || []).forEach(w => {
+        if (w.confidence < MIN_CONFIDENCE) return;
+        const raw = (w.text || '').toUpperCase().trim();
+        if (raw.length < MIN_WORD_LEN) return;
+        out.push({
+            raw,
+            conf: w.confidence,
+            x0: w.bbox.x0 / W,
+            y0: w.bbox.y0 / H,
+            x1: w.bbox.x1 / W,
+            y1: w.bbox.y1 / H
         });
-        return out;
+    });
+    return mergeTokens(out);
+}
+
+
+/* Merge adjacent boxes that form a dictionary entry (e.g. "NEW YORK") */
+function mergeTokens(words) {
+    if (!words.length) return [];
+
+    const sorted = [...words].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const rows = [];
+    for (const w of sorted) {
+        const row = rows.find(r => !(w.y1 < r.bboxY0 || w.y0 > r.bboxY1));
+        if (row) {
+            row.items.push(w);
+            row.bboxY0 = Math.min(row.bboxY0, w.y0);
+            row.bboxY1 = Math.max(row.bboxY1, w.y1);
+        } else {
+            rows.push({ items: [w], bboxY0: w.y0, bboxY1: w.y1 });
+        }
     }
 
+    const merged = [];
+    for (const row of rows) {
+        const items = row.items.sort((a, b) => a.x - b.x);
+        let cur = items[0];
+        for (let i = 1; i < items.length; i++) {
+            const nxt = items[i];
+            const combinedNorm = (cur.raw + ' ' + nxt.raw).replace(/[^A-Z]/g, '');
+            if (DICT_ENTRIES.some(e => e.norm === combinedNorm)) {
+                cur = {
+                    raw: cur.raw + ' ' + nxt.raw,
+                    conf: Math.max(cur.conf, nxt.conf),
+                    x0: Math.min(cur.x0, nxt.x0),
+                    y0: Math.min(cur.y0, nxt.y0),
+                    x1: Math.max(cur.x1, nxt.x1),
+                    y1: Math.max(cur.y1, nxt.y1)
+                };
+            } else {
+                merged.push(cur);
+                cur = nxt;
+            }
+        }
+        merged.push(cur);
+    }
+    return merged;
+}
+
+/* Apply fuzzy dictionary correction after merging */
+function finalizeMerged(merged) {
+    const out = [];
+    for (const item of merged) {
+        const word = correctWord(item.raw);
+        if (!word) continue;
+        out.push({
+            word,
+            conf: item.conf,
+            x: (item.x0 + item.x1) / 2,
+            y: (item.y0 + item.y1) / 2
+        });
+    }
+    return out;
+}
+   
     /* ---------- grid mapping ---------- */
     function toGrid(words) {
         if (!words.length) return { grid: Array(25).fill(null), score: 0 };
@@ -166,12 +227,12 @@
 
             statusCb('Reading board (pass 1 of 2)…');
             const res1 = await w.recognize(canvas);
-            const up = toGrid(harvest(res1.data, canvas.width, canvas.height));
+            const up = toGrid(finalizeMerged(harvest(res1.data, canvas.width, canvas.height)));
 
             statusCb('Reading board (pass 2 of 2)…');
             const flipped = rotate180(canvas);
             const res2 = await w.recognize(flipped);
-            const down = toGrid(harvest(res2.data, flipped.width, flipped.height));
+            const down = toGrid(finalizeMerged(harvest(res2.data, flipped.width, flipped.height)));
 
             const winner = down.score > up.score ? down : up;
             if (!winner.grid.some(Boolean)) {
