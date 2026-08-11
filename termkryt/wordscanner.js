@@ -19,16 +19,20 @@
 
     let worker = null;
 
-    async function getWorker() {
-        if (!worker) {
-            worker = await Tesseract.createWorker('eng');
-            await worker.setParameters({
-                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
-                preserve_interword_spaces: '1'
-            });
-        }
-        return worker;
+async function getWorker() {
+    if (!worker) {
+        worker = await Tesseract.createWorker('eng', 1, {
+            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/worker.min.js',
+            corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.0',
+            langPath:   'https://tessdata.projectnaptha.com/4.0.0'
+        });
+        await worker.setParameters({
+            tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
+            preserve_interword_spaces: '1'
+        });
     }
+    return worker;
+}
 
     // Simple normalized similarity (use string-similarity lib if present)
     function similarity(a, b) {
