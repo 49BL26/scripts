@@ -1634,9 +1634,173 @@ function switchPairs() {
     saveCurrentState();
 }
 
+/* ============================================================
+   COMPACT URL CODEC  (base-62)
+   #<GRID>-<WORDS_MAP:50>[_<SMASHED>-<LENGTHS>]
+   ============================================================ */
+const B62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const GAP = 'zz';                 // static custom-word marker
+const GAP_NUM = 35 * 62 + 35;     // 2205 — reserved, never used as a word index
+
+function b62enc(n) {              // BigInt -> base-62 string
+    n = BigInt(n);
+    if (n <= 0n) return '0';
+    let s = '';
+    while (n > 0n) { s = B62[Number(n % 62n)] + s; n /= 62n; }
+    return s;
+}
+function b62dec(s) {              // base-62 string -> BigInt
+    let n = 0n;
+    for (const ch of String(s)) {
+        const d = B62.indexOf(ch);
+        if (d < 0) return null;
+        n = n * 62n + BigInt(d);
+    }
+    return n;
+}
+
+/* ---- canonical dictionary: normalised word -> index ---- */
+const CANON_LIST = [];
+const CANON_INDEX = new Map();
+(function buildCanon() {
+    WORD_PAIRS.flat().forEach(w => {
+        const k = wnorm(w);
+        if (!k || CANON_INDEX.has(k)) return;
+        CANON_INDEX.set(k, CANON_LIST.length);
+        CANON_LIST.push(w);
+    });
+})();
+
+/* ---- section 1: grid (flip, rotation, 25 x [colour + revealed]) ---- */
+const URL_COLORS = ['white', 'red', 'blue', 'black'];
+
+function encodeGrid(cells, colorblind) {
+    let n = BigInt((isFlipped ? 1 : 0) * 4 + ((currentRotation / 90) | 0) % 4);
+    cells.forEach(cell => {
+        const ci = colorblind ? 0 : Math.max(0, URL_COLORS.indexOf(getColor(cell)));
+        const rv = (!colorblind && cell.classList.contains('play-active')) ? 1 : 0;
+        n = n * 8n + BigInt(ci * 2 + rv);
+    });
+    return b62enc(n);
+}
+
+function decodeGrid(token) {
+    let n = b62dec(token);
+    if (n === null) return null;
+    const out = new Array(25);
+    for (let i = 24; i >= 0; i--) {
+        const v = Number(n % 8n); n /= 8n;
+        out[i] = { colorClass: URL_COLORS[v >> 1], isPlayFlipped: (v & 1) === 1 };
+    }
+    const f = Number(n % 8n);
+    return { isFlipped: f >= 4, rotation: (f % 4) * 90, cells: out };
+}
+
+/* ---- section 3 helpers: smashed text + packed lengths ---- */
+function encodeSmashed(words) {                       // base-26 -> BigInt -> base-62
+    let n = 0n;
+    for (const ch of words.join('')) n = n * 26n + BigInt(ch.charCodeAt(0) - 97);
+    return b62enc(n);
+}
+function decodeSmashed(token, total) {
+    let n = b62dec(token);
+    if (n === null) return null;
+    let s = '';
+    for (let i = 0; i < total; i++) {                  // fixed width — leading 'a's survive
+        s = String.fromCharCode(97 + Number(n % 26n)) + s;
+        n /= 26n;
+    }
+    return s;
+}
+function encodeLengths(lens) {                        // 5 bits/word, self-delimiting
+    let n = 1n;                                       // leading sentinel
+    for (const L of lens) n = n * 32n + BigInt(L);
+    return b62enc(n);
+}
+function decodeLengths(token) {
+    let n = b62dec(token);
+    if (n === null || n < 1n) return null;
+    const lens = [];
+    while (n > 1n) { lens.unshift(Number(n % 32n)); n /= 32n; }
+    return lens;
+}
+
+/* ---- build the whole hash ---- */
+function buildUrlHash(colorblind = false) {
+    const cells = [...board.getElementsByClassName('cell')];
+    let map = '';
+    const custom = [], lens = [];
+
+    cells.forEach((cell, i) => {
+        const raw = getText(cell).trim();
+        const k = isPlaceholder(raw, i) ? '' : wnorm(raw);
+        const idx = k ? CANON_INDEX.get(k) : undefined;
+        if (idx !== undefined && idx !== GAP_NUM && idx < 62 * 62) {
+            map += B62[(idx / 62) | 0] + B62[idx % 62];
+        } else {
+            map += GAP;
+            const t = (k || '').slice(0, 31);
+            custom.push(t);
+            lens.push(t.length);
+        }
+    });
+
+    let hash = encodeGrid(cells, colorblind) + '-' + map;
+    if (custom.length) hash += '_' + encodeSmashed(custom) + '-' + encodeLengths(lens);
+    return hash;
+}
+
+/* ---- parse the whole hash ---- */
+function parseUrlHash(raw) {
+    const s = String(raw || '').trim();
+    const dash = s.indexOf('-');
+    if (dash < 1) return null;
+
+    const grid = decodeGrid(s.slice(0, dash));
+    if (!grid) return null;
+
+    const rest = s.slice(dash + 1);
+    const us = rest.indexOf('_');
+    const map = us < 0 ? rest : rest.slice(0, us);
+    if (map.length !== 50) return null;
+
+    const words = new Array(25).fill('');
+    const gaps = [];
+    for (let i = 0; i < 25; i++) {
+        const pair = map.slice(i * 2, i * 2 + 2);
+        if (pair === GAP) { gaps.push(i); continue; }
+        const n = Number(b62dec(pair));
+        words[i] = CANON_LIST[n] || '';
+    }
+
+    if (gaps.length) {
+        if (us < 0) return null;
+        const blob = rest.slice(us + 1);
+        const cut = blob.indexOf('-');
+        if (cut < 0) return null;
+        const lens = decodeLengths(blob.slice(cut + 1));
+        if (!lens || lens.length !== gaps.length) return null;
+        const total = lens.reduce((a, b) => a + b, 0);
+        const text = decodeSmashed(blob.slice(0, cut), total);
+        if (text === null) return null;
+        let p = 0;
+        gaps.forEach((pos, j) => { words[pos] = text.slice(p, p + lens[j]); p += lens[j]; });
+    }
+
+    return {
+        isFlipped: grid.isFlipped,
+        rotation: grid.rotation,
+        cells: grid.cells.map((c, i) => ({
+            text: words[i] || `Card ${i + 1}`,
+            colorClass: c.colorClass,
+            isPlayFlipped: c.isPlayFlipped
+        }))
+    };
+}
+
 function shareBoardUrl(colorblind = false) {
     const base = location.href.split('#')[0];
-    const url = base + '#' + encodeURIComponent(buildDataString(colorblind));
+    const url = base + '#' + buildUrlHash(colorblind);
     uiShowText('Copy this link to share the current board:', url,
                colorblind ? 'Share Player Link (no colors)' : 'Share URL');
 }
@@ -1838,7 +2002,9 @@ loadSavedState();
 (function autoImportFromUrl() {
     const raw = decodeURIComponent(location.hash.slice(1));
     if (!raw) return;
-    const parsed = raw.includes('::') ? parseLegacy(raw) : parseCompact(raw);
+    const parsed = raw.includes('::') ? parseLegacy(raw)
+                 : raw.includes(':')  ? parseCompact(raw)     // old compact format
+                 : parseUrlHash(raw);                         // new base-62 format
     if (!parsed) return;
     isFlipped = parsed.isFlipped;
     board.classList.toggle('flipped', isFlipped);
