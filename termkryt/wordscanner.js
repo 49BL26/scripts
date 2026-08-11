@@ -269,11 +269,11 @@ window.scanWordFromImage = async function (file, statusCb) {
         URL.revokeObjectURL(url);
         updateStats();
         saveCurrentState();
-        statusCb('Filled ${filled.length} cells${globalFlip ? ' (photo was upside down — auto-corrected)' : ''}.');
+statusCb('Filled ${filled.length} cells${globalFlip ? " (photo was upside down — auto-corrected)" : ""}.');
         return filled.length;
     } catch (e) {
         console.error(e);
-        statusCb('Scan error: ' + e.message);
+        console.log(`OCR: ${m.status} ${m.progress}`);
         return null;
     }
 };
