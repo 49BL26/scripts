@@ -291,6 +291,8 @@
     <div class="control-group" id="g-words">
         <button onclick="importWordsPrompt()">Import Words</button>
         <button onclick="addWordPrompt()">Add Words</button>
+	    <button onclick="document.getElementById('scan-file').click()">Scan Word</button>
+    	<input type="file" id="scan-file" accept="image/*" style="display:none;">
     </div>
 
     <div class="control-group" id="g-key">
@@ -418,8 +420,12 @@
 
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 
+<script src="https://unpkg.com/tesseract.js@4/dist/tesseract.min.js"></script>
+	
 <script src="keycards.js"></script>
 
+<script src="wordscanner.js"></script>
+	
 <script src="wordpairs.js"></script>
 
 <script src="shareboard.js"></script>
@@ -712,6 +718,34 @@ document.addEventListener('keydown', e => {
 });
 
 
+document.getElementById('scan-file').addEventListener('change', function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const status = await uiAlert; // optional; use modal for feedback
+    // Use a lightweight status via the modal system:
+    (async () => {
+        const statusMsg = await uiPrompt('Scanning…', '', {
+            title: 'Word Scanner',
+            okLabel: 'Cancel',
+            multiline: false
+        });
+    })();
+
+    // Better: show a simple status modal using existing UI
+    const overlay = document.getElementById('modal-overlay');
+    // We'll just run scan and show result via uiAlert
+    scanWordFromImage(file, msg => console.log(msg))
+        .then(word => {
+            if (word) {
+                // Optionally show a confirmation
+                uiAlert(`Scanned: “${word}”`, 'Scan Complete');
+            } else {
+                uiAlert('No match found. Try another photo.', 'Scan Failed');
+            }
+            e.target.value = ''; // allow re-select same file
+        });
+});
+	
 
 /* ============================================================
    KEY CARD ASSISTANT — deduce the whole grid from a few cells
