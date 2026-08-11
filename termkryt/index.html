@@ -718,19 +718,6 @@ document.addEventListener('keydown', e => {
 });
 
 
-document.getElementById('scan-file').addEventListener('change', function (e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const status = await uiAlert; // optional; use modal for feedback
-    // Use a lightweight status via the modal system:
-    (async () => {
-        const statusMsg = await uiPrompt('Scanning…', '', {
-            title: 'Word Scanner',
-            okLabel: 'Cancel',
-            multiline: false
-        });
-    })();
-
     // Better: show a simple status modal using existing UI
     const overlay = document.getElementById('modal-overlay');
     // We'll just run scan and show result via uiAlert
@@ -1902,7 +1889,36 @@ loadSavedState();
     saveCurrentState();
 })();
 
-
+document.getElementById('scan-file').addEventListener('change', async function (e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const word = await scanWordFromImage(file, m => console.log(m));
+    if (word) uiAlert(`Scanned: "${word}"`, 'Scan Complete');
+    else uiAlert('No match found. Try another photo.', 'Scan Failed');
+    e.target.value = ''; // allow re-selecting the same file
+});
 </script>
+
+<script>
+(function bootstrapBoard() {
+    const boardEl = document.getElementById('board');
+    if (!boardEl || boardEl.children.length) return;
+    for (let i = 0; i < 25; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell white';
+        cell.dataset.index = i;
+        const span = document.createElement('span');
+        span.className = 'cell-text';
+        span.textContent = 'Card ' + (i + 1);
+        cell.appendChild(span);
+        boardEl.appendChild(cell);
+        if (typeof handleCellClick === 'function') {
+            cell.addEventListener('click', function () { handleCellClick(cell); });
+        }
+    }
+    console.warn('Fallback board created — main init may have failed.');
+})();
+</script>
+	
 </body>
 </html>
