@@ -423,13 +423,12 @@
 <script src="keycards.js"></script>
 <script src="wordpairs.js"></script>
 <script src="wordscanner.js"></script>
-<script src="shareboard.js"></script>
+<script src="sshareboard.js"></script>
 
 <script>
 /* ============================================================
    MODAL SYSTEM (replaces alert / confirm / prompt)
    ============================================================ */
-const overlay      = document.getElementById('modal-overlay');
 const modalTitle   = document.getElementById('modal-title');
 const modalMessage = document.getElementById('modal-message');
 const modalInput   = document.getElementById('modal-input');
@@ -715,18 +714,6 @@ document.addEventListener('keydown', e => {
 
     // Better: show a simple status modal using existing UI
     const overlay = document.getElementById('modal-overlay');
-    // We'll just run scan and show result via uiAlert
-    scanWordFromImage(file, msg => console.log(msg))
-        .then(word => {
-            if (word) {
-                // Optionally show a confirmation
-                uiAlert(`Scanned: “${word}”`, 'Scan Complete');
-            } else {
-                uiAlert('No match found. Try another photo.', 'Scan Failed');
-            }
-            e.target.value = ''; // allow re-select same file
-        });
-});
 	
 
 /* ============================================================
