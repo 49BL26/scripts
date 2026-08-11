@@ -1897,9 +1897,9 @@ loadSavedState();
 document.getElementById('scan-file').addEventListener('change', async function (e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    const word = await scanWordFromImage(file, function(){});
-    if (word) uiAlert('Scanned: "' + word + '"', 'Scan Complete');
-    else uiAlert('No match found. Try another photo.', 'Scan Failed');
+    const n = await scanWordFromImage(file, m => console.log(m));
+    if (n) uiAlert('Scanned and filled ' + n + ' cells. Fix any misreads via Manual Edit.', 'Scan Complete');
+    else uiAlert('No readable words found. Try a straighter, brighter photo.', 'Scan Failed');
     e.target.value = '';
 });
 </script>
