@@ -3,8 +3,8 @@
    Load AFTER wordpairs.js. Uses WORD_PAIRS for the dictionary.
    ============================================================ */
 (function () {
-    const TARGET_WIDTH = 400;             // downscale for CPU
-    const MIN_CONFIDENCE = 0.35;
+    const TARGET_WIDTH = 800;             // downscale for CPU
+    const MIN_CONFIDENCE = 0.25;
 
     // Build dictionary from your existing WORD_PAIRS
     const DICT = (function () {
@@ -55,18 +55,25 @@ async function getWorker() {
         return 1 - dp[m][n] / Math.max(m, n);
     }
 
-    function bestMatch(text) {
-        let best = { target: '', rating: 0 };
-        // Try whole text first, then each line, then each word
-        const candidates = [text, ...text.split(/\s+/).filter(w => w.length > 2)];
-        for (const cand of candidates) {
-            for (const dictWord of DICT) {
-                const r = similarity(cand, dictWord);
-                if (r > best.rating) best = { target: dictWord, rating: r };
-            }
-        }
-        return best;
+function bestMatch(text) {
+    const tokens = text.split(/\s+/).filter(w => w.length > 2);
+    const candidates = [...tokens];
+    for (let i = 0; i < tokens.length - 1; i++) {
+        candidates.push(tokens[i] + ' ' + tokens[i + 1]);
     }
+    let best = { target: '', rating: 0 };
+    for (const cand of candidates) {
+        for (const dictWord of DICT) {
+            const r = similarity(cand, dictWord);
+            if (r > best.rating) best = { target: dictWord, rating: r };
+        }
+    }
+    for (const dictWord of DICT) {           // exact substring = perfect match
+        if (text.includes(dictWord)) return { target: dictWord, rating: 1 };
+    }
+    return best;
+}
+
 
     // Main pipeline — returns recognized word string or null
     async function processImage(file, statusCb) {
@@ -114,6 +121,10 @@ async function getWorker() {
         const clean = s => s.toUpperCase().replace(/\s+/g, ' ').trim();
         const t1 = clean(r1.data.text), t2 = clean(r2.data.text);
 
+        console.log('OCR upright:', JSON.stringify(t1));
+        console.log('OCR flipped:', JSON.stringify(t2));
+
+       
         // Pick the better-scoring orientation
         const m1 = bestMatch(t1), m2 = bestMatch(t2);
         const winner = (m1.rating >= m2.rating) ? m1 : m2;
