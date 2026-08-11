@@ -42,7 +42,7 @@ script.onload = () => {
 if (cv.Mat) resolve(cv);
 else cv.onRuntimeInitialized = () => resolve(cv);
 };
-script.onerror = () => { cvReady = null; reject(new Error(‘OpenCV.js failed to load’)); };
+script.onerror = () => { cvReady = null; reject(new Error('OpenCV.js failed to load')); };
 document.head.appendChild(script);
 });
 return cvReady;
