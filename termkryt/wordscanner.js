@@ -19,10 +19,12 @@
 
     let worker = null;
 
+
 async function getWorker() {
     if (!worker) {
         worker = await Tesseract.createWorker('eng', 1, {
-            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4.1.4/dist/worker.min.js',
+            logger: m => console.log('OCR progress:', m),
+            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js',
             corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.0',
             langPath:   'https://tessdata.projectnaptha.com/4.0.0'
         });
@@ -33,6 +35,7 @@ async function getWorker() {
     }
     return worker;
 }
+
 
     // Simple normalized similarity (use string-similarity lib if present)
     function similarity(a, b) {
