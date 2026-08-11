@@ -390,9 +390,12 @@
         <p id="modal-message"></p>
         <input type="text" id="modal-input">
         <textarea id="modal-area" spellcheck="false"></textarea>
+		<div id="modal-qr" style="display:none; justify-content:center; padding:8px 0 12px;"></div>
         <div class="modal-buttons" id="modal-buttons"></div>
     </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 
 <script src="keycards.js"></script>
 
@@ -546,6 +549,65 @@ function switchMenu(key) {
         btn.textContent = b.label;
         bar.appendChild(btn);
     });
+
+function uiShowQR(url, title = 'Share via QR') {
+    const qrEl = document.getElementById('modal-qr');
+    if (!qrEl) { return uiAlert('QR container missing — check modal markup.'); }
+
+    qrEl.innerHTML = '';
+    qrEl.style.display = 'flex';
+    try {
+        new QRCode(qrEl, {
+            text: url,
+            width: 256,
+            height: 256,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    } catch (e) {
+        console.error('QR error:', e);
+        qrEl.style.display = 'none';
+        return uiAlert('Failed to render QR: ' + e.message);
+    }
+
+    let needsReset = true;
+    const flashBtn = btn => {
+        const t = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = t, 1200);
+    };
+    const fallbackCopy = btn => {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); flashBtn(btn); }
+        catch (err) { alert('Copy failed. Link: ' + url); }
+        document.body.removeChild(ta);
+    };
+    const copyLink = btn => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(() => flashBtn(btn)).catch(() => fallbackCopy(btn));
+        } else { fallbackCopy(btn); }
+    };
+
+    return showModal({
+        title,
+        message: '',
+        buttons: [
+            { label: 'Copy Link', keepOpen: true, action: (b) => copyLink(b) },
+            { label: 'Close', value: null, primary: true }
+        ],
+        dismiss: null
+    }).then(() => {
+        if (needsReset) {
+            needsReset = false;
+            qrEl.style.display = 'none';
+            qrEl.innerHTML = '';
+        }
+    });
+}
 
 
     handleModeChange(); 
@@ -1561,8 +1623,10 @@ async function importDataString() {
     if (!input) return;
 
     const s = input.trim();
-    const parsed = s.includes('::') ? parseLegacy(s) : parseCompact(s);
-    if (!parsed) { await uiAlert('That string could not be read. Check that it is complete.', 'Bad data'); return; }
+    const parsed = s.includes('::')          ? parseLegacy(s)
+                 : s.includes(':')           ? parseCompact(s)
+                 : /^[0-9A-Za-z]+$/.test(s)  ? parseStateToken(s)
+                 : null;
 
     isFlipped = parsed.isFlipped;
     board.classList.toggle('flipped', isFlipped);
@@ -1670,6 +1734,120 @@ const CANON_INDEX = new Map();
         CANON_LIST.push(w);
     });
 })();
+
+/* ============================================================
+   UNIFIED BASE-62 STATE CODEC
+   gridValue = boardId*32 + rotationId*8 + orientation
+   orientation = flipBit*4 + (currentRotation/90)
+   totalValue = gridValue + 1280n * SUM(wordIdx_i * D^i)
+   ============================================================ */
+const B62A = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+function toB62(n) {
+    if (n <= 0n) return '0';
+    let s = '';
+    while (n > 0n) { s = B62A[Number(n % 62n)] + s; n /= 62n; }
+    return s;
+}
+function fromB62(s) {
+    let n = 0n;
+    for (const ch of s) {
+        const d = B62A.indexOf(ch);
+        if (d < 0) return null;
+        n = n * 62n + BigInt(d);
+    }
+    return n;
+}
+
+/* --- canonical dictionary: WORD_PAIRS flattened, deduped, order frozen --- */
+const canonicalWordList = (() => {
+    const out = [], seen = new Set();
+    WORD_PAIRS.forEach(p => p.forEach(w => {
+        const k = wnorm(w);
+        if (k && !seen.has(k)) { seen.add(k); out.push(w); }
+    }));
+    return out;
+})();
+const DICTIONARY_SIZE = canonicalWordList.length;
+const D_BIG = BigInt(DICTIONARY_SIZE);
+const WORD_INDEX = new Map(canonicalWordList.map((w, i) => [wnorm(w), i]));
+
+/* --- canonical key-card list: KEY_CARDS in declaration order, 25 chars each --- */
+const CANON_BOARDS = (() => {
+    const out = [];
+    Object.values(KEY_CARDS).forEach(raw => {
+        const s = String(raw).toLowerCase().replace(/[^drbw]/g, '');
+        for (let p = 0; p + 25 <= s.length; p += 25) out.push(s.slice(p, p + 25));
+    });
+    return out;
+})();
+
+const COLOR_TO_KEY = { red:'r', blue:'b', white:'w', black:'d' };
+
+/* ---------- EXPORT ---------- */
+function buildStateToken() {
+    const cells = [...board.getElementsByClassName('cell')];
+    if (cells.length !== 25) return null;
+
+    const live = cells.map(c => COLOR_TO_KEY[getColor(c)] || 'w').join('');
+
+    let boardId = -1, rotationId = 0;
+    outer:
+    for (let b = 0; b < CANON_BOARDS.length; b++) {
+        let g = CANON_BOARDS[b];
+        for (let r = 0; r < 4; r++) {
+            if (g === live) { boardId = b; rotationId = r; break outer; }
+            g = keyRot90(g);
+        }
+    }
+    if (boardId < 0) return null;                    // not a retail layout
+
+    const orientation = (isFlipped ? 4 : 0) + (((currentRotation % 360) / 90) | 0);
+    const gridValue = boardId * 32 + rotationId * 8 + orientation;
+
+    let totalValue = BigInt(gridValue);
+    for (let i = 0; i < 25; i++) {
+        const idx = WORD_INDEX.get(wnorm(getText(cells[i])));
+        if (idx === undefined) return null;          // off-dictionary word
+        totalValue += BigInt(idx) * 1280n * (D_BIG ** BigInt(i));
+    }
+    return toB62(totalValue);
+}
+
+/* ---------- IMPORT ---------- */
+function parseStateToken(str) {
+    let totalValue = fromB62(str);
+    if (totalValue === null) return null;
+
+    const gridValue = Number(totalValue % 1280n);
+    totalValue = totalValue / 1280n;
+
+    const boardId    = (gridValue / 32) | 0;
+    const rotationId = ((gridValue % 32) / 8) | 0;
+    const orientation = gridValue % 8;
+    if (boardId >= CANON_BOARDS.length) return null;
+
+    let grid = CANON_BOARDS[boardId];
+    for (let r = 0; r < rotationId; r++) grid = keyRot90(grid);
+
+    const words = [];
+    for (let i = 0; i < 25; i++) {
+        const wordIndex = Number(totalValue % D_BIG);
+        words.push(canonicalWordList[wordIndex]);
+        totalValue = totalValue / D_BIG;
+    }
+
+    return {
+        isFlipped: orientation >= 4,
+        rotation: (orientation % 4) * 90,
+        cells: Array.from({ length: 25 }, (_, i) => ({
+            text: words[i] || `Card ${i + 1}`,
+            colorClass: KEY_CLS[grid[i]] || 'white',
+            isPlayFlipped: false
+        }))
+    };
+}
+
 
 /* ---- section 1: grid (flip, rotation, 25 x [colour + revealed]) ---- */
 const URL_COLORS = ['white', 'red', 'blue', 'black'];
@@ -1800,10 +1978,16 @@ function parseUrlHash(raw) {
 
 function shareBoardUrl(colorblind = false) {
     const base = location.href.split('#')[0];
-    const url = base + '#' + buildUrlHash(colorblind);
-    uiShowText('Copy this link to share the current board:', url,
-               colorblind ? 'Share Player Link (no colors)' : 'Share URL');
+    const token = colorblind ? null : buildStateToken();
+
+    if (token) {
+        uiShowQR(base + '#' + token, 'Share URL — scan to open');
+        return;
+    }
+    uiShowQR(base + '#' + encodeURIComponent(buildDataString(colorblind)),
+             colorblind ? 'Share Player Link (no colors)' : 'Share URL');
 }
+
 
 /* ===== MENU BAR ===== */
 const MENU_ACTIONS = {
@@ -2002,10 +2186,13 @@ loadSavedState();
 (function autoImportFromUrl() {
     const raw = decodeURIComponent(location.hash.slice(1));
     if (!raw) return;
-    const parsed = raw.includes('::') ? parseLegacy(raw)
-                 : raw.includes(':')  ? parseCompact(raw)     // old compact format
-                 : parseUrlHash(raw);                         // new base-62 format
+
+    const parsed = raw.includes('::')          ? parseLegacy(raw)
+                 : raw.includes(':')           ? parseCompact(raw)
+                 : /^[0-9A-Za-z]+$/.test(raw)  ? parseStateToken(raw)
+                 : null;
     if (!parsed) return;
+
     isFlipped = parsed.isFlipped;
     board.classList.toggle('flipped', isFlipped);
     currentRotation = parsed.rotation;
@@ -2013,6 +2200,75 @@ loadSavedState();
     initBoard(parsed.cells);
     saveCurrentState();
 })();
+
+
+/* ===== QR CODE SHARING ===== */
+window.uiShowQR = (url, title = 'Share via QR') => {
+    const qrEl = document.getElementById('modal-qr');
+    if (!qrEl) {
+        window.alert('QR container #modal-qr missing. Check modal markup.');
+        return Promise.resolve(false);
+    }
+
+    qrEl.innerHTML = '';
+    qrEl.style.display = 'flex';
+
+    if (typeof QRCode === 'undefined') {
+        qrEl.style.display = 'none';
+        window.alert('QR library not loaded — check script tag for qrcode.min.js');
+        return Promise.resolve(false);
+    }
+
+    try {
+        new QRCode(qrEl, {
+            text: url,
+            width: 256,
+            height: 256,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    } catch (e) {
+        qrEl.style.display = 'none';
+        window.alert('QR render failed: ' + e.message);
+        return Promise.resolve(false);
+    }
+
+    const flashBtn = btn => {
+        const t = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = t, 1200);
+    };
+    const fallbackCopy = btn => {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); flashBtn(btn); }
+        catch (err) { window.alert('Copy failed. Link: ' + url); }
+        document.body.removeChild(ta);
+    };
+    const copyLink = btn => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url)
+                .then(() => flashBtn(btn))
+                .catch(() => fallbackCopy(btn));
+        } else fallbackCopy(btn);
+    };
+
+    return showModal({
+        title,
+        message: '',
+        buttons: [
+            { label: 'Copy Link', keepOpen: true, action: b => copyLink(b) },
+            { label: 'Close', value: null, primary: true }
+        ],
+        dismiss: null
+    }).then(() => {
+        qrEl.style.display = 'none';
+        qrEl.innerHTML = '';
+    });
+};
 
 </script>
 </body>
