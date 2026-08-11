@@ -35,8 +35,8 @@
 if (window.cv && cv.Mat) return Promise.resolve(cv);
 if (cvReady) return cvReady;
 cvReady = new Promise((resolve, reject) => {
-const script = document.createElement(‘script’);
-script.src = ‘https://docs.opencv.org/4.9.0/opencv.js’;
+const script = document.createElement('script');
+script.src = 'https://docs.opencv.org/4.9.0/opencv.js';
 script.async = true;
 script.onload = () => {
 if (cv.Mat) resolve(cv);
@@ -269,7 +269,7 @@ window.scanWordFromImage = async function (file, statusCb) {
         URL.revokeObjectURL(url);
         updateStats();
         saveCurrentState();
-        statusCb(`Filled ${filled.length} cells${globalFlip ? ' (photo was upside down — auto-corrected)' : ''}.`);
+        statusCb('Filled ${filled.length} cells${globalFlip ? ' (photo was upside down — auto-corrected)' : ''}.');
         return filled.length;
     } catch (e) {
         console.error(e);
