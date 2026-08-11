@@ -419,15 +419,10 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-
 <script src="https://unpkg.com/tesseract.js@4/dist/tesseract.min.js"></script>
-	
 <script src="keycards.js"></script>
-	
 <script src="wordpairs.js"></script>
-
 <script src="wordscanner.js"></script>
-	
 <script src="shareboard.js"></script>
 
 <script>
@@ -1888,15 +1883,6 @@ loadSavedState();
     initBoard(parsed.cells);
     saveCurrentState();
 })();
-
-document.getElementById('scan-file').addEventListener('change', async function (e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const word = await scanWordFromImage(file, m => console.log(m));
-    if (word) uiAlert(`Scanned: "${word}"`, 'Scan Complete');
-    else uiAlert('No match found. Try another photo.', 'Scan Failed');
-    e.target.value = ''; // allow re-selecting the same file
-});
 </script>
 
 <script>
@@ -1918,6 +1904,17 @@ document.getElementById('scan-file').addEventListener('change', async function (
     }
     console.warn('Fallback board created — main init may have failed.');
 })();
+</script>
+
+<script>
+document.getElementById('scan-file').addEventListener('change', async function (e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const word = await scanWordFromImage(file, function(){});
+    if (word) uiAlert('Scanned: "' + word + '"', 'Scan Complete');
+    else uiAlert('No match found. Try another photo.', 'Scan Failed');
+    e.target.value = '';
+});
 </script>
 	
 </body>
