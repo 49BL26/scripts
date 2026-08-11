@@ -1,15 +1,24 @@
 /* ============================================================
-   WORD SCANNER — lightweight full-board OCR
-   2 OCR passes total (upright + flipped). No OpenCV.
-   Words are mapped to the 5x5 grid by their bounding boxes.
+   WORD SCANNER — lightweight full-board OCR (lenient mode)
+   2 OCR passes (upright + flipped). No OpenCV.
+   Words mapped to the 5x5 grid via bounding boxes.
    Load AFTER wordpairs.js and tesseract.js.
    ============================================================ */
 (function () {
     'use strict';
 
-    const MAX_DIM = 1600;          // downscale limit; keeps memory low
-    const MIN_CONFIDENCE = 40;     // per-word Tesseract confidence (0-100)
-    const MIN_WORD_LEN = 3;
+    const MAX_DIM = 2000;            // higher res = better OCR on rough photos
+    const MIN_CONFIDENCE = 10;       // was 40 — much more forgiving
+    const MIN_WORD_LEN = 2;          // was 3 — accept short words
+
+    // Build dictionary from WORD_PAIRS (used to override confidence rules)
+    const DICT = (function () {
+        const s = new Set();
+        (window.WORD_PAIRS || []).forEach(pair => pair.forEach(w => {
+            s.add(w.toUpperCase().replace(/[^A-Z]/g, '')); // "ICE CREAM" → "ICECREAM"
+        }));
+        return s;
+    })();
 
     let worker = null;
 
@@ -23,27 +32,35 @@
             await worker.setParameters({
                 tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
                 preserve_interword_spaces: '1',
-                tessedit_pageseg_mode: '11'   // sparse text: isolated words + boxes
+                tessedit_pageseg_mode: '11'   // sparse text with bounding boxes
             });
         }
         return worker;
     }
 
+    // Very forgiving plausibility test
     function plausible(word) {
-        if (!word || word.length < MIN_WORD_LEN) return false;
-        if (!/[AEIOUY]/.test(word)) return false;
-        if (/[^A-Z ]/.test(word)) return false;
+        if (!word) return false;
+
+        const clean = word.toUpperCase().replace(/[^A-Z]/g, '');
+        if (clean.length < MIN_WORD_LEN) return false;
+
+        // Dictionary words are always OK (ICE CREAM, NEW YORK etc.)
+        if (DICT.has(clean)) return true;
+
+        // Non‑dictionary words: allow short words, but need a vowel and pure letters
+        if (word.toUpperCase() !== clean) return false;          // no punctuation
+        if (!/[AEIOUY]/.test(clean)) return false;               // must have a vowel
         return true;
     }
 
-    // Grayscale + contrast, in place
     function enhance(canvas) {
         const ctx = canvas.getContext('2d');
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const d = img.data;
         for (let i = 0; i < d.length; i += 4) {
             const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const v = Math.max(0, Math.min(255, (g - 128) * 1.4 + 128));
+            const v = Math.max(0, Math.min(255, (g - 128) * 1.3 + 128)); // gentler
             d[i] = d[i + 1] = d[i + 2] = v;
         }
         ctx.putImageData(img, 0, 0);
@@ -60,23 +77,28 @@
         return dst;
     }
 
-    // Extract usable words + centroids from one recognize() result
     function harvest(data, W, H) {
         const out = [];
         (data.words || []).forEach(w => {
             const text = (w.text || '').toUpperCase().trim();
-            if (w.confidence < MIN_CONFIDENCE || !plausible(text)) return;
+            const cleanKey = text.replace(/[^A-Z]/g, '');
+            const isDict = DICT.has(cleanKey);
+
+            // Dictionary words: accept any confidence ≥ 0
+            // Others: only if confidence is at least MIN_CONFIDENCE AND plausible
+            if (!isDict && (w.confidence < MIN_CONFIDENCE || !plausible(text))) return;
+            if (isDict && !plausible(text)) return; // ensure even dict words have letters (edge case)
+
             out.push({
                 word: text,
                 conf: w.confidence,
-                x: (w.bbox.x0 + w.bbox.x1) / 2 / W,   // normalized 0-1
+                x: (w.bbox.x0 + w.bbox.x1) / 2 / W,
                 y: (w.bbox.y0 + w.bbox.y1) / 2 / H
             });
         });
         return out;
     }
 
-    // Map word list onto a 5x5 grid using the words' own bounding extent
     function toGrid(words) {
         if (!words.length) return { grid: Array(25).fill(null), score: 0 };
         const xs = words.map(w => w.x), ys = words.map(w => w.y);
@@ -91,7 +113,7 @@
             const row = Math.min(4, Math.max(0, Math.round(((w.y - y0) / spanY) * 4)));
             const idx = row * 5 + col;
             if (!grid[idx] || w.conf > grid[idx].conf) {
-                if (!grid[idx]) score += w.conf;      // reward new cells
+                if (!grid[idx]) score += w.conf;
                 grid[idx] = w;
             }
         });
@@ -105,7 +127,6 @@
                 throw new Error('Tesseract not loaded — check script tag.');
             }
 
-            // Load and downscale the photo
             const url = URL.createObjectURL(file);
             const img = new Image();
             await new Promise((res, rej) => {
@@ -132,16 +153,12 @@
             const res2 = await w.recognize(flipped);
             const down = toGrid(harvest(res2.data, flipped.width, flipped.height));
 
-            // Choose the better orientation by total confidence of placed cells
             const winner = down.score > up.score ? down : up;
             if (!winner.grid.some(Boolean)) {
                 statusCb('No readable words found.');
                 return 0;
             }
 
-            // Fill board (grid already in correct order for either orientation,
-            // because the flipped pass reads the flipped image top-to-bottom,
-            // which corresponds to the true board order)
             const cells = [...board.querySelectorAll('.cell')];
             let filled = 0;
             winner.grid.forEach((entry, i) => {
