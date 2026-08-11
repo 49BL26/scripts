@@ -13,22 +13,27 @@
     let cvReady = null;
 
     /* ---------- Tesseract ---------- */
-    async function getWorker() {
-        if (!worker) {
-            worker = await Tesseract.createWorker('eng', 1, {
+async function getWorker() {
+    if (!scheduler) {
+        scheduler = await Tesseract.createScheduler();
+        for (let i = 0; i < 2; i++) {   // 2 parallel workers
+            const w = await Tesseract.createWorker('eng', 1, {
                 workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
                 corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
                 langPath:   'https://tessdata.projectnaptha.com/4.0.0',
                 logger: m => console.log('OCR:', m.status, m.progress)
             });
-            await worker.setParameters({
+            await w.setParameters({
                 tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
                 preserve_interword_spaces: '1',
                 tessedit_pageseg_mode: '7'
             });
+            scheduler.addWorker(w);
         }
-        return worker;
     }
+    return scheduler;
+}
+
 
     /* ---------- OpenCV loader ---------- */
     function loadOpenCv() {
@@ -178,14 +183,17 @@ async function extractBoardCanvas(source, statusCb) {
 
 /* ---------- Per-cell OCR with 180° self-check ---------- */
 async function ocrCell(cropCanvas) {
-    const w = await getWorker();
+    const sched = await getWorker();
     const up = enhanceForOcr(cropCanvas);
-    const upRes = await w.recognize(up);
+    const down = rotateCanvas180(up);
+
+    const [upRes, downRes] = await Promise.all([
+        sched.addJob('recognize', up),
+        sched.addJob('recognize', down)
+    ]);
+
     const wordUp = (upRes.data.text || '').toUpperCase().replace(/\s+/g, ' ').trim();
     const confUp = upRes.data.confidence || 0;
-
-    const down = rotateCanvas180(up);
-    const downRes = await w.recognize(down);
     const wordDown = (downRes.data.text || '').toUpperCase().replace(/\s+/g, ' ').trim();
     const confDown = downRes.data.confidence || 0;
 
@@ -234,19 +242,29 @@ window.scanWordFromImage = async function (file, statusCb) {
         const results = [];
         let rotatedCount = 0;
 
-        statusCb('Reading 25 cells…');
-        for (let r = 0; r < 5; r++) {
-            for (let c = 0; c < 5; c++) {
-                const crop = document.createElement('canvas');
-                crop.width = cellW;
-                crop.height = cellH;
-                const ctx = crop.getContext('2d');
-                ctx.drawImage(boardCanvas, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
-                const res = await ocrCell(crop);
-                if (res.rotated) rotatedCount++;
-                results.push(res);
+            statusCb('Reading 25 cells…');
+            const cellsData = [];
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 5; c++) {
+                    const crop = document.createElement('canvas');
+                    crop.width = cellW;
+                    crop.height = cellH;
+                    const ctx = crop.getContext('2d');
+                    ctx.drawImage(boardCanvas, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
+                    cellsData.push({ r, c, crop });
+                }
             }
-        }
+
+            for (let i = 0; i < cellsData.length; i += 5) {
+                const batch = cellsData.slice(i, i + 5);
+                const batchResults = await Promise.all(batch.map(item => ocrCell(item.crop)));
+                batchResults.forEach((res, j) => {
+                    const item = batch[j];
+                    results[item.r * 5 + item.c] = res;
+                    if (res.rotated) rotatedCount++;
+                });
+                await new Promise(r => setTimeout(r, 0));   // keep UI responsive
+            }
 
         // If most cells preferred the 180° rotation, the whole photo was upside down
         const globalFlip = rotatedCount >= FLIP_THRESHOLD;
