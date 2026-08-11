@@ -215,6 +215,30 @@
     flex-wrap: wrap;
 }
 
+/* Full-screen modal (used by share/QR dialogs) */
+.modal-overlay.fullscreen .modal {
+    width: 100vw;
+    min-height: 100vh;
+    max-width: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+.modal-overlay.fullscreen #modal-qr {
+    margin: 16px auto;
+}
+.modal-overlay.fullscreen .modal-buttons {
+    margin-top: auto;
+}
+.modal-overlay.fullscreen .modal-buttons .modal-btn {
+    font-size: 16px;
+    padding: 12px 24px;
+}
+
+
+
 </style>
 </head>
 <body>
@@ -401,6 +425,8 @@
 
 <script src="wordpairs.js"></script>
 
+<script src="shareboard.js"></script>
+
 <script>
 /* ============================================================
    MODAL SYSTEM (replaces alert / confirm / prompt)
@@ -550,67 +576,7 @@ function switchMenu(key) {
         bar.appendChild(btn);
     });
 
-function uiShowQR(url, title = 'Share via QR') {
-    const qrEl = document.getElementById('modal-qr');
-    if (!qrEl) { return uiAlert('QR container missing — check modal markup.'); }
-
-    qrEl.innerHTML = '';
-    qrEl.style.display = 'flex';
-    try {
-        new QRCode(qrEl, {
-            text: url,
-            width: 256,
-            height: 256,
-            colorDark: '#000000',
-            colorLight: '#ffffff',
-            correctLevel: QRCode.CorrectLevel.M
-        });
-    } catch (e) {
-        console.error('QR error:', e);
-        qrEl.style.display = 'none';
-        return uiAlert('Failed to render QR: ' + e.message);
-    }
-
-    let needsReset = true;
-    const flashBtn = btn => {
-        const t = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = t, 1200);
-    };
-    const fallbackCopy = btn => {
-        const ta = document.createElement('textarea');
-        ta.value = url;
-        document.body.appendChild(ta);
-        ta.select();
-        try { document.execCommand('copy'); flashBtn(btn); }
-        catch (err) { alert('Copy failed. Link: ' + url); }
-        document.body.removeChild(ta);
-    };
-    const copyLink = btn => {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url).then(() => flashBtn(btn)).catch(() => fallbackCopy(btn));
-        } else { fallbackCopy(btn); }
-    };
-
-    return showModal({
-        title,
-        message: '',
-        buttons: [
-            { label: 'Copy Link', keepOpen: true, action: (b) => copyLink(b) },
-            { label: 'Close', value: null, primary: true }
-        ],
-        dismiss: null
-    }).then(() => {
-        if (needsReset) {
-            needsReset = false;
-            qrEl.style.display = 'none';
-            qrEl.innerHTML = '';
-        }
-    });
-}
-
-
-    handleModeChange(); 
+    handleModeChange();
 }
 
 /* Random whole-board generator + random word filler */
@@ -1160,15 +1126,6 @@ function assistApply(i) {
     } else {
         assist.input.focus();
     }
-
-    assist.input.value = before + ' ' + WORD_DISPLAY.get(it.key);
-    assistClose();
-    if (assist.autoApply) {
-        assist.autoApply = false;
-        settleModal(assist.input.value);
-    } else {
-        assist.input.focus();
-    }
 }
 
 
@@ -1610,6 +1567,13 @@ function buildDataString(colorblind = false) {
 }
 
 
+function parseAnyFormat(s) {
+    if (!s) return null;
+    if (s.includes('::'))                 return parseLegacy(s);
+    if (s.includes(':'))                  return parseCompact(s);
+    if (/^-?[0-9A-Za-z]+$/.test(s))       return decodeBoardToken(s);   // shareboard.js
+    return null;
+}
 
 
 async function exportDataString() {
@@ -1623,10 +1587,8 @@ async function importDataString() {
     if (!input) return;
 
     const s = input.trim();
-    const parsed = s.includes('::')          ? parseLegacy(s)
-                 : s.includes(':')           ? parseCompact(s)
-                 : /^[0-9A-Za-z]+$/.test(s)  ? parseStateToken(s)
-                 : null;
+    const parsed = parseAnyFormat(s);
+    if (!parsed) { await uiAlert('That string could not be read. Check that it is complete.', 'Bad data'); return; }
 
     isFlipped = parsed.isFlipped;
     board.classList.toggle('flipped', isFlipped);
@@ -1635,6 +1597,7 @@ async function importDataString() {
     initBoard(parsed.cells);
     saveCurrentState();
 }
+
 
 function parseCompact(s) {
     const cut = s.indexOf(':');
@@ -1698,296 +1661,8 @@ function switchPairs() {
     saveCurrentState();
 }
 
-/* ============================================================
-   COMPACT URL CODEC  (base-62)
-   #<GRID>-<WORDS_MAP:50>[_<SMASHED>-<LENGTHS>]
-   ============================================================ */
-const B62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const GAP = 'zz';                 // static custom-word marker
-const GAP_NUM = 35 * 62 + 35;     // 2205 — reserved, never used as a word index
-
-function b62enc(n) {              // BigInt -> base-62 string
-    n = BigInt(n);
-    if (n <= 0n) return '0';
-    let s = '';
-    while (n > 0n) { s = B62[Number(n % 62n)] + s; n /= 62n; }
-    return s;
-}
-function b62dec(s) {              // base-62 string -> BigInt
-    let n = 0n;
-    for (const ch of String(s)) {
-        const d = B62.indexOf(ch);
-        if (d < 0) return null;
-        n = n * 62n + BigInt(d);
-    }
-    return n;
-}
-
-/* ---- canonical dictionary: normalised word -> index ---- */
-const CANON_LIST = [];
-const CANON_INDEX = new Map();
-(function buildCanon() {
-    WORD_PAIRS.flat().forEach(w => {
-        const k = wnorm(w);
-        if (!k || CANON_INDEX.has(k)) return;
-        CANON_INDEX.set(k, CANON_LIST.length);
-        CANON_LIST.push(w);
-    });
-})();
-
-/* ============================================================
-   UNIFIED BASE-62 STATE CODEC
-   gridValue = boardId*32 + rotationId*8 + orientation
-   orientation = flipBit*4 + (currentRotation/90)
-   totalValue = gridValue + 1280n * SUM(wordIdx_i * D^i)
-   ============================================================ */
-const B62A = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-
-function toB62(n) {
-    if (n <= 0n) return '0';
-    let s = '';
-    while (n > 0n) { s = B62A[Number(n % 62n)] + s; n /= 62n; }
-    return s;
-}
-function fromB62(s) {
-    let n = 0n;
-    for (const ch of s) {
-        const d = B62A.indexOf(ch);
-        if (d < 0) return null;
-        n = n * 62n + BigInt(d);
-    }
-    return n;
-}
-
-/* --- canonical dictionary: WORD_PAIRS flattened, deduped, order frozen --- */
-const canonicalWordList = (() => {
-    const out = [], seen = new Set();
-    WORD_PAIRS.forEach(p => p.forEach(w => {
-        const k = wnorm(w);
-        if (k && !seen.has(k)) { seen.add(k); out.push(w); }
-    }));
-    return out;
-})();
-const DICTIONARY_SIZE = canonicalWordList.length;
-const D_BIG = BigInt(DICTIONARY_SIZE);
-const WORD_INDEX = new Map(canonicalWordList.map((w, i) => [wnorm(w), i]));
-
-/* --- canonical key-card list: KEY_CARDS in declaration order, 25 chars each --- */
-const CANON_BOARDS = (() => {
-    const out = [];
-    Object.values(KEY_CARDS).forEach(raw => {
-        const s = String(raw).toLowerCase().replace(/[^drbw]/g, '');
-        for (let p = 0; p + 25 <= s.length; p += 25) out.push(s.slice(p, p + 25));
-    });
-    return out;
-})();
-
-const COLOR_TO_KEY = { red:'r', blue:'b', white:'w', black:'d' };
-
-/* ---------- EXPORT ---------- */
-function buildStateToken() {
-    const cells = [...board.getElementsByClassName('cell')];
-    if (cells.length !== 25) return null;
-
-    const live = cells.map(c => COLOR_TO_KEY[getColor(c)] || 'w').join('');
-
-    let boardId = -1, rotationId = 0;
-    outer:
-    for (let b = 0; b < CANON_BOARDS.length; b++) {
-        let g = CANON_BOARDS[b];
-        for (let r = 0; r < 4; r++) {
-            if (g === live) { boardId = b; rotationId = r; break outer; }
-            g = keyRot90(g);
-        }
-    }
-    if (boardId < 0) return null;                    // not a retail layout
-
-    const orientation = (isFlipped ? 4 : 0) + (((currentRotation % 360) / 90) | 0);
-    const gridValue = boardId * 32 + rotationId * 8 + orientation;
-
-    let totalValue = BigInt(gridValue);
-    for (let i = 0; i < 25; i++) {
-        const idx = WORD_INDEX.get(wnorm(getText(cells[i])));
-        if (idx === undefined) return null;          // off-dictionary word
-        totalValue += BigInt(idx) * 1280n * (D_BIG ** BigInt(i));
-    }
-    return toB62(totalValue);
-}
-
-/* ---------- IMPORT ---------- */
-function parseStateToken(str) {
-    let totalValue = fromB62(str);
-    if (totalValue === null) return null;
-
-    const gridValue = Number(totalValue % 1280n);
-    totalValue = totalValue / 1280n;
-
-    const boardId    = (gridValue / 32) | 0;
-    const rotationId = ((gridValue % 32) / 8) | 0;
-    const orientation = gridValue % 8;
-    if (boardId >= CANON_BOARDS.length) return null;
-
-    let grid = CANON_BOARDS[boardId];
-    for (let r = 0; r < rotationId; r++) grid = keyRot90(grid);
-
-    const words = [];
-    for (let i = 0; i < 25; i++) {
-        const wordIndex = Number(totalValue % D_BIG);
-        words.push(canonicalWordList[wordIndex]);
-        totalValue = totalValue / D_BIG;
-    }
-
-    return {
-        isFlipped: orientation >= 4,
-        rotation: (orientation % 4) * 90,
-        cells: Array.from({ length: 25 }, (_, i) => ({
-            text: words[i] || `Card ${i + 1}`,
-            colorClass: KEY_CLS[grid[i]] || 'white',
-            isPlayFlipped: false
-        }))
-    };
-}
-
-
-/* ---- section 1: grid (flip, rotation, 25 x [colour + revealed]) ---- */
-const URL_COLORS = ['white', 'red', 'blue', 'black'];
-
-function encodeGrid(cells, colorblind) {
-    let n = BigInt((isFlipped ? 1 : 0) * 4 + ((currentRotation / 90) | 0) % 4);
-    cells.forEach(cell => {
-        const ci = colorblind ? 0 : Math.max(0, URL_COLORS.indexOf(getColor(cell)));
-        const rv = (!colorblind && cell.classList.contains('play-active')) ? 1 : 0;
-        n = n * 8n + BigInt(ci * 2 + rv);
-    });
-    return b62enc(n);
-}
-
-function decodeGrid(token) {
-    let n = b62dec(token);
-    if (n === null) return null;
-    const out = new Array(25);
-    for (let i = 24; i >= 0; i--) {
-        const v = Number(n % 8n); n /= 8n;
-        out[i] = { colorClass: URL_COLORS[v >> 1], isPlayFlipped: (v & 1) === 1 };
-    }
-    const f = Number(n % 8n);
-    return { isFlipped: f >= 4, rotation: (f % 4) * 90, cells: out };
-}
-
-/* ---- section 3 helpers: smashed text + packed lengths ---- */
-function encodeSmashed(words) {                       // base-26 -> BigInt -> base-62
-    let n = 0n;
-    for (const ch of words.join('')) n = n * 26n + BigInt(ch.charCodeAt(0) - 97);
-    return b62enc(n);
-}
-function decodeSmashed(token, total) {
-    let n = b62dec(token);
-    if (n === null) return null;
-    let s = '';
-    for (let i = 0; i < total; i++) {                  // fixed width — leading 'a's survive
-        s = String.fromCharCode(97 + Number(n % 26n)) + s;
-        n /= 26n;
-    }
-    return s;
-}
-function encodeLengths(lens) {                        // 5 bits/word, self-delimiting
-    let n = 1n;                                       // leading sentinel
-    for (const L of lens) n = n * 32n + BigInt(L);
-    return b62enc(n);
-}
-function decodeLengths(token) {
-    let n = b62dec(token);
-    if (n === null || n < 1n) return null;
-    const lens = [];
-    while (n > 1n) { lens.unshift(Number(n % 32n)); n /= 32n; }
-    return lens;
-}
-
-/* ---- build the whole hash ---- */
-function buildUrlHash(colorblind = false) {
-    const cells = [...board.getElementsByClassName('cell')];
-    let map = '';
-    const custom = [], lens = [];
-
-    cells.forEach((cell, i) => {
-        const raw = getText(cell).trim();
-        const k = isPlaceholder(raw, i) ? '' : wnorm(raw);
-        const idx = k ? CANON_INDEX.get(k) : undefined;
-        if (idx !== undefined && idx !== GAP_NUM && idx < 62 * 62) {
-            map += B62[(idx / 62) | 0] + B62[idx % 62];
-        } else {
-            map += GAP;
-            const t = (k || '').slice(0, 31);
-            custom.push(t);
-            lens.push(t.length);
-        }
-    });
-
-    let hash = encodeGrid(cells, colorblind) + '-' + map;
-    if (custom.length) hash += '_' + encodeSmashed(custom) + '-' + encodeLengths(lens);
-    return hash;
-}
-
-/* ---- parse the whole hash ---- */
-function parseUrlHash(raw) {
-    const s = String(raw || '').trim();
-    const dash = s.indexOf('-');
-    if (dash < 1) return null;
-
-    const grid = decodeGrid(s.slice(0, dash));
-    if (!grid) return null;
-
-    const rest = s.slice(dash + 1);
-    const us = rest.indexOf('_');
-    const map = us < 0 ? rest : rest.slice(0, us);
-    if (map.length !== 50) return null;
-
-    const words = new Array(25).fill('');
-    const gaps = [];
-    for (let i = 0; i < 25; i++) {
-        const pair = map.slice(i * 2, i * 2 + 2);
-        if (pair === GAP) { gaps.push(i); continue; }
-        const n = Number(b62dec(pair));
-        words[i] = CANON_LIST[n] || '';
-    }
-
-    if (gaps.length) {
-        if (us < 0) return null;
-        const blob = rest.slice(us + 1);
-        const cut = blob.indexOf('-');
-        if (cut < 0) return null;
-        const lens = decodeLengths(blob.slice(cut + 1));
-        if (!lens || lens.length !== gaps.length) return null;
-        const total = lens.reduce((a, b) => a + b, 0);
-        const text = decodeSmashed(blob.slice(0, cut), total);
-        if (text === null) return null;
-        let p = 0;
-        gaps.forEach((pos, j) => { words[pos] = text.slice(p, p + lens[j]); p += lens[j]; });
-    }
-
-    return {
-        isFlipped: grid.isFlipped,
-        rotation: grid.rotation,
-        cells: grid.cells.map((c, i) => ({
-            text: words[i] || `Card ${i + 1}`,
-            colorClass: c.colorClass,
-            isPlayFlipped: c.isPlayFlipped
-        }))
-    };
-}
-
-function shareBoardUrl(colorblind = false) {
-    const base = location.href.split('#')[0];
-    const token = colorblind ? null : buildStateToken();
-
-    if (token) {
-        uiShowQR(base + '#' + token, 'Share URL — scan to open');
-        return;
-    }
-    uiShowQR(base + '#' + encodeURIComponent(buildDataString(colorblind)),
-             colorblind ? 'Share Player Link (no colors)' : 'Share URL');
-}
-
+/* URL sharing (encodeBoardToken / decodeBoardToken / shareBoardUrl)
+   now lives in shareboard.js */
 
 /* ===== MENU BAR ===== */
 const MENU_ACTIONS = {
@@ -2186,13 +1861,8 @@ loadSavedState();
 (function autoImportFromUrl() {
     const raw = decodeURIComponent(location.hash.slice(1));
     if (!raw) return;
-
-    const parsed = raw.includes('::')          ? parseLegacy(raw)
-                 : raw.includes(':')           ? parseCompact(raw)
-                 : /^[0-9A-Za-z]+$/.test(raw)  ? parseStateToken(raw)
-                 : null;
+    const parsed = parseAnyFormat(raw);
     if (!parsed) return;
-
     isFlipped = parsed.isFlipped;
     board.classList.toggle('flipped', isFlipped);
     currentRotation = parsed.rotation;
@@ -2201,74 +1871,6 @@ loadSavedState();
     saveCurrentState();
 })();
 
-
-/* ===== QR CODE SHARING ===== */
-window.uiShowQR = (url, title = 'Share via QR') => {
-    const qrEl = document.getElementById('modal-qr');
-    if (!qrEl) {
-        window.alert('QR container #modal-qr missing. Check modal markup.');
-        return Promise.resolve(false);
-    }
-
-    qrEl.innerHTML = '';
-    qrEl.style.display = 'flex';
-
-    if (typeof QRCode === 'undefined') {
-        qrEl.style.display = 'none';
-        window.alert('QR library not loaded — check script tag for qrcode.min.js');
-        return Promise.resolve(false);
-    }
-
-    try {
-        new QRCode(qrEl, {
-            text: url,
-            width: 256,
-            height: 256,
-            colorDark: '#000000',
-            colorLight: '#ffffff',
-            correctLevel: QRCode.CorrectLevel.M
-        });
-    } catch (e) {
-        qrEl.style.display = 'none';
-        window.alert('QR render failed: ' + e.message);
-        return Promise.resolve(false);
-    }
-
-    const flashBtn = btn => {
-        const t = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = t, 1200);
-    };
-    const fallbackCopy = btn => {
-        const ta = document.createElement('textarea');
-        ta.value = url;
-        document.body.appendChild(ta);
-        ta.select();
-        try { document.execCommand('copy'); flashBtn(btn); }
-        catch (err) { window.alert('Copy failed. Link: ' + url); }
-        document.body.removeChild(ta);
-    };
-    const copyLink = btn => {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url)
-                .then(() => flashBtn(btn))
-                .catch(() => fallbackCopy(btn));
-        } else fallbackCopy(btn);
-    };
-
-    return showModal({
-        title,
-        message: '',
-        buttons: [
-            { label: 'Copy Link', keepOpen: true, action: b => copyLink(b) },
-            { label: 'Close', value: null, primary: true }
-        ],
-        dismiss: null
-    }).then(() => {
-        qrEl.style.display = 'none';
-        qrEl.innerHTML = '';
-    });
-};
 
 </script>
 </body>
