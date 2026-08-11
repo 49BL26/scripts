@@ -19,14 +19,13 @@
 
     let worker = null;
 
-
 async function getWorker() {
     if (!worker) {
         worker = await Tesseract.createWorker('eng', 1, {
-            logger: m => console.log('OCR progress:', m),
-            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js',
-            corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.0',
-            langPath:   'https://tessdata.projectnaptha.com/4.0.0'
+            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+            corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
+            langPath:   'https://tessdata.projectnaptha.com/4.0.0',
+            logger: m => console.log('OCR:', m.status, m.progress)
         });
         await worker.setParameters({
             tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
