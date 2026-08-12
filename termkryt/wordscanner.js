@@ -125,46 +125,22 @@
     function getService() {
         if (!servicePromise) {
             servicePromise = (async function () {
-                const P = await waitForPaddle();
-
-                // Singleton style: PaddleOcrService.getInstance()
-                if (typeof P.getInstance === 'function') {
-                    const svc = P.getInstance();
-                    if (typeof svc.initialize === 'function') await svc.initialize();
-                    else if (typeof svc.init === 'function') await svc.init();
-                    return svc;
-                }
-                // Named export holding the class/service
-                const Cls = P.PaddleOcrService || P.OcrService || P.default || P;
-                if (typeof Cls === 'function') {
-                    if (typeof Cls.getInstance === 'function') {
-                        const svc = Cls.getInstance();
-                        if (typeof svc.initialize === 'function') await svc.initialize();
-                        else if (typeof svc.init === 'function') await svc.init();
-                        return svc;
-                    }
-                    const svc = new Cls();
-                    if (typeof svc.initialize === 'function') await svc.initialize();
-                    else if (typeof svc.init === 'function') await svc.init();
-                    return svc;
-                }
-                // Already an instance
-                if (typeof P.initialize === 'function') { await P.initialize(); return P; }
-                if (typeof P.init === 'function') { await P.init(); return P; }
-                return P;
+                const Ocr = await waitForPaddle();
+                const factory = Ocr.create ? Ocr : (Ocr.default || Ocr);
+                return await factory.create();
             })();
-            servicePromise.catch(function () { servicePromise = null; }); // allow retry
+            servicePromise.catch(function () { servicePromise = null; });
         }
         return servicePromise;
     }
 
     async function runOcr(svc, canvas) {
-        const fns = ['recognize', 'detect', 'ocr', 'process', 'run'];
-        for (const f of fns) {
-            if (typeof svc[f] === 'function') return await svc[f](canvas);
-        }
-        throw new Error('No recognize method found on OCR service.');
+        const src = canvas.toDataURL('image/png');
+        if (typeof svc.detect === 'function') return await svc.detect(src);
+        if (typeof svc.recognize === 'function') return await svc.recognize(src);
+        throw new Error('No detect/recognize method on OCR service.');
     }
+
 
     /* ---------- result adapter ---------- */
     // Normalizes many possible output shapes into
@@ -186,7 +162,8 @@
                          (Array.isArray(ln) && typeof ln[1] === 'string' ? ln[1] : '');
             if (!text) return;
             const conf = (ln.confidence != null ? ln.confidence :
-                          ln.score != null ? ln.score : 0.5);
+                          ln.score != null ? ln.score :
+                          ln.mean != null ? ln.mean : 0.5);
 
             let x0, y0, x1, y1;
             const box = ln.box || ln.bbox || ln.points || ln.polygon ||
