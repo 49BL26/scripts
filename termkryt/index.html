@@ -457,10 +457,59 @@
 <script src="shareboard.js"></script>
 
 <script>
-/* ============================================================
+// Array to store the running history of all console logs
+const globalLogHistory = [];
+
+// 1. Intercept console.log immediately to track and record background data
+const originalConsoleLog = console.log;
+console.log = function(...args) {
+    // Keep native browser console printing functional
+    originalConsoleLog.apply(console, args); 
+
+    // Format args exactly like console.log output strings
+    const formattedLog = args.map(arg => 
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg
+    ).join(' ');
+
+    // Store log with a clean timestamp entry
+    const timestamp = new Date().toLocaleTimeString();
+    globalLogHistory.push(`[${timestamp}] ${formattedLog}`);
+};
+
+/**
+ * Trigger function to view the entire recorded history log in the modal
+ */
+function displayLogHistoryModal() {
+    // Generate text or a fallback notice if history is completely empty
+    const fullLogText = globalLogHistory.length > 0 
+        ? globalLogHistory.join('\n') 
+        : "No console logs recorded yet.";
+
+    showModal({
+        title: 'System Log History',
+        input: 'area',       // Uses the textarea block for proper scrollbars & monospace formatting
+        value: fullLogText,  // Injects the accumulated logs into the textarea
+        readonly: true,      // Prevents the user from breaking the logs text
+        buttons: [
+            { 
+                label: 'Clear History', 
+                value: 'clear', 
+                danger: true, 
+                keepOpen: true, // Custom action handler rule
+                action: (btn, field) => {
+                    globalLogHistory.length = 0; // Empty the tracking array safely
+                    if (field) field.value = "History cleared.";
+                }
+            },
+            { label: 'Close', value: 'close', primary: true }
+        ]
+    });
+}		
+	
+	/* ============================================================
    MODAL SYSTEM (replaces alert / confirm / prompt)
    ============================================================ */
-   
+
     // Better: show a simple status modal using existing UI
 const overlay = document.getElementById('modal-overlay');
 const modalTitle   = document.getElementById('modal-title');
@@ -706,6 +755,7 @@ function executeCommand(raw) {
     const arg = args.slice(1).join(' ');
 
     const commands = {
+		'log':             () => displayLogHistoryModal()
         'invert':          () => invertColors(),
         'flip-h':          () => flipBoardH(),
         'flip-v':          () => flipBoardV(),
