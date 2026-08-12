@@ -1,451 +1,380 @@
 /* ============================================================
-   WORD SCANNER — full-board OCR via ppu-paddle-ocr,
-   force-matched to WORD_PAIRS
+   WORD SCANNER v3 — OpenCV.js card isolation + Tesseract.js
    ------------------------------------------------------------
-   Load order:
-     <script type="module">
-       import * as M from 'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm';
-       window.PaddleOcr = M.default ?? M;
-       window.dispatchEvent(new Event('paddle-ready'));
-     </script>
-     wordpairs.js -> wordscanner.js
+   Pipeline:
+     1. OpenCV: grayscale -> Gaussian blur -> Canny -> morph close
+     2. Contours filtered by area + aspect ratio -> 25 cards
+     3. Per-card perspective warp -> flat standardized canvas
+     4. Center crop + Otsu binarize (black text / white bg)
+     5. Tesseract PSM 8 (single word), letters-only whitelist
+     6. Optional force-match against WORD_PAIRS
+   ------------------------------------------------------------
+   Load order: tesseract.js -> opencv.js -> wordpairs.js -> this
    Exposes: window.scanWordFromImage(file, statusCb) -> count
+            window.extractBoardWords(imgOrCanvas)    -> 5x5 array
    ============================================================ */
 (function () {
     'use strict';
 
-    const MAX_DIM = 2000;
-    const GOOD_ENOUGH = 20;
-    const PADDLE_WAIT_MS = 15000;   // wait this long for the module to appear
+    /* ================= CONFIG ================= */
+    const CFG = {
+        MAX_DIM: 1600,            // working resolution ceiling
+        BLUR_KSIZE: 5,            // Gaussian kernel (5 or 7)
+        CANNY_LOW: 50,
+        CANNY_HIGH: 150,
+        MORPH_KSIZE: 5,           // closing kernel
+        CARD_MIN_AREA_FRAC: 0.004,  // card must be >= 0.4% of image
+        CARD_MAX_AREA_FRAC: 0.10,   // and <= 10%
+        ASPECT_MIN: 1.1,          // Codenames cards ~1.55:1 landscape
+        ASPECT_MAX: 2.4,
+        WARP_W: 300,              // standardized card size
+        WARP_H: 200,
+        CROP_MARGIN: 0.13,        // trim 13% margin off warped card
+        WORKER_COUNT: 4,          // Tesseract worker pool size
+        MIN_WORD_LEN: 2
+    };
 
+    let workerPool = null;
     let DICT_ENTRIES = null;
-    let servicePromise = null;
 
-    /* ---------- dictionary ---------- */
-    function rawPairs() {
-        if (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) return WORD_PAIRS;
-        if (typeof window !== 'undefined' && Array.isArray(window.WORD_PAIRS)) return window.WORD_PAIRS;
-        return null;
-    }
-
-    function getDict() {
-        if (DICT_ENTRIES) return DICT_ENTRIES;
-        const pairs = rawPairs();
-        if (!pairs || !pairs.length) return null;
-        const map = new Map();
-        pairs.forEach(function (pair) {
-            (Array.isArray(pair) ? pair : [pair]).forEach(function (w) {
-                if (typeof w !== 'string') return;
-                const n = w.toUpperCase().replace(/[^A-Z]/g, '');
-                if (n.length >= 2 && !map.has(n)) map.set(n, w.toUpperCase());
-            });
-        });
-        if (!map.size) return null;
-        DICT_ENTRIES = Array.from(map, function (e) { return { norm: e[0], display: e[1] }; });
-        return DICT_ENTRIES;
-    }
-
-    /* ---------- string matching ---------- */
-    function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
-
-    function matrixSimilarity(a, b) {
-        if (!a.length || !b.length) return 0;
-        const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-        for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-        for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-        for (let i = 1; i <= a.length; i++) {
-            for (let j = 1; j <= b.length; j++) {
-                dp[i][j] = Math.min(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
-                );
-            }
-        }
-        return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
-    }
-
-    function slotSimilarity(a, b) {
-        if (!a.length || !b.length) return 0;
-        const maxLen = Math.max(a.length, b.length);
-        const minLen = Math.min(a.length, b.length);
-        let mismatches = 0;
-        for (let i = 0; i < minLen; i++) if (a[i] !== b[i]) mismatches++;
-        mismatches += Math.abs(a.length - b.length);
-        return 1 - (mismatches / maxLen);
-    }
-
-    function bestDictWord(raw) {
-        const dict = getDict();
-        const clean = norm(raw);
-        if (!clean.length) return { display: null, sim: -1 };
-        let best = { display: null, sim: -1 };
-        for (let i = 0; i < dict.length; i++) {
-            const dictWord = dict[i].norm;
-            if (Math.abs(clean.length - dictWord.length) > 2) continue;
-            const scoreSlot = slotSimilarity(clean, dictWord);
-            const scoreMatrix = matrixSimilarity(clean, dictWord);
-            const combinedScore = Math.max(scoreSlot * 1.05, scoreMatrix);
-            if (combinedScore > best.sim) {
-                best = { display: dict[i].display, sim: combinedScore };
-            }
-        }
-        return best;
-    }
-
-    /* ---------- ppu-paddle-ocr service ---------- */
-    function findPaddleGlobal() {
-        const cands = [window.PaddleOcr, window.PaddleOCR, window.paddleOcr, window.PPUPaddleOCR];
-        for (const c of cands) if (c) return c;
-        return null;
-    }
-
-    function waitForPaddle() {
+    /* ================= OPENCV READINESS ================= */
+    function cvReady() {
         return new Promise(function (resolve, reject) {
-            const found = findPaddleGlobal();
-            if (found) return resolve(found);
-            let done = false;
-            function finish(v) { if (!done) { done = true; resolve(v); } }
-            window.addEventListener('paddle-ready', function () {
-                const g = findPaddleGlobal();
-                if (g) finish(g);
-            }, { once: true });
-            const start = Date.now();
+            if (typeof cv !== 'undefined' && cv.Mat) return resolve();
+            let waited = 0;
             const iv = setInterval(function () {
-                const g = findPaddleGlobal();
-                if (g) { clearInterval(iv); finish(g); }
-                else if (Date.now() - start > PADDLE_WAIT_MS) {
+                if (typeof cv !== 'undefined' && cv.Mat) { clearInterval(iv); resolve(); }
+                else if ((waited += 200) > 20000) {
                     clearInterval(iv);
-                    if (!done) { done = true; reject(new Error('ppu-paddle-ocr not loaded — use the type="module" import shim.')); }
+                    reject(new Error('OpenCV.js failed to load.'));
                 }
             }, 200);
         });
     }
 
-    const GUTEN_BASE = 'https://cdn.jsdelivr.net/npm/@gutenye/ocr-models/assets';
+    /* ================= DICTIONARY (optional force-match) ================= */
+    function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-    function getService() {
-        if (!servicePromise) {
-            servicePromise = (async function () {
-                const Ocr = await waitForPaddle();
-                const factory = (Ocr && typeof Ocr.create === 'function') ? Ocr
-                              : (Ocr.default && typeof Ocr.default.create === 'function') ? Ocr.default
-                              : Ocr;
-                return await factory.create({
-                    models: {
-                        detectionPath:   GUTEN_BASE + '/ch_PP-OCRv4_det_infer.onnx',
-                        recognitionPath: GUTEN_BASE + '/ch_PP-OCRv4_rec_infer.onnx',
-                        dictionaryPath:  GUTEN_BASE + '/ppocr_keys_v1.txt'
-                    }
-                });
-            })();
-            servicePromise.catch(function () { servicePromise = null; });
-        }
-        return servicePromise;
-    }
-
-
-    async function runOcr(svc, canvas) {
-        const src = canvas.toDataURL('image/png');
-        if (typeof svc.detect === 'function') return await svc.detect(src);
-        if (typeof svc.recognize === 'function') return await svc.recognize(src);
-        throw new Error('No detect/recognize method on OCR service.');
-    }
-
-
-    /* ---------- result adapter ---------- */
-    // Normalizes many possible output shapes into
-    // [{ text, conf, x0,y0,x1,y1 }] in pixel coords.
-    function normalizeResults(res) {
-        if (!res) return [];
-        let lines = res;
-        if (!Array.isArray(lines)) {
-            lines = res.lines || res.results || res.data || res.words ||
-                    res.text_lines || res.items || [];
-        }
-        if (!Array.isArray(lines)) return [];
-
-        const out = [];
-        lines.forEach(function (ln) {
-            if (!ln) return;
-            const text = ln.text || ln.transcription || ln.label || ln.word ||
-                         (typeof ln === 'string' ? ln : '') ||
-                         (Array.isArray(ln) && typeof ln[1] === 'string' ? ln[1] : '');
-            if (!text) return;
-            const conf = (ln.confidence != null ? ln.confidence :
-                          ln.score != null ? ln.score :
-                          ln.mean != null ? ln.mean : 0.5);
-
-            let x0, y0, x1, y1;
-            const box = ln.box || ln.bbox || ln.points || ln.polygon ||
-                        (Array.isArray(ln) ? ln[0] : null);
-            if (box && Array.isArray(box) && Array.isArray(box[0])) {
-                // quad points [[x,y],...]
-                const xs = box.map(function (p) { return p[0]; });
-                const ys = box.map(function (p) { return p[1]; });
-                x0 = Math.min.apply(null, xs); x1 = Math.max.apply(null, xs);
-                y0 = Math.min.apply(null, ys); y1 = Math.max.apply(null, ys);
-            } else if (box && Array.isArray(box) && box.length === 4 && typeof box[0] === 'number') {
-                // [x0,y0,x1,y1] or [x,y,w,h] — heuristic
-                if (box[2] > box[0] && box[3] > box[1]) { x0 = box[0]; y0 = box[1]; x1 = box[2]; y1 = box[3]; }
-                else { x0 = box[0]; y0 = box[1]; x1 = box[0] + box[2]; y1 = box[1] + box[3]; }
-            } else if (box && typeof box === 'object') {
-                x0 = box.x0 != null ? box.x0 : box.left != null ? box.left : box.x;
-                y0 = box.y0 != null ? box.y0 : box.top != null ? box.top : box.y;
-                x1 = box.x1 != null ? box.x1 :
-                     (box.right != null ? box.right :
-                      (x0 != null && box.width != null ? x0 + box.width : null));
-                y1 = box.y1 != null ? box.y1 :
-                     (box.bottom != null ? box.bottom :
-                      (y0 != null && box.height != null ? y0 + box.height : null));
-            }
-            if (x0 == null || y0 == null || x1 == null || y1 == null) return;
-            out.push({ text: String(text), conf: conf, x0: x0, y0: y0, x1: x1, y1: y1 });
-        });
-        return out;
-    }
-
-    /* ---------- harvest: split lines into word tokens, dict-match ---------- */
-    function harvest(rawLines, W, H) {
-        const tokens = [];
-        rawLines.forEach(function (ln) {
-            const words = ln.text.toUpperCase().split(/\s+/).filter(function (t) { return norm(t).length; });
-            if (!words.length) return;
-            // Proportional sub-boxes across the line width
-            const totalChars = words.reduce(function (a, w) { return a + w.length; }, 0) + (words.length - 1);
-            let cursor = 0;
-            const lineW = ln.x1 - ln.x0;
-            words.forEach(function (w) {
-                const frac0 = cursor / totalChars;
-                const frac1 = (cursor + w.length) / totalChars;
-                cursor += w.length + 1;
-                tokens.push({
-                    raw: w,
-                    conf: ln.conf,
-                    x0: (ln.x0 + lineW * frac0) / W, y0: ln.y0 / H,
-                    x1: (ln.x0 + lineW * frac1) / W, y1: ln.y1 / H
-                });
+    function getDict() {
+        if (DICT_ENTRIES) return DICT_ENTRIES;
+        const pairs = (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) ? WORD_PAIRS
+                    : (window.WORD_PAIRS || null);
+        if (!pairs) return null;
+        const map = new Map();
+        pairs.forEach(function (pair) {
+            (Array.isArray(pair) ? pair : [pair]).forEach(function (w) {
+                if (typeof w !== 'string') return;
+                const n = norm(w);
+                if (n.length >= CFG.MIN_WORD_LEN && !map.has(n)) map.set(n, w.toUpperCase());
             });
         });
-
-        tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
-
-        // Merge neighbours when the pair beats either alone (NEW + YORK)
-        const merged = [];
-        let cur = null;
-        for (let i = 0; i < tokens.length; i++) {
-            const tok = tokens[i];
-            if (cur) {
-                const sameLine = tok.y0 < cur.y1 && tok.y1 > cur.y0;
-                const close = (tok.x0 - cur.x1) < 0.07;
-                if (sameLine && close) {
-                    const joined = bestDictWord(cur.raw + ' ' + tok.raw);
-                    const solo = Math.max(bestDictWord(cur.raw).sim, bestDictWord(tok.raw).sim);
-                    if (joined.sim >= solo) {
-                        cur = {
-                            raw: cur.raw + ' ' + tok.raw,
-                            conf: Math.max(cur.conf, tok.conf),
-                            x0: Math.min(cur.x0, tok.x0), y0: Math.min(cur.y0, tok.y0),
-                            x1: Math.max(cur.x1, tok.x1), y1: Math.max(cur.y1, tok.y1)
-                        };
-                        continue;
-                    }
-                }
-                merged.push(cur);
-            }
-            cur = tok;
-        }
-        if (cur) merged.push(cur);
-
-        return merged.map(function (item) {
-            const m = bestDictWord(item.raw);
-            return {
-                word: m.display, sim: m.sim, conf: item.conf,
-                x: (item.x0 + item.x1) / 2,
-                y: (item.y0 + item.y1) / 2
-            };
-        }).filter(function (t) { return t.word; });
+        DICT_ENTRIES = map.size ? Array.from(map, e => ({ norm: e[0], display: e[1] })) : null;
+        return DICT_ENTRIES;
     }
 
-    /* ---------- gap clustering / grid (unchanged) ---------- */
-    function clusterAxis(values, maxGroups) {
-        const sorted = values.slice().sort(function (a, b) { return a - b; });
-        if (!sorted.length) return [];
-        const span = sorted[sorted.length - 1] - sorted[0];
-        let groups = [[sorted[0]]];
-        const threshold = Math.max(span / (maxGroups * 2.2), 0.012);
+    function levenshtein(a, b) {
+        const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+        for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+        for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+        for (let i = 1; i <= a.length; i++)
+            for (let j = 1; j <= b.length; j++)
+                dp[i][j] = Math.min(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
+                );
+        return dp[a.length][b.length];
+    }
+
+    function forceMatch(raw) {
+        const dict = getDict();
+        const clean = norm(raw);
+        if (!clean.length) return null;
+        if (!dict) return clean;                       // no dictionary: pass through
+        let best = null, bestSim = -1;
+        for (const entry of dict) {
+            if (Math.abs(clean.length - entry.norm.length) > 3) continue;
+            const sim = 1 - levenshtein(clean, entry.norm) /
+                        Math.max(clean.length, entry.norm.length);
+            if (sim > bestSim) { bestSim = sim; best = entry.display; }
+        }
+        return best;
+    }
+
+    /* ================= STAGE 1: PREPROCESS + EDGES ================= */
+    function preprocessEdges(srcMat) {
+        const gray = new cv.Mat(), blurred = new cv.Mat(),
+              edges = new cv.Mat(), closed = new cv.Mat();
+        try {
+            cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blurred,
+                new cv.Size(CFG.BLUR_KSIZE, CFG.BLUR_KSIZE), 0);
+            cv.Canny(blurred, edges, CFG.CANNY_LOW, CFG.CANNY_HIGH);
+            const kernel = cv.getStructuringElement(cv.MORPH_RECT,
+                new cv.Size(CFG.MORPH_KSIZE, CFG.MORPH_KSIZE));
+            cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel);
+            kernel.delete();
+            return closed;
+        } finally {
+            gray.delete(); blurred.delete(); edges.delete();
+        }
+    }
+
+    /* ================= STAGE 2: CONTOURS -> CARD QUADS ================= */
+    function orderCorners(pts) {
+        // Sort 4 points: TL, TR, BR, BL
+        const bySum   = pts.slice().sort((a, b) => (a.x + a.y) - (b.x + b.y));
+        const byDiff  = pts.slice().sort((a, b) => (a.y - a.x) - (b.y - b.x));
+        return [bySum[0], byDiff[0], bySum[3], byDiff[3]]; // TL, TR, BR, BL
+    }
+
+    function findCardQuads(edgeMat, imgArea) {
+        const contours = new cv.MatVector(), hierarchy = new cv.Mat();
+        const quads = [];
+        try {
+            cv.findContours(edgeMat, contours, hierarchy,
+                cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            for (let i = 0; i < contours.size(); i++) {
+                const cnt = contours.get(i);
+                const area = cv.contourArea(cnt);
+                if (area < imgArea * CFG.CARD_MIN_AREA_FRAC ||
+                    area > imgArea * CFG.CARD_MAX_AREA_FRAC) { cnt.delete(); continue; }
+
+                // Use min-area rect: tolerant of slightly rounded corners
+                const rect = cv.minAreaRect(cnt);
+                const w = Math.max(rect.size.width, rect.size.height);
+                const h = Math.min(rect.size.width, rect.size.height);
+                cnt.delete();
+                if (!h) continue;
+                const aspect = w / h;
+                if (aspect < CFG.ASPECT_MIN || aspect > CFG.ASPECT_MAX) continue;
+                if ((w * h) > 0 && area / (w * h) < 0.75) continue; // not solidly rectangular
+
+                const box = cv.RotatedRect.points(rect);   // 4 corner points
+                quads.push({
+                    corners: orderCorners(box.map(p => ({ x: p.x, y: p.y }))),
+                    cx: rect.center.x, cy: rect.center.y,
+                    area: area
+                });
+            }
+        } finally {
+            contours.delete(); hierarchy.delete();
+        }
+
+        // Deduplicate nested/duplicate detections of the same card
+        quads.sort((a, b) => b.area - a.area);
+        const kept = [];
+        for (const q of quads) {
+            const dupe = kept.some(k =>
+                Math.hypot(k.cx - q.cx, k.cy - q.cy) < Math.sqrt(k.area) * 0.5);
+            if (!dupe) kept.push(q);
+        }
+        return kept;
+    }
+
+    /* ================= STAGE 2b: SORT QUADS INTO 5x5 GRID ================= */
+    function gridSort(quads) {
+        if (!quads.length) return [];
+        const sorted = quads.slice().sort((a, b) => a.cy - b.cy);
+        const rows = [];
+        let row = [sorted[0]];
+        const rowTol = Math.sqrt(sorted[0].area) * 0.6;
         for (let i = 1; i < sorted.length; i++) {
-            if (sorted[i] - sorted[i - 1] > threshold) groups.push([sorted[i]]);
-            else groups[groups.length - 1].push(sorted[i]);
+            const prevY = row.reduce((s, q) => s + q.cy, 0) / row.length;
+            if (Math.abs(sorted[i].cy - prevY) < rowTol) row.push(sorted[i]);
+            else { rows.push(row); row = [sorted[i]]; }
         }
-        while (groups.length > maxGroups) {
-            let bestI = 0, bestGap = Infinity;
-            for (let i = 0; i < groups.length - 1; i++) {
-                const gap = groups[i + 1][0] - groups[i][groups[i].length - 1];
-                if (gap < bestGap) { bestGap = gap; bestI = i; }
+        rows.push(row);
+        rows.forEach(r => r.sort((a, b) => a.cx - b.cx));
+        return rows;
+    }
+
+    /* ================= STAGE 2c/3: WARP + CROP + OTSU ================= */
+    function warpAndBinarize(srcMat, quad) {
+        const [tl, tr, br, bl] = quad.corners;
+        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2,
+            [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
+        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2,
+            [0, 0, CFG.WARP_W, 0, CFG.WARP_W, CFG.WARP_H, 0, CFG.WARP_H]);
+
+        const M = cv.getPerspectiveTransform(srcTri, dstTri);
+        const warped = new cv.Mat();
+        cv.warpPerspective(srcMat, warped, M,
+            new cv.Size(CFG.WARP_W, CFG.WARP_H),
+            cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+        srcTri.delete(); dstTri.delete(); M.delete();
+
+        // Center crop: remove borders/shadows
+        const mx = Math.round(CFG.WARP_W * CFG.CROP_MARGIN);
+        const my = Math.round(CFG.WARP_H * CFG.CROP_MARGIN);
+        const roi = warped.roi(new cv.Rect(mx, my,
+            CFG.WARP_W - 2 * mx, CFG.WARP_H - 2 * my));
+
+        // Otsu binarize -> black text on white
+        const gray = new cv.Mat(), bin = new cv.Mat();
+        cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY);
+        cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+
+        // If mostly black, polarity is inverted: flip it
+        if (cv.countNonZero(bin) < bin.rows * bin.cols / 2) {
+            cv.bitwise_not(bin, bin);
+        }
+
+        const canvas = document.createElement('canvas');
+        cv.imshow(canvas, bin);
+
+        roi.delete(); warped.delete(); gray.delete(); bin.delete();
+        return canvas;
+    }
+
+    /* ================= STAGE 4: TESSERACT POOL ================= */
+    async function getPool() {
+        if (workerPool) return workerPool;
+        const n = Math.min(CFG.WORKER_COUNT,
+            navigator.hardwareConcurrency || 2);
+        workerPool = await Promise.all(
+            Array.from({ length: n }, async function () {
+                const w = await Tesseract.createWorker('eng');
+                await w.setParameters({
+                    tessedit_pageseg_mode: '8',   // single word
+                    tessedit_char_whitelist:
+                        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+                });
+                return w;
+            })
+        );
+        return workerPool;
+    }
+
+    async function recognizeAll(canvases, statusCb) {
+        const pool = await getPool();
+        const results = new Array(canvases.length).fill(null);
+        let next = 0, done = 0;
+
+        await Promise.all(pool.map(async function (w) {
+            while (next < canvases.length) {
+                const idx = next++;
+                if (!canvases[idx]) { done++; continue; }
+                try {
+                    const r = await w.recognize(canvases[idx]);
+                    results[idx] = (r.data.text || '').trim();
+                } catch (e) {
+                    console.warn('OCR failed for card', idx, e);
+                    results[idx] = null;                 // graceful per-card failure
+                }
+                statusCb('Reading cards… ' + (++done) + '/' + canvases.length);
             }
-            groups[bestI] = groups[bestI].concat(groups[bestI + 1]);
-            groups.splice(bestI + 1, 1);
+        }));
+        return results;
+    }
+
+    /* ================= CORE PIPELINE ================= */
+    async function extractBoardWords(imageSource, statusCb) {
+        statusCb = statusCb || function () {};
+        await cvReady();
+
+        // Normalize input to a bounded canvas
+        const iw = imageSource.width || imageSource.naturalWidth;
+        const ih = imageSource.height || imageSource.naturalHeight;
+        const scale = Math.min(1, CFG.MAX_DIM / Math.max(iw, ih));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(iw * scale);
+        canvas.height = Math.round(ih * scale);
+        canvas.getContext('2d').drawImage(imageSource, 0, 0, canvas.width, canvas.height);
+
+        const src = cv.imread(canvas);
+        let cardCanvases = [], gridRows = [];
+        try {
+            statusCb('Detecting card edges…');
+            const edgeMat = preprocessEdges(src);
+            let quads;
+            try {
+                quads = findCardQuads(edgeMat, canvas.width * canvas.height);
+            } finally {
+                edgeMat.delete();
+            }
+
+            if (quads.length < 8) {
+                throw new Error('Only ' + quads.length +
+                    ' card(s) detected — retake photo with the full board, ' +
+                    'even lighting, and a contrasting background.');
+            }
+
+            gridRows = gridSort(quads);
+            const flat = gridRows.flat();
+            statusCb('Found ' + flat.length + ' cards. Flattening…');
+
+            cardCanvases = flat.map(function (q, i) {
+                try { return warpAndBinarize(src, q); }
+                catch (e) {
+                    console.warn('Warp failed for card', i, e);
+                    return null;                          // unresolved contour: skip
+                }
+            });
+        } finally {
+            src.delete();
         }
-        return groups.map(function (g) {
-            return g.reduce(function (a, b) { return a + b; }, 0) / g.length;
-        });
-    }
 
-    function nearestIndex(centers, v) {
-        let bi = 0, bd = Infinity;
-        for (let i = 0; i < centers.length; i++) {
-            const d = Math.abs(centers[i] - v);
-            if (d < bd) { bd = d; bi = i; }
+        const rawWords = await recognizeAll(cardCanvases, statusCb);
+
+        // Rebuild 5x5 structure following the physical row layout
+        const board = [];
+        let k = 0;
+        for (const row of gridRows) {
+            const outRow = [];
+            for (let c = 0; c < row.length; c++) {
+                const matched = forceMatch(rawWords[k++]);
+                outRow.push(matched || null);
+            }
+            board.push(outRow);
         }
-        return bi;
-    }
-
-    function toGrid(words) {
-        const grid = new Array(25).fill(null);
-        if (!words.length) return { grid: grid, score: 0, filled: 0 };
-        const rowCenters = clusterAxis(words.map(function (w) { return w.y; }), 5);
-        const colCenters = clusterAxis(words.map(function (w) { return w.x; }), 5);
-        let score = 0, filled = 0;
-        words.forEach(function (w) {
-            const row = nearestIndex(rowCenters, w.y);
-            const col = nearestIndex(colCenters, w.x);
-            const idx = Math.min(24, row * 5 + col);
-            if (!grid[idx]) { filled++; score += w.sim; grid[idx] = w; }
-            else if (w.sim > grid[idx].sim) { score += w.sim - grid[idx].sim; grid[idx] = w; }
+        // Pad/trim to strict 5x5
+        while (board.length < 5) board.push([null, null, null, null, null]);
+        board.length = 5;
+        board.forEach(function (r) {
+            while (r.length < 5) r.push(null);
+            r.length = 5;
         });
-        return { grid: grid, score: score, filled: filled };
+        return board;
     }
 
-    function dedupeGrid(grid) {
-        const seen = new Map();
-        grid.forEach(function (cell, i) {
-            if (!cell) return;
-            const prev = seen.get(cell.word);
-            if (prev === undefined) { seen.set(cell.word, i); return; }
-            if (cell.sim > grid[prev].sim) { grid[prev] = null; seen.set(cell.word, i); }
-            else grid[i] = null;
-        });
-        return grid;
-    }
+    /* ================= PUBLIC API ================= */
+    window.extractBoardWords = extractBoardWords;
 
-    /* ---------- image variants ---------- */
-    function cloneCanvas(src, scale) {
-        scale = scale || 1;
-        const dst = document.createElement('canvas');
-        dst.width = Math.round(src.width * scale);
-        dst.height = Math.round(src.height * scale);
-        const ctx = dst.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(src, 0, 0, dst.width, dst.height);
-        return dst;
-    }
-
-    function grayContrast(src, amount) {
-        const c = cloneCanvas(src);
-        const ctx = c.getContext('2d');
-        const img = ctx.getImageData(0, 0, c.width, c.height);
-        const d = img.data;
-        for (let i = 0; i < d.length; i += 4) {
-            const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const v = Math.max(0, Math.min(255, (g - 128) * amount + 128));
-            d[i] = d[i + 1] = d[i + 2] = v;
-        }
-        ctx.putImageData(img, 0, 0);
-        return c;
-    }
-
-    function rotate180(src) {
-        const dst = document.createElement('canvas');
-        dst.width = src.width;
-        dst.height = src.height;
-        const ctx = dst.getContext('2d');
-        ctx.translate(src.width / 2, src.height / 2);
-        ctx.rotate(Math.PI);
-        ctx.drawImage(src, -src.width / 2, -src.height / 2);
-        return dst;
-    }
-
-    /* ---------- public API ---------- */
     window.scanWordFromImage = async function (file, statusCb) {
         statusCb = statusCb || function () {};
         try {
-            if (!getDict()) {
-                throw new Error('WORD_PAIRS not found — wordpairs.js must load first.');
-            }
+            if (typeof Tesseract === 'undefined')
+                throw new Error('tesseract.js not loaded.');
 
-            statusCb('Loading OCR model…');
-            const svc = await getService();
-
+            statusCb('Loading image…');
             const url = URL.createObjectURL(file);
             const img = new Image();
             await new Promise(function (res, rej) {
                 img.onload = res; img.onerror = rej; img.src = url;
             });
-            const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
-            const base = document.createElement('canvas');
-            base.width = Math.round(img.width * scale);
-            base.height = Math.round(img.height * scale);
-            base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
             URL.revokeObjectURL(url);
 
-            const variants = [
-                { name: 'raw',      make: function () { return cloneCanvas(base); } },
-                { name: 'contrast', make: function () { return grayContrast(base, 1.3); } }
-            ];
+            const board = await extractBoardWords(img, statusCb);
 
-            let best = null, bestLabel = '', bestFlipped = false;
-
-            for (let v = 0; v < variants.length; v++) {
-                const canvas = variants[v].make();
-
-                statusCb('Reading board — ' + variants[v].name + ' (upright)…');
-                const r1 = await runOcr(svc, canvas);
-                const up = toGrid(harvest(normalizeResults(r1), canvas.width, canvas.height));
-                if (!best || up.score > best.score) {
-                    best = up; bestLabel = variants[v].name; bestFlipped = false;
-                }
-                if (best.filled >= GOOD_ENOUGH) break;
-
-                statusCb('Reading board — ' + variants[v].name + ' (flipped)…');
-                const flipped = rotate180(canvas);
-                const r2 = await runOcr(svc, flipped);
-                const down = toGrid(harvest(normalizeResults(r2), flipped.width, flipped.height));
-                if (down.score > best.score) {
-                    best = down; bestLabel = variants[v].name; bestFlipped = true;
-                }
-                if (best.filled >= GOOD_ENOUGH) break;
-            }
-
-            dedupeGrid(best.grid);
-
-            console.log('Scan variant used:', bestLabel, bestFlipped ? '(flipped)' : '(upright)');
-            console.log('Scan result grid:', best.grid.map(function (c) {
-                return c ? c.word + ' (' + c.sim.toFixed(2) + ')' : '—';
-            }));
-
+            // Write into the DOM board
             const cells = Array.prototype.slice.call(
-                document.getElementById('board').querySelectorAll('.cell')
-            );
+                document.getElementById('board').querySelectorAll('.cell'));
             let filled = 0;
-            best.grid.forEach(function (entry, i) {
-                if (entry && cells[i]) {
-                    cells[i].querySelector('.cell-text').textContent = entry.word.toLowerCase();
+            board.flat().forEach(function (word, i) {
+                if (word && cells[i]) {
+                    cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
                     filled++;
                 }
             });
 
-            if (!filled) {
-                statusCb('OCR found no text.');
-                return 0;
-            }
+            console.log('Board result:', board);
+            if (!filled) { statusCb('No readable cards found.'); return 0; }
 
             if (typeof updateStats === 'function') updateStats();
             if (typeof saveCurrentState === 'function') saveCurrentState();
-
-            statusCb('Filled ' + filled + ' of 25 cells using ' + bestLabel +
-                (bestFlipped ? ' (photo upside down — corrected)' : '') + '.');
+            statusCb('Filled ' + filled + ' of 25 cells.');
             return filled;
         } catch (e) {
             console.error(e);
