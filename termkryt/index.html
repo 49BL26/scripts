@@ -457,10 +457,10 @@
 <script src="shareboard.js"></script>
 
 <script>
-	/* ============================================================
+/* ============================================================
    MODAL SYSTEM (replaces alert / confirm / prompt)
    ============================================================ */
-
+   
     // Better: show a simple status modal using existing UI
 const overlay = document.getElementById('modal-overlay');
 const modalTitle   = document.getElementById('modal-title');
@@ -706,7 +706,6 @@ function executeCommand(raw) {
     const arg = args.slice(1).join(' ');
 
     const commands = {
-		'log':             () => displayLogHistoryModal()
         'invert':          () => invertColors(),
         'flip-h':          () => flipBoardH(),
         'flip-v':          () => flipBoardV(),
