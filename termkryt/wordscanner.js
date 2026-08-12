@@ -1,52 +1,70 @@
 /* ============================================================
-   WORD SCANNER — force-match every token to the word list
-   2 OCR passes (upright + flipped). No OpenCV. No rejection.
+   WORD SCANNER — full-board OCR, force-matched to WORD_PAIRS
+   ------------------------------------------------------------
+   - 2 OCR passes total (upright + flipped 180°); better one wins
+   - Every OCR token is mapped to the CLOSEST dictionary word.
+     Nothing is rejected; the word list itself is the filter.
+   - Adjacent tokens merge when the pair matches a dictionary
+     entry better than either alone (NEW + YORK -> NEW YORK).
+   - Words are placed into the 5x5 grid by bounding-box position.
+   - Duplicate dictionary words: better match keeps the cell.
+   ------------------------------------------------------------
+   Load order in HTML:
+     tesseract.js  ->  wordpairs.js  ->  wordscanner.js
+   Exposes: window.scanWordFromImage(file, statusCb) -> count
    ============================================================ */
 (function () {
     'use strict';
 
-    const MAX_DIM = 2000;
+    const MAX_DIM = 2000;   // downscale limit for huge photos
 
-    // Dictionary from WORD_PAIRS
+    /* ---------- dictionary from WORD_PAIRS ---------- */
     const DICT_ENTRIES = (function () {
         const map = new Map();
-        (window.WORD_PAIRS || []).forEach(pair => pair.forEach(w => {
-            const n = w.toUpperCase().replace(/[^A-Z]/g, '');
-            if (n.length >= 2) map.set(n, w.toUpperCase());
-        }));
-        return [...map].map(([norm, display]) => ({ norm, display }));
+        (window.WORD_PAIRS || []).forEach(function (pair) {
+            pair.forEach(function (w) {
+                const n = w.toUpperCase().replace(/[^A-Z]/g, '');
+                if (n.length >= 2 && !map.has(n)) map.set(n, w.toUpperCase());
+            });
+        });
+        return Array.from(map, function (e) { return { norm: e[0], display: e[1] }; });
     })();
 
     let worker = null;
 
-    const norm = s => (s || '').toUpperCase().replace(/[^A-Z]/g, '');
+    /* ---------- helpers ---------- */
+    function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
+    // Levenshtein similarity ratio, 0..1
     function similarity(a, b) {
         if (!a.length || !b.length) return 0;
-        const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
-        for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-        for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-        for (let i = 1; i <= a.length; i++)
-            for (let j = 1; j <= b.length; j++)
+        const dp = [];
+        for (let i = 0; i <= a.length; i++) { dp.push([i]); }
+        for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+        for (let i = 1; i <= a.length; i++) {
+            for (let j = 1; j <= b.length; j++) {
                 dp[i][j] = Math.min(
-                    dp[i-1][j] + 1,
-                    dp[i][j-1] + 1,
-                    dp[i-1][j-1] + (a[i-1] !== b[j-1] ? 1 : 0)
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
                 );
+            }
+        }
         return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
     }
 
-    // ALWAYS returns the closest dictionary word — never null
+    // ALWAYS returns the closest dictionary word — never null.
     function bestDictWord(raw) {
         const clean = norm(raw);
-        let best = { display: DICT_ENTRIES[0] ? DICT_ENTRIES[0].display : raw, sim: -1 };
-        for (const e of DICT_ENTRIES) {
-            const s = similarity(clean, e.norm);
-            if (s > best.sim) best = { display: e.display, sim: s };
+        let best = { display: null, sim: -1 };
+        for (let i = 0; i < DICT_ENTRIES.length; i++) {
+            const s = similarity(clean, DICT_ENTRIES[i].norm);
+            if (s > best.sim) best = { display: DICT_ENTRIES[i].display, sim: s };
         }
-        return best;   // { display, sim }
+        return best;
     }
 
+    /* ---------- Tesseract worker (cached) ---------- */
     async function getWorker() {
         if (!worker) {
             worker = await Tesseract.createWorker('eng', 1, {
@@ -57,61 +75,67 @@
             await worker.setParameters({
                 tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
                 preserve_interword_spaces: '1',
-                tessedit_pageseg_mode: '11'
+                tessedit_pageseg_mode: '11'   // sparse text with word boxes
             });
         }
         return worker;
     }
 
+    /* ---------- image processing ---------- */
     function enhance(canvas) {
         const ctx = canvas.getContext('2d');
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const d = img.data;
         for (let i = 0; i < d.length; i += 4) {
-            const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+            const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
             const v = Math.max(0, Math.min(255, (g - 128) * 1.3 + 128));
-            d[i] = d[i+1] = d[i+2] = v;
+            d[i] = d[i + 1] = d[i + 2] = v;
         }
         ctx.putImageData(img, 0, 0);
     }
 
     function rotate180(src) {
         const dst = document.createElement('canvas');
-        dst.width = src.width; dst.height = src.height;
+        dst.width = src.width;
+        dst.height = src.height;
         const ctx = dst.getContext('2d');
-        ctx.translate(src.width/2, src.height/2);
+        ctx.translate(src.width / 2, src.height / 2);
         ctx.rotate(Math.PI);
-        ctx.drawImage(src, -src.width/2, -src.height/2);
+        ctx.drawImage(src, -src.width / 2, -src.height / 2);
         return dst;
     }
 
-    /* Collect raw tokens with boxes. Merge horizontally-adjacent tokens
-       when the pair is closer to a dictionary entry than either alone. */
+    /* ---------- token harvest + adjacent-token merging ---------- */
     function harvest(data, W, H) {
         const tokens = [];
-        (data.words || []).forEach(w => {
+        (data.words || []).forEach(function (w) {
             const raw = (w.text || '').toUpperCase().trim();
-            if (norm(raw).length < 2) return;          // only real filter: noise
+            if (norm(raw).length < 2) return;   // skip pure noise fragments
             tokens.push({
-                raw,
+                raw: raw,
                 conf: w.confidence || 0,
                 x0: w.bbox.x0 / W, y0: w.bbox.y0 / H,
                 x1: w.bbox.x1 / W, y1: w.bbox.y1 / H
             });
         });
 
-        // Merge pass: try joining each token with its right neighbor
-        tokens.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+        // Merge pass: join a token with its right neighbour when the
+        // joined string matches the dictionary better than either alone.
+        tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
         const merged = [];
         let cur = null;
-        for (const tok of tokens) {
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
             if (cur) {
                 const sameLine = tok.y0 < cur.y1 && tok.y1 > cur.y0;
-                const close = (tok.x0 - cur.x1) < 0.04;
+                const close = (tok.x0 - cur.x1) < 0.05;
                 if (sameLine && close) {
-                    const joined = bestDictWord(cur.raw + tok.raw);
-                    const solo = Math.max(bestDictWord(cur.raw).sim, bestDictWord(tok.raw).sim);
-                    if (joined.sim > solo) {           // pair beats both singles
+                    const joined = bestDictWord(cur.raw + ' ' + tok.raw);
+                    const soloBest = Math.max(
+                        bestDictWord(cur.raw).sim,
+                        bestDictWord(tok.raw).sim
+                    );
+                    if (joined.sim > soloBest) {
                         cur = {
                             raw: cur.raw + ' ' + tok.raw,
                             conf: Math.max(cur.conf, tok.conf),
@@ -127,12 +151,12 @@
         }
         if (cur) merged.push(cur);
 
-        // Force-match every token — nothing is dropped
-        return merged.map(item => {
+        // Force-match every merged token to a dictionary word.
+        return merged.map(function (item) {
             const m = bestDictWord(item.raw);
             return {
                 word: m.display,
-                sim: m.sim,                         // match quality, used for dedupe
+                sim: m.sim,
                 conf: item.conf,
                 x: (item.x0 + item.x1) / 2,
                 y: (item.y0 + item.y1) / 2
@@ -140,54 +164,66 @@
         });
     }
 
+    /* ---------- map words to the 5x5 grid ---------- */
     function toGrid(words) {
-        if (!words.length) return { grid: Array(25).fill(null), score: 0 };
-        const xs = words.map(w => w.x), ys = words.map(w => w.y);
-        const x0 = Math.min(...xs), x1 = Math.max(...xs);
-        const y0 = Math.min(...ys), y1 = Math.max(...ys);
-        const spanX = Math.max(x1 - x0, 0.01), spanY = Math.max(y1 - y0, 0.01);
+        if (!words.length) return { grid: new Array(25).fill(null), score: 0 };
+        const xs = words.map(function (w) { return w.x; });
+        const ys = words.map(function (w) { return w.y; });
+        const x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+        const y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+        const spanX = Math.max(x1 - x0, 0.01);
+        const spanY = Math.max(y1 - y0, 0.01);
 
-        const grid = Array(25).fill(null);
+        const grid = new Array(25).fill(null);
         let score = 0;
-        words.forEach(w => {
+        words.forEach(function (w) {
             const col = Math.min(4, Math.max(0, Math.round(((w.x - x0) / spanX) * 4)));
             const row = Math.min(4, Math.max(0, Math.round(((w.y - y0) / spanY) * 4)));
             const idx = row * 5 + col;
-            // Better match quality wins the cell
             if (!grid[idx] || w.sim > grid[idx].sim) {
                 if (!grid[idx]) score += w.sim;
                 grid[idx] = w;
             }
         });
-        return { grid, score };
+        return { grid: grid, score: score };
     }
 
-    /* Same dictionary word claimed by two cells? Keep the better match,
-       re-run the loser's raw text... simplest: just clear duplicates. */
+    /* ---------- one dictionary word per board ---------- */
     function dedupeGrid(grid) {
-        const seen = new Map();  // word -> index of best cell
-        grid.forEach((cell, i) => {
+        const seen = new Map();   // word -> cell index of best match
+        grid.forEach(function (cell, i) {
             if (!cell) return;
             const prev = seen.get(cell.word);
             if (prev === undefined) { seen.set(cell.word, i); return; }
-            // keep the higher-sim one
-            if (cell.sim > grid[prev].sim) { grid[prev] = null; seen.set(cell.word, i); }
-            else grid[i] = null;
+            if (cell.sim > grid[prev].sim) {
+                grid[prev] = null;
+                seen.set(cell.word, i);
+            } else {
+                grid[i] = null;
+            }
         });
         return grid;
     }
 
+    /* ---------- public API ---------- */
     window.scanWordFromImage = async function (file, statusCb) {
         statusCb = statusCb || function () {};
         try {
-            if (typeof Tesseract === 'undefined')
-                throw new Error('Tesseract not loaded — check script tag.');
-            if (!DICT_ENTRIES.length)
-                throw new Error('WORD_PAIRS empty — wordpairs.js must load first.');
+            if (typeof Tesseract === 'undefined') {
+                throw new Error('Tesseract not loaded — check script tag order.');
+            }
+            if (!DICT_ENTRIES.length) {
+                throw new Error('WORD_PAIRS is empty — wordpairs.js must load before wordscanner.js.');
+            }
 
+            // Load and downscale the photo
             const url = URL.createObjectURL(file);
             const img = new Image();
-            await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+            await new Promise(function (res, rej) {
+                img.onload = res;
+                img.onerror = rej;
+                img.src = url;
+            });
             const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
             const canvas = document.createElement('canvas');
             canvas.width = Math.round(img.width * scale);
@@ -198,29 +234,35 @@
 
             const w = await getWorker();
 
+            // Pass 1: upright
             statusCb('Reading board (pass 1 of 2)…');
             const res1 = await w.recognize(canvas);
             const up = toGrid(harvest(res1.data, canvas.width, canvas.height));
 
+            // Pass 2: flipped 180°
             statusCb('Reading board (pass 2 of 2)…');
             const flipped = rotate180(canvas);
             const res2 = await w.recognize(flipped);
             const down = toGrid(harvest(res2.data, flipped.width, flipped.height));
 
+            // Better total match quality wins
             const winner = down.score > up.score ? down : up;
             dedupeGrid(winner.grid);
 
             console.log('Scan result grid:',
-                winner.grid.map(c => c ? `${c.word} (${c.sim.toFixed(2)})` : '—'));
+                winner.grid.map(function (c) {
+                    return c ? c.word + ' (' + c.sim.toFixed(2) + ')' : '—';
+                }));
 
             if (!winner.grid.some(Boolean)) {
                 statusCb('OCR returned zero tokens — image unreadable.');
                 return 0;
             }
 
-            const cells = [...board.querySelectorAll('.cell')];
+            // Fill the board
+            const cells = Array.prototype.slice.call(board.querySelectorAll('.cell'));
             let filled = 0;
-            winner.grid.forEach((entry, i) => {
+            winner.grid.forEach(function (entry, i) {
                 if (entry) {
                     cells[i].querySelector('.cell-text').textContent = entry.word;
                     filled++;
@@ -229,7 +271,8 @@
 
             updateStats();
             saveCurrentState();
-            statusCb(`Filled ${filled} of 25 cells${winner === down ? ' (photo upside down — corrected)' : ''}.`);
+            statusCb('Filled ' + filled + ' of 25 cells' +
+                (winner === down ? ' (photo upside down — corrected)' : '') + '.');
             return filled;
         } catch (e) {
             console.error(e);
