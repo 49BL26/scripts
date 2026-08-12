@@ -48,30 +48,74 @@
     /* ---------- string matching ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-function similarity(a, b) {
+// --- ENGINE 1: Matrix Alignment (Handles insertions/deletions/swaps) ---
+function matrixSimilarity(a, b) {
     if (!a.length || !b.length) return 0;
+    
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+    
+    for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+            dp[i][j] = Math.min(
+                dp[i - 1][j] + 1,                                  // Deletion
+                dp[i][j - 1] + 1,                                  // Insertion
+                dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0) // Substitution
+            );
+        }
+    }
+    return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
+}
 
-    // Strict length variance constraint (adjust to 0 if you want an absolute match)
-    const lenDiff = Math.abs(a.length - b.length);
-    if (lenDiff > 2) return 0;       
-  
+// --- ENGINE 2: Slot Alignment (Locks letter order, blocks trailing substring cuts) ---
+function slotSimilarity(a, b) {
+    if (!a.length || !b.length) return 0;
+    
     const maxLen = Math.max(a.length, b.length);
     const minLen = Math.min(a.length, b.length);
     let mismatches = 0;
 
-    // 1. Check positions character-by-character up to the shorter word's length
     for (let i = 0; i < minLen; i++) {
-        if (a[i] !== b[i]) {
-            mismatches++;
+        if (a[i] !== b[i]) mismatches++;
+    }
+    mismatches += Math.abs(a.length - b.length); // Add trailing penalty
+
+    return 1 - (mismatches / maxLen);
+}
+
+// --- THE CONTROLLER: Cross-evaluates both scoring algorithms ---
+function bestDictWord(raw) {
+    const dict = getDict();
+    const clean = norm(raw);
+    
+    if (!clean.length) return { display: null, sim: -1 };
+
+    let best = { display: null, sim: -1 };
+
+    for (let i = 0; i < dict.length; i++) {
+        const dictWord = dict[i].norm;
+        
+        // Skip extreme size variations upfront
+        if (Math.abs(clean.length - dictWord.length) > 2) continue;
+
+        // Run both evaluation methods
+        const scoreSlot = slotSimilarity(clean, dictWord);
+        const scoreMatrix = matrixSimilarity(clean, dictWord);
+
+        // ALGORITHMIC SELECTION RULE:
+        // Prioritize slot alignment if it scores reasonably well (prevents phantom offsets),
+        // but fall back to the structural matrix if a clear length shift or typo happened.
+        let combinedScore = Math.max(scoreSlot * 1.05, scoreMatrix);
+
+        if (combinedScore > best.sim) {
+            best = { display: dict[i].display, sim: combinedScore };
         }
     }
 
-    // 2. CRITICAL: Add all leftover un-matched trailing characters to the penalty
-    mismatches += lenDiff;
-
-    // Return the true ratio of correct characters
-    return 1 - (mismatches / maxLen);
+    return best;
 }
+
    
 /*old similarity function, worked well
 function similarity(a, b) {
@@ -92,7 +136,7 @@ function similarity(a, b) {
             }
         }
         return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
-    } */
+    } 
 
     function bestDictWord(raw) {
         const dict = getDict();
@@ -103,7 +147,7 @@ function similarity(a, b) {
             if (s > best.sim) best = { display: dict[i].display, sim: s };
         }
         return best;
-    }
+    } */
 
     function bestDictWord(raw) {
         const dict = getDict();
