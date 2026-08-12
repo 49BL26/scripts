@@ -417,23 +417,25 @@
         <div class="modal-buttons" id="modal-buttons"></div>
     </div>
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script src="https://unpkg.com/tesseract.js@4/dist/tesseract.min.js"></script>
-<script src="keycards.js"></script>
-<script src="wordpairs.js"></script>
-<script src="wordscanner.js"></script>
-<script src="sshareboard.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://mijustrenoha.github.io/scripts/termkryt/keycards.js"></script>
+<script src="https://mijustrenoha.github.io/scripts/termkryt/wordpairs.js"></script>
+<script src="https://mijustrenoha.github.io/scripts/termkryt/wordscanner.js"></script>
+<script src="https://mijustrenoha.github.io/scripts/termkryt/shareboard.js"></script>
 
 <script>
 /* ============================================================
    MODAL SYSTEM (replaces alert / confirm / prompt)
    ============================================================ */
+   
+    // Better: show a simple status modal using existing UI
+const overlay = document.getElementById('modal-overlay');
 const modalTitle   = document.getElementById('modal-title');
 const modalMessage = document.getElementById('modal-message');
 const modalInput   = document.getElementById('modal-input');
 const modalArea    = document.getElementById('modal-area');
 const modalButtons = document.getElementById('modal-buttons');
+const board = document.getElementById('board');
 
 let modalResolve = null;
 let modalField = null;
@@ -712,8 +714,6 @@ document.addEventListener('keydown', e => {
 });
 
 
-    // Better: show a simple status modal using existing UI
-    const overlay = document.getElementById('modal-overlay');
 	
 
 /* ============================================================
@@ -1146,7 +1146,7 @@ async function uiPromptWord(message, defaultValue = '', opts = {}) {
 /* ============================================================
    BOARD STATE
    ============================================================ */
-const board = document.getElementById('board');
+
 const COLORS = ['red','blue','black','white'];
 let currentRotation = 0;
 let isFlipped = false;
@@ -1898,8 +1898,8 @@ document.getElementById('scan-file').addEventListener('change', async function (
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     const n = await scanWordFromImage(file, m => console.log(m));
-    if (n) uiAlert('Scanned and filled ' + n + ' cells. Fix any misreads via Manual Edit.', 'Scan Complete');
-    else uiAlert('No readable words found. Try a straighter, brighter photo.', 'Scan Failed');
+    if (n > 0) uiAlert('Scanned and filled ' + n + ' cells. Fix misreads via Manual Edit.', 'Scan Complete');
+    else uiAlert('Still nothing readable. Try: square-on photo, flat lighting, no glare.', 'Scan Failed');
     e.target.value = '';
 });
 </script>
