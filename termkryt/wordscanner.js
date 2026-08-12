@@ -48,7 +48,33 @@
     /* ---------- string matching ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-    function similarity(a, b) {
+function similarity(a, b) {
+    if (!a.length || !b.length) return 0;
+
+    // Strict length variance constraint (adjust to 0 if you want an absolute match)
+    const lenDiff = Math.abs(a.length - b.length);
+    if (lenDiff > 2) return 0;       
+  
+    const maxLen = Math.max(a.length, b.length);
+    const minLen = Math.min(a.length, b.length);
+    let mismatches = 0;
+
+    // 1. Check positions character-by-character up to the shorter word's length
+    for (let i = 0; i < minLen; i++) {
+        if (a[i] !== b[i]) {
+            mismatches++;
+        }
+    }
+
+    // 2. CRITICAL: Add all leftover un-matched trailing characters to the penalty
+    mismatches += lenDiff;
+
+    // Return the true ratio of correct characters
+    return 1 - (mismatches / maxLen);
+}
+   
+/*old similarity function, worked well
+function similarity(a, b) {
         if (!a.length || !b.length) return 0;
 
         if (Math.abs(a.length - b.length) > 0) return 0;
@@ -66,7 +92,7 @@
             }
         }
         return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
-    }
+    } */
 
     function bestDictWord(raw) {
         const dict = getDict();
