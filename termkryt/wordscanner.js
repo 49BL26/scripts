@@ -1,242 +1,3 @@
-(function () {
-    "use strict";
-
-    // Configuration Fallbacks (Assumed based on your context structure)
-    const CFG = {
-        WARP_W: 300,
-        WARP_H: 200,
-        CROP_MARGIN: 0.12, // Trim outer 12% to completely drop card lines
-        WORKER_COUNT: 4,
-        MAX_DIM: 1600
-    };
-
-    let workerPool = null;
-
-    // Fixed: Injected standard cleanup to replace the missing global forceMatch dependency
-    function forceMatch(text) {
-        if (!text) return null;
-        // Strip out lingering whitespace or rogue single-character noise
-        let cleaned = text.replace(/[^a-zA-Z]/g, '').trim();
-        return cleaned.length > 1 ? cleaned.toUpperCase() : null;
-    }
-
-    function cvReady() {
-        return new Promise((resolve) => {
-            if (typeof cv !== 'undefined' && cv.Mat) return resolve();
-            if (typeof cv !== 'undefined') {
-                cv.onRuntimeInitialized = resolve;
-            } else {
-                window.addEventListener('opencv-ready', resolve, { once: true });
-            }
-        });
-    }
-
-    /* ================= STAGE 2c/3: WARP + CROP + OTSU ================= */
-    function warpAndBinarize(srcMat, quad) {
-        const [tl, tr, br, bl] = quad.corners;
-        
-        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
-        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, CFG.WARP_W, 0, CFG.WARP_W, CFG.WARP_H, 0, CFG.WARP_H]);
-        
-        const M = cv.getPerspectiveTransform(srcTri, dstTri);
-        const warped = new cv.Mat();
-        
-        // Target matrices allocated safely for standard loop scope
-        let roi = null;
-        let gray = new cv.Mat();
-        let bin = new cv.Mat();
-        const canvas = document.createElement('canvas');
-
-        try {
-            cv.warpPerspective(srcMat, warped, M, new cv.Size(CFG.WARP_W, CFG.WARP_H), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
-
-            // Center crop calculations
-            const mx = Math.round(CFG.WARP_W * CFG.CROP_MARGIN);
-            const my = Math.round(CFG.WARP_H * CFG.CROP_MARGIN);
-            
-            // Fixed: Captured ROI into scoped variable to safely invoke clear operations later
-            roi = warped.roi(new cv.Rect(mx, my, CFG.WARP_W - 2 * mx, CFG.WARP_H - 2 * my));
-
-            // Otsu Binarization process
-            cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY);
-            cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
-
-            // Polar inversion correction
-            if (cv.countNonZero(bin) < (bin.rows * bin.cols) / 2) {
-                cv.bitwise_not(bin, bin);
-            }
-
-            cv.imshow(canvas, bin);
-        } finally {
-            // Fixed: Explicit, deep WebAssembly memory sweeps to actively target leak footprints
-            srcTri.delete(); 
-            dstTri.delete(); 
-            M.delete();
-            warped.delete(); 
-            gray.delete(); 
-            bin.delete();
-            if (roi) roi.delete();
-        }
-
-        return canvas;
-    }
-
-    /* ================= STAGE 4: TESSERACT POOL ================= */
-    async function getPool() {
-        if (workerPool) return workerPool;
-        const n = Math.min(CFG.WORKER_COUNT, navigator.hardwareConcurrency || 2);
-        
-        const localPool = [];
-        for (let i = 0; i < n; i++) {
-            // Fixed: Sequential generation patterns rather than simultaneous promises to ensure thread stability
-            const w = await Tesseract.createWorker('eng');
-            await w.setParameters({
-                tessedit_pageseg_mode: '8', // Force strict single word target processing
-                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-            });
-            localPool.push(w);
-        }
-        workerPool = localPool;
-        return workerPool;
-    }
-
-    async function recognizeAll(canvases, statusCb) {
-        const pool = await getPool();
-        const results = new Array(canvases.length).fill(null);
-        let next = 0, done = 0;
-
-        await Promise.all(pool.map(async function (w) {
-            while (next < canvases.length) {
-                const idx = next++;
-                if (!canvases[idx]) { done++; continue; }
-                try {
-                    const r = await w.recognize(canvases[idx]);
-                    results[idx] = (r.data.text || '').trim();
-                } catch (e) {
-                    console.warn('OCR failed for card', idx, e);
-                    results[idx] = null; 
-                }
-                statusCb('Reading cards… ' + (++done) + '/' + canvases.length);
-            }
-        }));
-        return results;
-    }
-
-    /* ================= CORE PIPELINE ================= */
-    async function extractBoardWords(imageSource, statusCb) {
-        statusCb = statusCb || function () {};
-        await cvReady();
-
-        const iw = imageSource.width || imageSource.naturalWidth;
-        const ih = imageSource.height || imageSource.naturalHeight;
-        const scale = Math.min(1, CFG.MAX_DIM / Math.max(iw, ih));
-        
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(iw * scale);
-        canvas.height = Math.round(ih * scale);
-        canvas.getContext('2d').drawImage(imageSource, 0, 0, canvas.width, canvas.height);
-
-        const src = cv.imread(canvas);
-        let cardCanvases = [], gridRows = [];
-        
-        try {
-            statusCb('Detecting card edges…');
-            const edgeMat = preprocessEdges(src);
-            let quads;
-            try {
-                quads = findCardQuads(edgeMat, canvas.width * canvas.height);
-            } finally {
-                edgeMat.delete();
-            }
-
-            if (quads.length < 8) {
-                throw new Error('Only ' + quads.length +
-                    ' card(s) detected — retake photo with the full board, ' +
-                    'even lighting, and a contrasting background.');
-            }
-
-            gridRows = gridSort(quads);
-            const flat = gridRows.flat();
-            statusCb('Found ' + flat.length + ' cards. Flattening…');
-
-            cardCanvases = flat.map(function (q, i) {
-                try { return warpAndBinarize(src, q); }
-                catch (e) {
-                    console.warn('Warp failed for card', i, e);
-                    return null; 
-                }
-            });
-        } finally {
-            src.delete(); // Critical cleanup point for original canvas matrix mapping context
-        }
-
-        const rawWords = await recognizeAll(cardCanvases, statusCb);
-
-        const board = [];
-        let k = 0;
-        for (const row of gridRows) {
-            const outRow = [];
-            for (let c = 0; c < row.length; c++) {
-                const matched = forceMatch(rawWords[k++]);
-                outRow.push(matched || null);
-            }
-            board.push(outRow);
-        }
-        
-        while (board.length < 5) board.push([null, null, null, null, null]);
-        board.length = 5;
-        board.forEach(function (r) {
-            while (r.length < 5) r.push(null);
-            r.length = 5;
-        });
-        return board;
-    }
-
-    /* ================= PUBLIC API ================= */
-    window.extractBoardWords = extractBoardWords;
-
-    window.scanWordFromImage = async function (file, statusCb) {
-        statusCb = statusCb || function () {};
-        try {
-            if (typeof Tesseract === 'undefined')
-                throw new Error('tesseract.js not loaded.');
-
-            statusCb('Loading image…');
-            const url = URL.createObjectURL(file);
-            const img = new Image();
-            await new Promise(function (res, rej) {
-                img.onload = res; img.onerror = rej; img.src = url;
-            });
-            URL.revokeObjectURL(url);
-
-            const board = await extractBoardWords(img, statusCb);
-            const cells = Array.prototype.slice.call(document.getElementById('board').querySelectorAll('.cell'));
-            let filled = 0;
-            
-            board.flat().forEach(function (word, i) {
-                if (word && cells[i]) {
-                    const textNode = cells[i].querySelector('.cell-text');
-                    if (textNode) {
-                        textNode.textContent = word.toLowerCase();
-                        filled++;
-                    }
-                }
-            });
-
-            console.log('Board result:', board);
-            if (!filled) { statusCb('No readable cards found.'); return 0; }
-
-            if (typeof updateStats === 'function') updateStats();
-            if (typeof saveCurrentState === 'function') saveCurrentState();
-            statusCb('Filled ' + filled + ' of 25 cells.');
-            return filled;
-        } catch (e) {
-            console.error(e);
-            statusCb('Scan error: ' + e.message);
-            return null;
-        }
-    };
-})();
 /* ============================================================
    WORD SCANNER v3 — OpenCV.js card isolation + Tesseract.js
    ------------------------------------------------------------
@@ -249,8 +10,7 @@
      6. Optional force-match against WORD_PAIRS
    ------------------------------------------------------------
    Load order: tesseract.js -> opencv.js -> wordpairs.js -> this
-   Exposes: window.scanWordFromImage(file, statusCb) -> count
-            window.extractBoardWords(imgOrCanvas)    -> 5x5 array
+   Exposes: window.scanBoardFromImage(imgElementOrCanvas, statusCb)
    ============================================================ */
 (function () {
     'use strict';
@@ -361,7 +121,6 @@
 
     /* ================= STAGE 2: CONTOURS -> CARD QUADS ================= */
     function orderCorners(pts) {
-        // Sort 4 points: TL, TR, BR, BL
         const bySum   = pts.slice().sort((a, b) => (a.x + a.y) - (b.x + b.y));
         const byDiff  = pts.slice().sort((a, b) => (a.y - a.x) - (b.y - b.x));
         return [bySum[0], byDiff[0], bySum[3], byDiff[3]]; // TL, TR, BR, BL
@@ -380,7 +139,6 @@
                 if (area < imgArea * CFG.CARD_MIN_AREA_FRAC ||
                     area > imgArea * CFG.CARD_MAX_AREA_FRAC) { cnt.delete(); continue; }
 
-                // Use min-area rect: tolerant of slightly rounded corners
                 const rect = cv.minAreaRect(cnt);
                 const w = Math.max(rect.size.width, rect.size.height);
                 const h = Math.min(rect.size.width, rect.size.height);
@@ -388,9 +146,9 @@
                 if (!h) continue;
                 const aspect = w / h;
                 if (aspect < CFG.ASPECT_MIN || aspect > CFG.ASPECT_MAX) continue;
-                if ((w * h) > 0 && area / (w * h) < 0.75) continue; // not solidly rectangular
+                if ((w * h) > 0 && area / (w * h) < 0.75) continue; 
 
-                const box = cv.RotatedRect.points(rect);   // 4 corner points
+                const box = cv.RotatedRect.points(rect);   
                 quads.push({
                     corners: orderCorners(box.map(p => ({ x: p.x, y: p.y }))),
                     cx: rect.center.x, cy: rect.center.y,
@@ -401,7 +159,6 @@
             contours.delete(); hierarchy.delete();
         }
 
-        // Deduplicate nested/duplicate detections of the same card
         quads.sort((a, b) => b.area - a.area);
         const kept = [];
         for (const q of quads) {
@@ -415,210 +172,64 @@
     /* ================= STAGE 2b: SORT QUADS INTO 5x5 GRID ================= */
     function gridSort(quads) {
         if (!quads.length) return [];
+        // Sort items globally from top to bottom
         const sorted = quads.slice().sort((a, b) => a.cy - b.cy);
         const rows = [];
         let row = [sorted[0]];
         const rowTol = Math.sqrt(sorted[0].area) * 0.6;
+
         for (let i = 1; i < sorted.length; i++) {
             const prevY = row.reduce((s, q) => s + q.cy, 0) / row.length;
-            if (Math.abs(sorted[i].cy - prevY) < rowTol) row.push(sorted[i]);
-            else { rows.push(row); row = [sorted[i]]; }
+            if (Math.abs(sorted[i].cy - prevY) < rowTol) {
+                row.push(sorted[i]);
+            } else {
+                rows.push(row);
+                row = [sorted[i]];
+            }
         }
         rows.push(row);
+
+        // **FIX**: Complete sorting left-to-right inside each row row-by-row
         rows.forEach(r => r.sort((a, b) => a.cx - b.cx));
-        return rows;
+        return rows.flat();
     }
 
-    /* ================= STAGE 2c/3: WARP + CROP + OTSU ================= */
-    function warpAndBinarize(srcMat, quad) {
-        const [tl, tr, br, bl] = quad.corners;
-        const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2,
-            [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
-        const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2,
-            [0, 0, CFG.WARP_W, 0, CFG.WARP_W, CFG.WARP_H, 0, CFG.WARP_H]);
+    /* ================= STAGE 3 & 4: WARP + PROCESSING FOR OCR ================= */
+    function extractCardTextMat(srcMat, quad) {
+    const dstMat = new cv.Mat();
+    const dsize = new cv.Size(CFG.WARP_W, CFG.WARP_H);
+    
+    // ✅ Index maps sequentially through array coordinates [0] to [3]
+    const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+        quad.corners[0].x, quad.corners[0].y, // Top-Left
+        quad.corners[1].x, quad.corners[1].y, // Top-Right
+        quad.corners[2].x, quad.corners[2].y, // Bottom-Right
+        quad.corners[3].x, quad.corners[3].y  // Bottom-Left
+    ]);
+    
+    const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+        0, 0,
+        CFG.WARP_W, 0,
+        CFG.WARP_W, CFG.WARP_H,
+        0, CFG.WARP_H
+    ]);
 
-        const M = cv.getPerspectiveTransform(srcTri, dstTri);
-        const warped = new cv.Mat();
-        cv.warpPerspective(srcMat, warped, M,
-            new cv.Size(CFG.WARP_W, CFG.WARP_H),
-            cv.INTER_LINEAR, cv.BORDER_REPLICATE);
-        srcTri.delete(); dstTri.delete(); M.delete();
+    const M = cv.getPerspectiveTransform(srcTri, dstTri);
+    cv.warpPerspective(srcMat, dstMat, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
 
-        // Center crop: remove borders/shadows
-        const mx = Math.round(CFG.WARP_W * CFG.CROP_MARGIN);
-        const my = Math.round(CFG.WARP_H * CFG.CROP_MARGIN);
-        const roi = warped.roi(new cv.Rect(mx, my,
-            CFG.WARP_W - 2 * mx, CFG.WARP_H - 2 * my));
+    // 13% Center text crop
+    const mx = Math.floor(CFG.WARP_W * CFG.CROP_MARGIN);
+    const my = Math.floor(CFG.WARP_H * CFG.CROP_MARGIN);
+    const cropRect = new cv.Rect(mx, my, CFG.WARP_W - (mx * 2), CFG.WARP_H - (my * 2));
+    const cropped = dstMat.roi(cropRect);
 
-        // Otsu binarize -> black text on white
-        const gray = new cv.Mat(), bin = new cv.Mat();
-        cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY);
-        cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+    // Grayscale and clean binarization
+    const grayCrop = new cv.Mat(), finalBin = new cv.Mat();
+    cv.cvtColor(cropped, grayCrop, cv.COLOR_RGBA2GRAY);
+    cv.threshold(grayCrop, finalBin, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
 
-        // If mostly black, polarity is inverted: flip it
-        if (cv.countNonZero(bin) < bin.rows * bin.cols / 2) {
-            cv.bitwise_not(bin, bin);
-        }
-
-        const canvas = document.createElement('canvas');
-        cv.imshow(canvas, bin);
-
-        roi.delete(); warped.delete(); gray.delete(); bin.delete();
-        return canvas;
-    }
-
-    /* ================= STAGE 4: TESSERACT POOL ================= */
-    async function getPool() {
-        if (workerPool) return workerPool;
-        const n = Math.min(CFG.WORKER_COUNT,
-            navigator.hardwareConcurrency || 2);
-        workerPool = await Promise.all(
-            Array.from({ length: n }, async function () {
-                const w = await Tesseract.createWorker('eng');
-                await w.setParameters({
-                    tessedit_pageseg_mode: '8',   // single word
-                    tessedit_char_whitelist:
-                        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-                });
-                return w;
-            })
-        );
-        return workerPool;
-    }
-
-    async function recognizeAll(canvases, statusCb) {
-        const pool = await getPool();
-        const results = new Array(canvases.length).fill(null);
-        let next = 0, done = 0;
-
-        await Promise.all(pool.map(async function (w) {
-            while (next < canvases.length) {
-                const idx = next++;
-                if (!canvases[idx]) { done++; continue; }
-                try {
-                    const r = await w.recognize(canvases[idx]);
-                    results[idx] = (r.data.text || '').trim();
-                } catch (e) {
-                    console.warn('OCR failed for card', idx, e);
-                    results[idx] = null;                 // graceful per-card failure
-                }
-                statusCb('Reading cards… ' + (++done) + '/' + canvases.length);
-            }
-        }));
-        return results;
-    }
-
-    /* ================= CORE PIPELINE ================= */
-    async function extractBoardWords(imageSource, statusCb) {
-        statusCb = statusCb || function () {};
-        await cvReady();
-
-        // Normalize input to a bounded canvas
-        const iw = imageSource.width || imageSource.naturalWidth;
-        const ih = imageSource.height || imageSource.naturalHeight;
-        const scale = Math.min(1, CFG.MAX_DIM / Math.max(iw, ih));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(iw * scale);
-        canvas.height = Math.round(ih * scale);
-        canvas.getContext('2d').drawImage(imageSource, 0, 0, canvas.width, canvas.height);
-
-        const src = cv.imread(canvas);
-        let cardCanvases = [], gridRows = [];
-        try {
-            statusCb('Detecting card edges…');
-            const edgeMat = preprocessEdges(src);
-            let quads;
-            try {
-                quads = findCardQuads(edgeMat, canvas.width * canvas.height);
-            } finally {
-                edgeMat.delete();
-            }
-
-            if (quads.length < 8) {
-                throw new Error('Only ' + quads.length +
-                    ' card(s) detected — retake photo with the full board, ' +
-                    'even lighting, and a contrasting background.');
-            }
-
-            gridRows = gridSort(quads);
-            const flat = gridRows.flat();
-            statusCb('Found ' + flat.length + ' cards. Flattening…');
-
-            cardCanvases = flat.map(function (q, i) {
-                try { return warpAndBinarize(src, q); }
-                catch (e) {
-                    console.warn('Warp failed for card', i, e);
-                    return null;                          // unresolved contour: skip
-                }
-            });
-        } finally {
-            src.delete();
-        }
-
-        const rawWords = await recognizeAll(cardCanvases, statusCb);
-
-        // Rebuild 5x5 structure following the physical row layout
-        const board = [];
-        let k = 0;
-        for (const row of gridRows) {
-            const outRow = [];
-            for (let c = 0; c < row.length; c++) {
-                const matched = forceMatch(rawWords[k++]);
-                outRow.push(matched || null);
-            }
-            board.push(outRow);
-        }
-        // Pad/trim to strict 5x5
-        while (board.length < 5) board.push([null, null, null, null, null]);
-        board.length = 5;
-        board.forEach(function (r) {
-            while (r.length < 5) r.push(null);
-            r.length = 5;
-        });
-        return board;
-    }
-
-    /* ================= PUBLIC API ================= */
-    window.extractBoardWords = extractBoardWords;
-
-    window.scanWordFromImage = async function (file, statusCb) {
-        statusCb = statusCb || function () {};
-        try {
-            if (typeof Tesseract === 'undefined')
-                throw new Error('tesseract.js not loaded.');
-
-            statusCb('Loading image…');
-            const url = URL.createObjectURL(file);
-            const img = new Image();
-            await new Promise(function (res, rej) {
-                img.onload = res; img.onerror = rej; img.src = url;
-            });
-            URL.revokeObjectURL(url);
-
-            const board = await extractBoardWords(img, statusCb);
-
-            // Write into the DOM board
-            const cells = Array.prototype.slice.call(
-                document.getElementById('board').querySelectorAll('.cell'));
-            let filled = 0;
-            board.flat().forEach(function (word, i) {
-                if (word && cells[i]) {
-                    cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
-                    filled++;
-                }
-            });
-
-            console.log('Board result:', board);
-            if (!filled) { statusCb('No readable cards found.'); return 0; }
-
-            if (typeof updateStats === 'function') updateStats();
-            if (typeof saveCurrentState === 'function') saveCurrentState();
-            statusCb('Filled ' + filled + ' of 25 cells.');
-            return filled;
-        } catch (e) {
-            console.error(e);
-            statusCb('Scan error: ' + e.message);
-            return null;
-        }
-    };
-})();
+    // Memory cleanup
+    srcTri.delete(); dstTri.delete(); M.delete(); dstMat.delete(); cropped.delete(); grayCrop.delete();
+    
+    return finalBin;
+}
