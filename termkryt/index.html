@@ -345,6 +345,7 @@
             <option value="clear">Clear</option>
             <option value="data">Export/Import Data</option>
         </select>
+		<button onclick="printLog()">Print Logs</button>
     </div>
 
     <div class="control-group" id="g-colors">
@@ -2097,6 +2098,39 @@ document.getElementById('scan-file').addEventListener('change', async function (
 })();
 </script>
 
+<script>
+
+// Array to store all logs
+const logHistory = [];
+
+// Array of console methods you want to intercept
+const consoleMethods = ['log', 'info', 'warn', 'error', 'debug'];
+
+consoleMethods.forEach(method => {
+    // Save the original native method
+    const originalMethod = console[method];
+
+    // Override the method
+    console[method] = function (...args) {
+        // Store the log information as an object
+        logHistory.push({
+            timestamp: new Date().toISOString(),
+            type: method,
+            // Convert arguments to a readable array format
+            message: args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ')
+        });
+
+        // Call the original method so logs still appear in the DevTools console
+        originalMethod.apply(console, args);
+    };
+});
+
+function printLog() {
+    // Appends the raw recorded array as text straight to the body
+    document.body.insertAdjacentHTML('beforeend', `<pre>${JSON.stringify(logHistory, null, 2)}</pre>`);
+}
+	
+</script>
 
 </body>
 </html>
