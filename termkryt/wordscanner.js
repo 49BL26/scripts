@@ -50,6 +50,9 @@
 
     function similarity(a, b) {
         if (!a.length || !b.length) return 0;
+
+        if (Math.abs(a.length - b.length) > 3) return 0;       
+      
         const dp = [];
         for (let i = 0; i <= a.length; i++) dp.push([i]);
         for (let j = 1; j <= b.length; j++) dp[0][j] = j;
