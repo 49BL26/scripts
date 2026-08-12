@@ -46,77 +46,59 @@
     }
 
     /* ---------- string matching ---------- */
-    function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
+    function norm(s) { 
+        return (s || '').toUpperCase()
+            .replace(/[^A-Z0-9]/g, '') // 1. Keep numbers so we can fix them
+            .replace(/0/g, 'O')         // Convert common OCR number slips
+            .replace(/1/g, 'I')
+            .replace(/5/g, 'S');
+    }
 
-/* ---------- looser string matching (Jaro-Winkler style) ---------- */
-function similarity(s1, s2) {
-    if (s1 === s2) return 1.0;
-    
-    const len1 = s1.length, len2 = s2.length;
-    if (len1 === 0 || len2 === 0) return 0.0;
-
-    // Max distance allowed between matching characters
-    const matchWindow = Math.floor(Math.max(len1, len2) / 2) - 1;
-    const matches1 = new Array(len1).fill(false);
-    const matches2 = new Array(len2).fill(false);
-
-    let m = 0; // Number of matching characters
-    for (let i = 0; i < len1; i++) {
-        const start = Math.max(0, i - matchWindow);
-        const end = Math.min(len2, i + matchWindow + 1);
-        for (let j = start; j < end; j++) {
-            if (!matches2[j] && s1[i] === s2[j]) {
-                matches1[i] = true;
-                matches2[j] = true;
-                m++;
-                break;
+    function similarity(a, b) {
+        if (!a.length || !b.length) return 0;
+        
+        // 2. Standard Levenshtein Distance Matrix
+        const dp = [];
+        for (let i = 0; i <= a.length; i++) dp.push([i]);
+        for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+        
+        for (let i = 1; i <= a.length; i++) {
+            for (let j = 1; j <= b.length; j++) {
+                dp[i][j] = Math.min(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
+                );
+                
+                // Damerau adjustment: Catch adjacent character swaps (e.g., "YORK" vs "YROK")
+                if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                    dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+                }
             }
         }
-    }
+        
+        let score = 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
 
-    if (m === 0) return 0.0;
-
-    // Count transpositions
-    let t = 0, k = 0;
-    for (let i = 0; i < len1; i++) {
-        if (matches1[i]) {
-            while (!matches2[k]) k++;
-            if (s1[i] !== s2[k]) t++;
-            k++;
+        // 3. Substring Bonus: If the OCR text accidentally glued background noise
+        // to the word (e.g., "CATZZ" instead of "CAT"), treat it as a strong match.
+        if (a.includes(b) || b.includes(a)) {
+            score = Math.max(score, 0.70);
         }
-    }
-    t /= 2;
 
-    // Base Jaro similarity
-    let jaro = (m / len1 + m / len2 + (m - t) / m) / 3;
-
-    // Winkler modification: bonus for common prefix (up to 4 chars)
-    let prefix = 0;
-    for (let i = 0; i < Math.min(4, Math.min(len1, len2)); i++) {
-        if (s1[i] === s2[i]) prefix++;
-        else break;
-    }
-    
-    return jaro + (prefix * 0.1 * (1 - jaro));
-}
-
-function bestDictWord(raw) {
-    const dict = getDict();
-    const clean = norm(raw);
-    
-    // Fallback if the string is empty
-    if (!clean.length) return { display: null, sim: 0 }; 
-
-    let best = { display: null, sim: -1 };
-    for (let i = 0; i < dict.length; i++) {
-        const s = similarity(clean, dict[i].norm);
-        if (s > best.sim) best = { display: dict[i].display, sim: s };
+        return score;
     }
 
-    // NO CUTOFFS: Always return the absolute best guess available, 
-    // exactly like your original script expects.
-    return best;
-}
+    function bestDictWord(raw) {
+        const dict = getDict();
+        const clean = norm(raw);
+        let best = { display: null, sim: -1 };
+        for (let i = 0; i < dict.length; i++) {
+            // Apply the same normalized cleaning to the dictionary target
+            const s = similarity(clean, norm(dict[i].norm));
+            if (s > best.sim) best = { display: dict[i].display, sim: s };
+        }
+        return best;
+    }
 
     /* ---------- Tesseract ---------- */
     async function getWorker() {
