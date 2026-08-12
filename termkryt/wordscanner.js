@@ -59,8 +59,8 @@
         for (let i = 1; i <= a.length; i++) {
             for (let j = 1; j <= b.length; j++) {
                 dp[i][j] = Math.min(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
+                    //dp[i - 1][j] + 1,
+                    //dp[i][j - 1] + 1,
                     dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
                 );
             }
