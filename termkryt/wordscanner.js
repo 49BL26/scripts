@@ -2,42 +2,26 @@
    WORD SCANNER — full-board OCR via ppu-paddle-ocr,
    force-matched to WORD_PAIRS
    ------------------------------------------------------------
-   - Uses PaddleOCR (PP-OCR det+rec models via onnxruntime-web)
-     through the `ppu-paddle-ocr` package. Paddle handles
-     rotation, uneven lighting and phone-photo blur far better
-     than Tesseract, so fewer image variants are needed.
-   - Tries raw + contrast variants, upright + flipped; keeps
-     the best-scoring result.
-   - Every OCR token maps to the CLOSEST dictionary word.
-     Nothing is rejected; the word list itself is the filter.
-   - Adjacent tokens merge when the pair beats either alone
-     (NEW + YORK -> NEW YORK).
-   - Rows/columns found by gap clustering, so mild tilt is OK.
-   ------------------------------------------------------------
    Load order:
-     1) ppu-paddle-ocr (bundle/UMD or module that exposes a
-        global — see getService() for the names we look for),
-        e.g.:
-        <script src="https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/dist/index.umd.js"></script>
-        or, with modules:
-        <script type="module">
-          import * as PaddleOcr from 'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm';
-          window.PaddleOcr = PaddleOcr;
-        </script>
-     2) wordpairs.js
-     3) wordscanner.js
+     <script type="module">
+       import * as M from 'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm';
+       window.PaddleOcr = M.default ?? M;
+       window.dispatchEvent(new Event('paddle-ready'));
+     </script>
+     wordpairs.js -> wordscanner.js
    Exposes: window.scanWordFromImage(file, statusCb) -> count
    ============================================================ */
 (function () {
     'use strict';
 
-    const MAX_DIM = 2000;          // Paddle det model prefers moderate sizes
-    const GOOD_ENOUGH = 20;        // stop trying variants once this many cells fill
+    const MAX_DIM = 2000;
+    const GOOD_ENOUGH = 20;
+    const PADDLE_WAIT_MS = 15000;   // wait this long for the module to appear
 
     let DICT_ENTRIES = null;
     let servicePromise = null;
 
-    /* ---------- dictionary (lazy; works with `const WORD_PAIRS`) ---------- */
+    /* ---------- dictionary ---------- */
     function rawPairs() {
         if (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) return WORD_PAIRS;
         if (typeof window !== 'undefined' && Array.isArray(window.WORD_PAIRS)) return window.WORD_PAIRS;
@@ -64,174 +48,297 @@
     /* ---------- string matching ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-    // --- ENGINE 1: Matrix Alignment (Handles insertions/deletions/swaps) ---
     function matrixSimilarity(a, b) {
         if (!a.length || !b.length) return 0;
-
         const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
         for (let i = 0; i <= a.length; i++) dp[i][0] = i;
         for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-
         for (let i = 1; i <= a.length; i++) {
             for (let j = 1; j <= b.length; j++) {
                 dp[i][j] = Math.min(
-                    dp[i - 1][j] + 1,                                  // Deletion
-                    dp[i][j - 1] + 1,                                  // Insertion
-                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0) // Substitution
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
                 );
             }
         }
         return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
     }
 
-    // --- ENGINE 2: Slot Alignment (Locks letter order, blocks trailing substring cuts) ---
     function slotSimilarity(a, b) {
         if (!a.length || !b.length) return 0;
-
         const maxLen = Math.max(a.length, b.length);
         const minLen = Math.min(a.length, b.length);
         let mismatches = 0;
-
-        for (let i = 0; i < minLen; i++) {
-            if (a[i] !== b[i]) mismatches++;
-        }
-        mismatches += Math.abs(a.length - b.length); // Add trailing penalty
-
+        for (let i = 0; i < minLen; i++) if (a[i] !== b[i]) mismatches++;
+        mismatches += Math.abs(a.length - b.length);
         return 1 - (mismatches / maxLen);
     }
 
-    // --- THE CONTROLLER: Cross-evaluates both scoring algorithms ---
     function bestDictWord(raw) {
         const dict = getDict();
         const clean = norm(raw);
-
         if (!clean.length) return { display: null, sim: -1 };
-
         let best = { display: null, sim: -1 };
-
         for (let i = 0; i < dict.length; i++) {
             const dictWord = dict[i].norm;
-
-            // Skip extreme size variations upfront
             if (Math.abs(clean.length - dictWord.length) > 2) continue;
-
             const scoreSlot = slotSimilarity(clean, dictWord);
             const scoreMatrix = matrixSimilarity(clean, dictWord);
-
-            // Prioritize slot alignment if it scores reasonably well,
-            // fall back to the matrix when a length shift/typo happened.
             const combinedScore = Math.max(scoreSlot * 1.05, scoreMatrix);
-
             if (combinedScore > best.sim) {
                 best = { display: dict[i].display, sim: combinedScore };
             }
         }
-
         return best;
     }
 
-    /* ---------- ppu-paddle-ocr ---------- */
+    /* ---------- ppu-paddle-ocr service ---------- */
     function findPaddleGlobal() {
-        // Cover the common global names the bundle may register under.
-        const candidates = ['PaddleOcr', 'PaddleOCR', 'ppuPaddleOcr', 'paddleOcr'];
-        for (let i = 0; i < candidates.length; i++) {
-            if (typeof window[candidates[i]] !== 'undefined') return window[candidates[i]];
-        }
+        const cands = [window.PaddleOcr, window.PaddleOCR, window.paddleOcr, window.PPUPaddleOCR];
+        for (const c of cands) if (c) return c;
         return null;
     }
 
-    async function getService() {
+    function waitForPaddle() {
+        return new Promise(function (resolve, reject) {
+            const found = findPaddleGlobal();
+            if (found) return resolve(found);
+            let done = false;
+            function finish(v) { if (!done) { done = true; resolve(v); } }
+            window.addEventListener('paddle-ready', function () {
+                const g = findPaddleGlobal();
+                if (g) finish(g);
+            }, { once: true });
+            const start = Date.now();
+            const iv = setInterval(function () {
+                const g = findPaddleGlobal();
+                if (g) { clearInterval(iv); finish(g); }
+                else if (Date.now() - start > PADDLE_WAIT_MS) {
+                    clearInterval(iv);
+                    if (!done) { done = true; reject(new Error('ppu-paddle-ocr not loaded — use the type="module" import shim.')); }
+                }
+            }, 200);
+        });
+    }
+
+    function getService() {
         if (!servicePromise) {
             servicePromise = (async function () {
-                const mod = findPaddleGlobal();
-                if (!mod) {
-                    throw new Error('ppu-paddle-ocr not loaded — check script tag order.');
-                }
-                // The package exposes PaddleOcrService (singleton) in recent
-                // versions; older builds export a default class. Handle both.
-                const Service = mod.PaddleOcrService || mod.default || mod;
-                let svc;
-                if (typeof Service.getInstance === 'function') {
-                    svc = await Service.getInstance();
-                } else {
-                    svc = new Service();
+                const P = await waitForPaddle();
+
+                // Singleton style: PaddleOcrService.getInstance()
+                if (typeof P.getInstance === 'function') {
+                    const svc = P.getInstance();
                     if (typeof svc.initialize === 'function') await svc.initialize();
                     else if (typeof svc.init === 'function') await svc.init();
+                    return svc;
                 }
-                return svc;
+                // Named export holding the class/service
+                const Cls = P.PaddleOcrService || P.OcrService || P.default || P;
+                if (typeof Cls === 'function') {
+                    if (typeof Cls.getInstance === 'function') {
+                        const svc = Cls.getInstance();
+                        if (typeof svc.initialize === 'function') await svc.initialize();
+                        else if (typeof svc.init === 'function') await svc.init();
+                        return svc;
+                    }
+                    const svc = new Cls();
+                    if (typeof svc.initialize === 'function') await svc.initialize();
+                    else if (typeof svc.init === 'function') await svc.init();
+                    return svc;
+                }
+                // Already an instance
+                if (typeof P.initialize === 'function') { await P.initialize(); return P; }
+                if (typeof P.init === 'function') { await P.init(); return P; }
+                return P;
             })();
+            servicePromise.catch(function () { servicePromise = null; }); // allow retry
         }
         return servicePromise;
     }
 
-    // Normalize the many result shapes ppu-paddle-ocr versions return into
-    // a flat token list: { raw, conf, x0, y0, x1, y1 } (normalized 0..1).
-    function extractTokens(result, W, H) {
-        const tokens = [];
+    async function runOcr(svc, canvas) {
+        const fns = ['recognize', 'detect', 'ocr', 'process', 'run'];
+        for (const f of fns) {
+            if (typeof svc[f] === 'function') return await svc[f](canvas);
+        }
+        throw new Error('No recognize method found on OCR service.');
+    }
 
-        function boxToRect(box) {
-            // box may be [[x,y]x4], {x0,y0,x1,y1}, or [x0,y0,x1,y1]
-            if (!box) return null;
-            if (Array.isArray(box) && Array.isArray(box[0])) {
+    /* ---------- result adapter ---------- */
+    // Normalizes many possible output shapes into
+    // [{ text, conf, x0,y0,x1,y1 }] in pixel coords.
+    function normalizeResults(res) {
+        if (!res) return [];
+        let lines = res;
+        if (!Array.isArray(lines)) {
+            lines = res.lines || res.results || res.data || res.words ||
+                    res.text_lines || res.items || [];
+        }
+        if (!Array.isArray(lines)) return [];
+
+        const out = [];
+        lines.forEach(function (ln) {
+            if (!ln) return;
+            const text = ln.text || ln.transcription || ln.label || ln.word ||
+                         (typeof ln === 'string' ? ln : '') ||
+                         (Array.isArray(ln) && typeof ln[1] === 'string' ? ln[1] : '');
+            if (!text) return;
+            const conf = (ln.confidence != null ? ln.confidence :
+                          ln.score != null ? ln.score : 0.5);
+
+            let x0, y0, x1, y1;
+            const box = ln.box || ln.bbox || ln.points || ln.polygon ||
+                        (Array.isArray(ln) ? ln[0] : null);
+            if (box && Array.isArray(box) && Array.isArray(box[0])) {
+                // quad points [[x,y],...]
                 const xs = box.map(function (p) { return p[0]; });
                 const ys = box.map(function (p) { return p[1]; });
-                return {
-                    x0: Math.min.apply(null, xs), y0: Math.min.apply(null, ys),
-                    x1: Math.max.apply(null, xs), y1: Math.max.apply(null, ys)
-                };
+                x0 = Math.min.apply(null, xs); x1 = Math.max.apply(null, xs);
+                y0 = Math.min.apply(null, ys); y1 = Math.max.apply(null, ys);
+            } else if (box && Array.isArray(box) && box.length === 4 && typeof box[0] === 'number') {
+                // [x0,y0,x1,y1] or [x,y,w,h] — heuristic
+                if (box[2] > box[0] && box[3] > box[1]) { x0 = box[0]; y0 = box[1]; x1 = box[2]; y1 = box[3]; }
+                else { x0 = box[0]; y0 = box[1]; x1 = box[0] + box[2]; y1 = box[1] + box[3]; }
+            } else if (box && typeof box === 'object') {
+                x0 = box.x0 != null ? box.x0 : box.left != null ? box.left : box.x;
+                y0 = box.y0 != null ? box.y0 : box.top != null ? box.top : box.y;
+                x1 = box.x1 != null ? box.x1 :
+                     (box.right != null ? box.right :
+                      (x0 != null && box.width != null ? x0 + box.width : null));
+                y1 = box.y1 != null ? box.y1 :
+                     (box.bottom != null ? box.bottom :
+                      (y0 != null && box.height != null ? y0 + box.height : null));
             }
-            if (Array.isArray(box) && box.length === 4) {
-                return { x0: box[0], y0: box[1], x1: box[2], y1: box[3] };
-            }
-            if (typeof box.x0 === 'number') return box;
-            if (typeof box.x === 'number' && typeof box.width === 'number') {
-                return { x0: box.x, y0: box.y, x1: box.x + box.width, y1: box.y + box.height };
-            }
-            return null;
-        }
+            if (x0 == null || y0 == null || x1 == null || y1 == null) return;
+            out.push({ text: String(text), conf: conf, x0: x0, y0: y0, x1: x1, y1: y1 });
+        });
+        return out;
+    }
 
-        function push(text, conf, rect) {
-            const raw = (text || '').toUpperCase().trim();
-            if (!norm(raw).length || !rect) return;
-            tokens.push({
-                raw: raw,
-                conf: (conf || 0) * (conf <= 1 ? 100 : 1),
-                x0: rect.x0 / W, y0: rect.y0 / H,
-                x1: rect.x1 / W, y1: rect.y1 / H
-            });
-        }
-
-        const lines = result && (result.lines || result.results || result.data || result);
-        if (Array.isArray(lines)) {
-            lines.forEach(function (line) {
-                // Line may itself contain word segments; otherwise split the
-                // line text across its box proportionally.
-                const items = Array.isArray(line) ? line : [line];
-                items.forEach(function (item) {
-                    const text = item.text || item.transcription || item.label || '';
-                    const conf = item.confidence != null ? item.confidence
-                               : item.score != null ? item.score : item.mean || 0;
-                    const rect = boxToRect(item.box || item.bbox || item.points || item.frame);
-                    if (!rect) return;
-                    const parts = text.trim().split(/\s+/).filter(Boolean);
-                    if (parts.length <= 1) {
-                        push(text, conf, rect);
-                    } else {
-                        // Split multi-word lines into proportional sub-boxes so
-                        // the grid clustering still works per-token.
-                        const totalChars = parts.join('').length + (parts.length - 1);
-                        let cursor = rect.x0;
-                        const widthPerChar = (rect.x1 - rect.x0) / totalChars;
-                        parts.forEach(function (p) {
-                            const w = p.length * widthPerChar;
-                            push(p, conf, { x0: cursor, y0: rect.y0, x1: cursor + w, y1: rect.y1 });
-                            cursor += w + widthPerChar; // account for the space
-                        });
-                    }
+    /* ---------- harvest: split lines into word tokens, dict-match ---------- */
+    function harvest(rawLines, W, H) {
+        const tokens = [];
+        rawLines.forEach(function (ln) {
+            const words = ln.text.toUpperCase().split(/\s+/).filter(function (t) { return norm(t).length; });
+            if (!words.length) return;
+            // Proportional sub-boxes across the line width
+            const totalChars = words.reduce(function (a, w) { return a + w.length; }, 0) + (words.length - 1);
+            let cursor = 0;
+            const lineW = ln.x1 - ln.x0;
+            words.forEach(function (w) {
+                const frac0 = cursor / totalChars;
+                const frac1 = (cursor + w.length) / totalChars;
+                cursor += w.length + 1;
+                tokens.push({
+                    raw: w,
+                    conf: ln.conf,
+                    x0: (ln.x0 + lineW * frac0) / W, y0: ln.y0 / H,
+                    x1: (ln.x0 + lineW * frac1) / W, y1: ln.y1 / H
                 });
             });
+        });
+
+        tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
+
+        // Merge neighbours when the pair beats either alone (NEW + YORK)
+        const merged = [];
+        let cur = null;
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
+            if (cur) {
+                const sameLine = tok.y0 < cur.y1 && tok.y1 > cur.y0;
+                const close = (tok.x0 - cur.x1) < 0.07;
+                if (sameLine && close) {
+                    const joined = bestDictWord(cur.raw + ' ' + tok.raw);
+                    const solo = Math.max(bestDictWord(cur.raw).sim, bestDictWord(tok.raw).sim);
+                    if (joined.sim >= solo) {
+                        cur = {
+                            raw: cur.raw + ' ' + tok.raw,
+                            conf: Math.max(cur.conf, tok.conf),
+                            x0: Math.min(cur.x0, tok.x0), y0: Math.min(cur.y0, tok.y0),
+                            x1: Math.max(cur.x1, tok.x1), y1: Math.max(cur.y1, tok.y1)
+                        };
+                        continue;
+                    }
+                }
+                merged.push(cur);
+            }
+            cur = tok;
         }
-        return tokens;
+        if (cur) merged.push(cur);
+
+        return merged.map(function (item) {
+            const m = bestDictWord(item.raw);
+            return {
+                word: m.display, sim: m.sim, conf: item.conf,
+                x: (item.x0 + item.x1) / 2,
+                y: (item.y0 + item.y1) / 2
+            };
+        }).filter(function (t) { return t.word; });
+    }
+
+    /* ---------- gap clustering / grid (unchanged) ---------- */
+    function clusterAxis(values, maxGroups) {
+        const sorted = values.slice().sort(function (a, b) { return a - b; });
+        if (!sorted.length) return [];
+        const span = sorted[sorted.length - 1] - sorted[0];
+        let groups = [[sorted[0]]];
+        const threshold = Math.max(span / (maxGroups * 2.2), 0.012);
+        for (let i = 1; i < sorted.length; i++) {
+            if (sorted[i] - sorted[i - 1] > threshold) groups.push([sorted[i]]);
+            else groups[groups.length - 1].push(sorted[i]);
+        }
+        while (groups.length > maxGroups) {
+            let bestI = 0, bestGap = Infinity;
+            for (let i = 0; i < groups.length - 1; i++) {
+                const gap = groups[i + 1][0] - groups[i][groups[i].length - 1];
+                if (gap < bestGap) { bestGap = gap; bestI = i; }
+            }
+            groups[bestI] = groups[bestI].concat(groups[bestI + 1]);
+            groups.splice(bestI + 1, 1);
+        }
+        return groups.map(function (g) {
+            return g.reduce(function (a, b) { return a + b; }, 0) / g.length;
+        });
+    }
+
+    function nearestIndex(centers, v) {
+        let bi = 0, bd = Infinity;
+        for (let i = 0; i < centers.length; i++) {
+            const d = Math.abs(centers[i] - v);
+            if (d < bd) { bd = d; bi = i; }
+        }
+        return bi;
+    }
+
+    function toGrid(words) {
+        const grid = new Array(25).fill(null);
+        if (!words.length) return { grid: grid, score: 0, filled: 0 };
+        const rowCenters = clusterAxis(words.map(function (w) { return w.y; }), 5);
+        const colCenters = clusterAxis(words.map(function (w) { return w.x; }), 5);
+        let score = 0, filled = 0;
+        words.forEach(function (w) {
+            const row = nearestIndex(rowCenters, w.y);
+            const col = nearestIndex(colCenters, w.x);
+            const idx = Math.min(24, row * 5 + col);
+            if (!grid[idx]) { filled++; score += w.sim; grid[idx] = w; }
+            else if (w.sim > grid[idx].sim) { score += w.sim - grid[idx].sim; grid[idx] = w; }
+        });
+        return { grid: grid, score: score, filled: filled };
+    }
+
+    function dedupeGrid(grid) {
+        const seen = new Map();
+        grid.forEach(function (cell, i) {
+            if (!cell) return;
+            const prev = seen.get(cell.word);
+            if (prev === undefined) { seen.set(cell.word, i); return; }
+            if (cell.sim > grid[prev].sim) { grid[prev] = null; seen.set(cell.word, i); }
+            else grid[i] = null;
+        });
+        return grid;
     }
 
     /* ---------- image variants ---------- */
@@ -272,123 +379,6 @@
         return dst;
     }
 
-    /* ---------- harvest + merge ---------- */
-    function harvest(tokens) {
-        tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
-
-        // Merge with right neighbour when the pair matches better
-        const merged = [];
-        let cur = null;
-        for (let i = 0; i < tokens.length; i++) {
-            const tok = tokens[i];
-            if (cur) {
-                const sameLine = tok.y0 < cur.y1 && tok.y1 > cur.y0;
-                const close = (tok.x0 - cur.x1) < 0.07;
-                if (sameLine && close) {
-                    const joined = bestDictWord(cur.raw + ' ' + tok.raw);
-                    const solo = Math.max(bestDictWord(cur.raw).sim, bestDictWord(tok.raw).sim);
-                    if (joined.sim >= solo) {
-                        cur = {
-                            raw: cur.raw + ' ' + tok.raw,
-                            conf: Math.max(cur.conf, tok.conf),
-                            x0: Math.min(cur.x0, tok.x0), y0: Math.min(cur.y0, tok.y0),
-                            x1: Math.max(cur.x1, tok.x1), y1: Math.max(cur.y1, tok.y1)
-                        };
-                        continue;
-                    }
-                }
-                merged.push(cur);
-            }
-            cur = tok;
-        }
-        if (cur) merged.push(cur);
-
-        return merged.map(function (item) {
-            const m = bestDictWord(item.raw);
-            return {
-                word: m.display,
-                sim: m.sim,
-                conf: item.conf,
-                x: (item.x0 + item.x1) / 2,
-                y: (item.y0 + item.y1) / 2
-            };
-        }).filter(function (w) { return w.word; });
-    }
-
-    /* ---------- gap clustering: tolerant of tilt / partial boards ---------- */
-    function clusterAxis(values, maxGroups) {
-        const sorted = values.slice().sort(function (a, b) { return a - b; });
-        if (!sorted.length) return [];
-        const span = sorted[sorted.length - 1] - sorted[0];
-        let groups = [[sorted[0]]];
-        const threshold = Math.max(span / (maxGroups * 2.2), 0.012);
-        for (let i = 1; i < sorted.length; i++) {
-            if (sorted[i] - sorted[i - 1] > threshold) groups.push([sorted[i]]);
-            else groups[groups.length - 1].push(sorted[i]);
-        }
-        while (groups.length > maxGroups) {
-            let bestI = 0, bestGap = Infinity;
-            for (let i = 0; i < groups.length - 1; i++) {
-                const gap = groups[i + 1][0] - groups[i][groups[i].length - 1];
-                if (gap < bestGap) { bestGap = gap; bestI = i; }
-            }
-            groups[bestI] = groups[bestI].concat(groups[bestI + 1]);
-            groups.splice(bestI + 1, 1);
-        }
-        return groups.map(function (g) {
-            return g.reduce(function (a, b) { return a + b; }, 0) / g.length;
-        });
-    }
-
-    function nearestIndex(centers, v) {
-        let bi = 0, bd = Infinity;
-        for (let i = 0; i < centers.length; i++) {
-            const d = Math.abs(centers[i] - v);
-            if (d < bd) { bd = d; bi = i; }
-        }
-        return bi;
-    }
-
-    function toGrid(words) {
-        const grid = new Array(25).fill(null);
-        if (!words.length) return { grid: grid, score: 0, filled: 0 };
-
-        const rowCenters = clusterAxis(words.map(function (w) { return w.y; }), 5);
-        const colCenters = clusterAxis(words.map(function (w) { return w.x; }), 5);
-
-        let score = 0, filled = 0;
-        words.forEach(function (w) {
-            const row = nearestIndex(rowCenters, w.y);
-            const col = nearestIndex(colCenters, w.x);
-            const idx = Math.min(24, row * 5 + col);
-            if (!grid[idx]) { filled++; score += w.sim; grid[idx] = w; }
-            else if (w.sim > grid[idx].sim) { score += w.sim - grid[idx].sim; grid[idx] = w; }
-        });
-        return { grid: grid, score: score, filled: filled };
-    }
-
-    function dedupeGrid(grid) {
-        const seen = new Map();
-        grid.forEach(function (cell, i) {
-            if (!cell) return;
-            const prev = seen.get(cell.word);
-            if (prev === undefined) { seen.set(cell.word, i); return; }
-            if (cell.sim > grid[prev].sim) { grid[prev] = null; seen.set(cell.word, i); }
-            else grid[i] = null;
-        });
-        return grid;
-    }
-
-    /* ---------- run one canvas through Paddle ---------- */
-    async function ocrCanvas(svc, canvas) {
-        let result;
-        if (typeof svc.recognize === 'function') result = await svc.recognize(canvas);
-        else if (typeof svc.detect === 'function') result = await svc.detect(canvas);
-        else if (typeof svc.ocr === 'function') result = await svc.ocr(canvas);
-        else throw new Error('ppu-paddle-ocr service has no recognize()/detect()/ocr() method.');
-        return toGrid(harvest(extractTokens(result, canvas.width, canvas.height)));
-    }
-
     /* ---------- public API ---------- */
     window.scanWordFromImage = async function (file, statusCb) {
         statusCb = statusCb || function () {};
@@ -412,8 +402,6 @@
             base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
             URL.revokeObjectURL(url);
 
-            // Paddle is far more robust than Tesseract on phone photos,
-            // so fewer variants are needed.
             const variants = [
                 { name: 'raw',      make: function () { return cloneCanvas(base); } },
                 { name: 'contrast', make: function () { return grayContrast(base, 1.3); } }
@@ -425,7 +413,8 @@
                 const canvas = variants[v].make();
 
                 statusCb('Reading board — ' + variants[v].name + ' (upright)…');
-                const up = await ocrCanvas(svc, canvas);
+                const r1 = await runOcr(svc, canvas);
+                const up = toGrid(harvest(normalizeResults(r1), canvas.width, canvas.height));
                 if (!best || up.score > best.score) {
                     best = up; bestLabel = variants[v].name; bestFlipped = false;
                 }
@@ -433,7 +422,8 @@
 
                 statusCb('Reading board — ' + variants[v].name + ' (flipped)…');
                 const flipped = rotate180(canvas);
-                const down = await ocrCanvas(svc, flipped);
+                const r2 = await runOcr(svc, flipped);
+                const down = toGrid(harvest(normalizeResults(r2), flipped.width, flipped.height));
                 if (down.score > best.score) {
                     best = down; bestLabel = variants[v].name; bestFlipped = true;
                 }
@@ -459,7 +449,7 @@
             });
 
             if (!filled) {
-                statusCb('OCR found no text in any variant.');
+                statusCb('OCR found no text.');
                 return 0;
             }
 
