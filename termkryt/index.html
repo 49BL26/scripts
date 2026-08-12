@@ -452,8 +452,8 @@
     </div>
 </div>
 <script type="module">
-  import * as PaddleOcrModule from 'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm';
-  window.PaddleOcr = PaddleOcrModule.default ?? PaddleOcrModule;
+  import Ocr from 'https://cdn.jsdelivr.net/npm/@gutenye/ocr-browser/+esm';
+  window.PaddleOcr = Ocr;
   window.dispatchEvent(new Event('paddle-ready'));
 </script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
