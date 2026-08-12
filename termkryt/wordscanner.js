@@ -48,7 +48,7 @@
     /* ---------- string matching ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-   /* ---------- looser string matching (Jaro-Winkler style) ---------- */
+/* ---------- looser string matching (Jaro-Winkler style) ---------- */
 function similarity(s1, s2) {
     if (s1 === s2) return 1.0;
     
@@ -104,8 +104,8 @@ function bestDictWord(raw) {
     const dict = getDict();
     const clean = norm(raw);
     
-    // Ignore extreme garbage / tiny noise tokens
-    if (clean.length < 2) return { display: null, sim: 0 }; 
+    // Fallback if the string is empty
+    if (!clean.length) return { display: null, sim: 0 }; 
 
     let best = { display: null, sim: -1 };
     for (let i = 0; i < dict.length; i++) {
@@ -113,12 +113,8 @@ function bestDictWord(raw) {
         if (s > best.sim) best = { display: dict[i].display, sim: s };
     }
 
-    // MINIMUM THRESHOLD: Only accept if it's at least a 65% match.
-    // This stops Tesseract from turning random image artifacts into wrong words.
-    if (best.sim < 0.65) {
-        return { display: null, sim: 0 };
-    }
-
+    // NO CUTOFFS: Always return the absolute best guess available, 
+    // exactly like your original script expects.
     return best;
 }
 
