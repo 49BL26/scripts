@@ -6,9 +6,10 @@
     'use strict';
 
     const MAX_DIM = 2000;
-    const MIN_CONFIDENCE = 5;          // was 40 → now almost anything
-    const MIN_WORD_LEN = 2;
+    const MIN_CONFIDENCE = 0;    // was 5 — accept anything
+    const MIN_WORD_LEN = 3;
     const MATCH_THRESHOLD = 0.45;      // adjust: lower = more aggressive correction
+
 
     // Build dictionary entries with normalized + display forms
     const DICT_ENTRIES = (function () {
@@ -202,6 +203,46 @@ function finalizeMerged(merged) {
         return { grid, score };
     }
 
+
+function mergeGridWords(grid) {
+    const findEntry = s => DICT_ENTRIES.find(e => e.norm === s);
+    const norm = s => (s || '').toUpperCase().replace(/[^A-Z]/g, '');
+
+    const tryMerge = (i, j) => {
+        const a = grid[i], b = grid[j];
+        if (!a || !b) return false;
+        const combined = norm(a.word) + norm(b.word);
+        const entry = findEntry(combined);
+        if (entry) {
+            grid[i] = { word: entry.display, conf: Math.max(a.conf, b.conf), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            grid[j] = null;
+            return true;
+        }
+        return false;
+    };
+
+function correctGrid(grid) {
+    grid.forEach((cell, i) => {
+        if (!cell) return;
+        const fixed = correctWord(cell.word);
+        if (fixed) grid[i] = { ...cell, word: fixed };
+    });
+    return grid;
+}
+   
+    // horizontal pairs
+    for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 4; c++) tryMerge(r * 5 + c, r * 5 + c + 1);
+    }
+    // vertical pairs (for words written vertically like ICE/CREAM)
+    for (let c = 0; c < 5; c++) {
+        for (let r = 0; r < 4; r++) tryMerge(r * 5 + c, (r + 1) * 5 + c);
+    }
+    return grid;
+}
+
+   
+   
     /* ---------- public API ---------- */
     window.scanWordFromImage = async function (file, statusCb) {
         statusCb = statusCb || function () {};
@@ -234,11 +275,13 @@ function finalizeMerged(merged) {
             const res2 = await w.recognize(flipped);
             const down = toGrid(finalizeMerged(harvest(res2.data, flipped.width, flipped.height)));
 
-            const winner = down.score > up.score ? down : up;
-            if (!winner.grid.some(Boolean)) {
-                statusCb('No readable words found.');
-                return 0;
-            }
+const winner = down.score > up.score ? down : up;
+mergeGridWords(winner.grid);      // join "NEW"+"YORK" etc.
+correctGrid(winner.grid);         // "CTOPUS" → "OCTOPUS"
+if (!winner.grid.some(Boolean)) {
+    statusCb('No readable words found.');
+    return 0;
+}
 
             const cells = [...board.querySelectorAll('.cell')];
             let filled = 0;
