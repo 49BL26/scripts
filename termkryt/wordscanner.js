@@ -17,7 +17,7 @@
 
     /* ================= CONFIG ================= */
     const CFG = {
-        MAX_DIM: 1600,            // working resolution ceiling
+        MAX_DIM: 3200,            // working resolution ceiling
         BLUR_KSIZE: 5,            // Gaussian kernel (5 or 7)
         CANNY_LOW: 50,
         CANNY_HIGH: 150,
