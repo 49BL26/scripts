@@ -1,25 +1,41 @@
 /* ============================================================
-   WORD SCANNER — full-board OCR, force-matched to WORD_PAIRS
+   WORD SCANNER — full-board OCR via ppu-paddle-ocr,
+   force-matched to WORD_PAIRS
    ------------------------------------------------------------
-   - Tries several image variants (raw / contrast / binarized /
-     upscaled) in both orientations; keeps the best result.
+   - Uses PaddleOCR (PP-OCR det+rec models via onnxruntime-web)
+     through the `ppu-paddle-ocr` package. Paddle handles
+     rotation, uneven lighting and phone-photo blur far better
+     than Tesseract, so fewer image variants are needed.
+   - Tries raw + contrast variants, upright + flipped; keeps
+     the best-scoring result.
    - Every OCR token maps to the CLOSEST dictionary word.
      Nothing is rejected; the word list itself is the filter.
    - Adjacent tokens merge when the pair beats either alone
      (NEW + YORK -> NEW YORK).
    - Rows/columns found by gap clustering, so mild tilt is OK.
    ------------------------------------------------------------
-   Load order:  tesseract.js -> wordpairs.js -> wordscanner.js
+   Load order:
+     1) ppu-paddle-ocr (bundle/UMD or module that exposes a
+        global — see getService() for the names we look for),
+        e.g.:
+        <script src="https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/dist/index.umd.js"></script>
+        or, with modules:
+        <script type="module">
+          import * as PaddleOcr from 'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm';
+          window.PaddleOcr = PaddleOcr;
+        </script>
+     2) wordpairs.js
+     3) wordscanner.js
    Exposes: window.scanWordFromImage(file, statusCb) -> count
    ============================================================ */
 (function () {
     'use strict';
 
-    const MAX_DIM = 4000;          // downscale ceiling
+    const MAX_DIM = 2000;          // Paddle det model prefers moderate sizes
     const GOOD_ENOUGH = 20;        // stop trying variants once this many cells fill
 
     let DICT_ENTRIES = null;
-    let worker = null;
+    let servicePromise = null;
 
     /* ---------- dictionary (lazy; works with `const WORD_PAIRS`) ---------- */
     function rawPairs() {
@@ -48,134 +64,174 @@
     /* ---------- string matching ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-// --- ENGINE 1: Matrix Alignment (Handles insertions/deletions/swaps) ---
-function matrixSimilarity(a, b) {
-    if (!a.length || !b.length) return 0;
-    
-    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-    
-    for (let i = 1; i <= a.length; i++) {
-        for (let j = 1; j <= b.length; j++) {
-            dp[i][j] = Math.min(
-                dp[i - 1][j] + 1,                                  // Deletion
-                dp[i][j - 1] + 1,                                  // Insertion
-                dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0) // Substitution
-            );
-        }
-    }
-    return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
-}
-
-// --- ENGINE 2: Slot Alignment (Locks letter order, blocks trailing substring cuts) ---
-function slotSimilarity(a, b) {
-    if (!a.length || !b.length) return 0;
-    
-    const maxLen = Math.max(a.length, b.length);
-    const minLen = Math.min(a.length, b.length);
-    let mismatches = 0;
-
-    for (let i = 0; i < minLen; i++) {
-        if (a[i] !== b[i]) mismatches++;
-    }
-    mismatches += Math.abs(a.length - b.length); // Add trailing penalty
-
-    return 1 - (mismatches / maxLen);
-}
-
-// --- THE CONTROLLER: Cross-evaluates both scoring algorithms ---
-function bestDictWord(raw) {
-    const dict = getDict();
-    const clean = norm(raw);
-    
-    if (!clean.length) return { display: null, sim: -1 };
-
-    let best = { display: null, sim: -1 };
-
-    for (let i = 0; i < dict.length; i++) {
-        const dictWord = dict[i].norm;
-        
-        // Skip extreme size variations upfront
-        if (Math.abs(clean.length - dictWord.length) > 2) continue;
-
-        // Run both evaluation methods
-        const scoreSlot = slotSimilarity(clean, dictWord);
-        const scoreMatrix = matrixSimilarity(clean, dictWord);
-
-        // ALGORITHMIC SELECTION RULE:
-        // Prioritize slot alignment if it scores reasonably well (prevents phantom offsets),
-        // but fall back to the structural matrix if a clear length shift or typo happened.
-        let combinedScore = Math.max(scoreSlot * 1.05, scoreMatrix);
-
-        if (combinedScore > best.sim) {
-            best = { display: dict[i].display, sim: combinedScore };
-        }
-    }
-
-    return best;
-}
-
-   
-/*old similarity function, worked well
-function similarity(a, b) {
+    // --- ENGINE 1: Matrix Alignment (Handles insertions/deletions/swaps) ---
+    function matrixSimilarity(a, b) {
         if (!a.length || !b.length) return 0;
 
-        if (Math.abs(a.length - b.length) > 0) return 0;
-      
-        const dp = [];
-        for (let i = 0; i <= a.length; i++) dp.push([i]);
-        for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+        const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+        for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+        for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
         for (let i = 1; i <= a.length; i++) {
             for (let j = 1; j <= b.length; j++) {
                 dp[i][j] = Math.min(
-                    //dp[i - 1][j] + 1,
-                    //dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
+                    dp[i - 1][j] + 1,                                  // Deletion
+                    dp[i][j - 1] + 1,                                  // Insertion
+                    dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0) // Substitution
                 );
             }
         }
         return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
-    } 
+    }
 
+    // --- ENGINE 2: Slot Alignment (Locks letter order, blocks trailing substring cuts) ---
+    function slotSimilarity(a, b) {
+        if (!a.length || !b.length) return 0;
+
+        const maxLen = Math.max(a.length, b.length);
+        const minLen = Math.min(a.length, b.length);
+        let mismatches = 0;
+
+        for (let i = 0; i < minLen; i++) {
+            if (a[i] !== b[i]) mismatches++;
+        }
+        mismatches += Math.abs(a.length - b.length); // Add trailing penalty
+
+        return 1 - (mismatches / maxLen);
+    }
+
+    // --- THE CONTROLLER: Cross-evaluates both scoring algorithms ---
     function bestDictWord(raw) {
         const dict = getDict();
         const clean = norm(raw);
-        let best = { display: null, sim: -1 };
-        for (let i = 0; i < dict.length; i++) {
-            const s = similarity(clean, dict[i].norm);
-            if (s > best.sim) best = { display: dict[i].display, sim: s };
-        }
-        return best;
-    } */
 
-    function bestDictWord(raw) {
-        const dict = getDict();
-        const clean = norm(raw);
+        if (!clean.length) return { display: null, sim: -1 };
+
         let best = { display: null, sim: -1 };
+
         for (let i = 0; i < dict.length; i++) {
-            // Apply the same normalized cleaning to the dictionary target
-            const s = similarity(clean, norm(dict[i].norm));
-            if (s > best.sim) best = { display: dict[i].display, sim: s };
+            const dictWord = dict[i].norm;
+
+            // Skip extreme size variations upfront
+            if (Math.abs(clean.length - dictWord.length) > 2) continue;
+
+            const scoreSlot = slotSimilarity(clean, dictWord);
+            const scoreMatrix = matrixSimilarity(clean, dictWord);
+
+            // Prioritize slot alignment if it scores reasonably well,
+            // fall back to the matrix when a length shift/typo happened.
+            const combinedScore = Math.max(scoreSlot * 1.05, scoreMatrix);
+
+            if (combinedScore > best.sim) {
+                best = { display: dict[i].display, sim: combinedScore };
+            }
         }
+
         return best;
     }
 
-    /* ---------- Tesseract ---------- */
-    async function getWorker() {
-        if (!worker) {
-            worker = await Tesseract.createWorker('eng', 1, {
-                workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-                corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
-                langPath:   'https://tessdata.projectnaptha.com/4.0.0'
-            });
-            await worker.setParameters({
-                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
-                preserve_interword_spaces: '1',
-                tessedit_pageseg_mode: '11'
+    /* ---------- ppu-paddle-ocr ---------- */
+    function findPaddleGlobal() {
+        // Cover the common global names the bundle may register under.
+        const candidates = ['PaddleOcr', 'PaddleOCR', 'ppuPaddleOcr', 'paddleOcr'];
+        for (let i = 0; i < candidates.length; i++) {
+            if (typeof window[candidates[i]] !== 'undefined') return window[candidates[i]];
+        }
+        return null;
+    }
+
+    async function getService() {
+        if (!servicePromise) {
+            servicePromise = (async function () {
+                const mod = findPaddleGlobal();
+                if (!mod) {
+                    throw new Error('ppu-paddle-ocr not loaded — check script tag order.');
+                }
+                // The package exposes PaddleOcrService (singleton) in recent
+                // versions; older builds export a default class. Handle both.
+                const Service = mod.PaddleOcrService || mod.default || mod;
+                let svc;
+                if (typeof Service.getInstance === 'function') {
+                    svc = await Service.getInstance();
+                } else {
+                    svc = new Service();
+                    if (typeof svc.initialize === 'function') await svc.initialize();
+                    else if (typeof svc.init === 'function') await svc.init();
+                }
+                return svc;
+            })();
+        }
+        return servicePromise;
+    }
+
+    // Normalize the many result shapes ppu-paddle-ocr versions return into
+    // a flat token list: { raw, conf, x0, y0, x1, y1 } (normalized 0..1).
+    function extractTokens(result, W, H) {
+        const tokens = [];
+
+        function boxToRect(box) {
+            // box may be [[x,y]x4], {x0,y0,x1,y1}, or [x0,y0,x1,y1]
+            if (!box) return null;
+            if (Array.isArray(box) && Array.isArray(box[0])) {
+                const xs = box.map(function (p) { return p[0]; });
+                const ys = box.map(function (p) { return p[1]; });
+                return {
+                    x0: Math.min.apply(null, xs), y0: Math.min.apply(null, ys),
+                    x1: Math.max.apply(null, xs), y1: Math.max.apply(null, ys)
+                };
+            }
+            if (Array.isArray(box) && box.length === 4) {
+                return { x0: box[0], y0: box[1], x1: box[2], y1: box[3] };
+            }
+            if (typeof box.x0 === 'number') return box;
+            if (typeof box.x === 'number' && typeof box.width === 'number') {
+                return { x0: box.x, y0: box.y, x1: box.x + box.width, y1: box.y + box.height };
+            }
+            return null;
+        }
+
+        function push(text, conf, rect) {
+            const raw = (text || '').toUpperCase().trim();
+            if (!norm(raw).length || !rect) return;
+            tokens.push({
+                raw: raw,
+                conf: (conf || 0) * (conf <= 1 ? 100 : 1),
+                x0: rect.x0 / W, y0: rect.y0 / H,
+                x1: rect.x1 / W, y1: rect.y1 / H
             });
         }
-        return worker;
+
+        const lines = result && (result.lines || result.results || result.data || result);
+        if (Array.isArray(lines)) {
+            lines.forEach(function (line) {
+                // Line may itself contain word segments; otherwise split the
+                // line text across its box proportionally.
+                const items = Array.isArray(line) ? line : [line];
+                items.forEach(function (item) {
+                    const text = item.text || item.transcription || item.label || '';
+                    const conf = item.confidence != null ? item.confidence
+                               : item.score != null ? item.score : item.mean || 0;
+                    const rect = boxToRect(item.box || item.bbox || item.points || item.frame);
+                    if (!rect) return;
+                    const parts = text.trim().split(/\s+/).filter(Boolean);
+                    if (parts.length <= 1) {
+                        push(text, conf, rect);
+                    } else {
+                        // Split multi-word lines into proportional sub-boxes so
+                        // the grid clustering still works per-token.
+                        const totalChars = parts.join('').length + (parts.length - 1);
+                        let cursor = rect.x0;
+                        const widthPerChar = (rect.x1 - rect.x0) / totalChars;
+                        parts.forEach(function (p) {
+                            const w = p.length * widthPerChar;
+                            push(p, conf, { x0: cursor, y0: rect.y0, x1: cursor + w, y1: rect.y1 });
+                            cursor += w + widthPerChar; // account for the space
+                        });
+                    }
+                });
+            });
+        }
+        return tokens;
     }
 
     /* ---------- image variants ---------- */
@@ -205,27 +261,6 @@ function similarity(a, b) {
         return c;
     }
 
-    // Adaptive-ish threshold using the mean luminance
-    function binarize(src) {
-        const c = cloneCanvas(src);
-        const ctx = c.getContext('2d');
-        const img = ctx.getImageData(0, 0, c.width, c.height);
-        const d = img.data;
-        let sum = 0;
-        for (let i = 0; i < d.length; i += 4) {
-            sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        }
-        const mean = sum / (d.length / 4);
-        const cut = mean * 0.92;
-        for (let i = 0; i < d.length; i += 4) {
-            const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const v = g < cut ? 0 : 255;
-            d[i] = d[i + 1] = d[i + 2] = v;
-        }
-        ctx.putImageData(img, 0, 0);
-        return c;
-    }
-
     function rotate180(src) {
         const dst = document.createElement('canvas');
         dst.width = src.width;
@@ -238,20 +273,7 @@ function similarity(a, b) {
     }
 
     /* ---------- harvest + merge ---------- */
-    function harvest(data, W, H) {
-        let tokens = [];
-        (data.words || []).forEach(function (w) {
-            const raw = (w.text || '').toUpperCase().trim();
-            if (!norm(raw).length) return;              // single letters now allowed
-            if (!w.bbox) return;
-            tokens.push({
-                raw: raw,
-                conf: w.confidence || 0,
-                x0: w.bbox.x0 / W, y0: w.bbox.y0 / H,
-                x1: w.bbox.x1 / W, y1: w.bbox.y1 / H
-            });
-        });
-
+    function harvest(tokens) {
         tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
 
         // Merge with right neighbour when the pair matches better
@@ -290,7 +312,7 @@ function similarity(a, b) {
                 x: (item.x0 + item.x1) / 2,
                 y: (item.y0 + item.y1) / 2
             };
-        });
+        }).filter(function (w) { return w.word; });
     }
 
     /* ---------- gap clustering: tolerant of tilt / partial boards ---------- */
@@ -304,7 +326,6 @@ function similarity(a, b) {
             if (sorted[i] - sorted[i - 1] > threshold) groups.push([sorted[i]]);
             else groups[groups.length - 1].push(sorted[i]);
         }
-        // Too many clusters: merge the closest neighbours until we fit
         while (groups.length > maxGroups) {
             let bestI = 0, bestGap = Infinity;
             for (let i = 0; i < groups.length - 1; i++) {
@@ -358,16 +379,26 @@ function similarity(a, b) {
         return grid;
     }
 
+    /* ---------- run one canvas through Paddle ---------- */
+    async function ocrCanvas(svc, canvas) {
+        let result;
+        if (typeof svc.recognize === 'function') result = await svc.recognize(canvas);
+        else if (typeof svc.detect === 'function') result = await svc.detect(canvas);
+        else if (typeof svc.ocr === 'function') result = await svc.ocr(canvas);
+        else throw new Error('ppu-paddle-ocr service has no recognize()/detect()/ocr() method.');
+        return toGrid(harvest(extractTokens(result, canvas.width, canvas.height)));
+    }
+
     /* ---------- public API ---------- */
     window.scanWordFromImage = async function (file, statusCb) {
         statusCb = statusCb || function () {};
         try {
-            if (typeof Tesseract === 'undefined') {
-                throw new Error('Tesseract not loaded — check script tag order.');
-            }
             if (!getDict()) {
                 throw new Error('WORD_PAIRS not found — wordpairs.js must load first.');
             }
+
+            statusCb('Loading OCR model…');
+            const svc = await getService();
 
             const url = URL.createObjectURL(file);
             const img = new Image();
@@ -381,36 +412,32 @@ function similarity(a, b) {
             base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
             URL.revokeObjectURL(url);
 
-            // Variants, cheapest/most-likely first
+            // Paddle is far more robust than Tesseract on phone photos,
+            // so fewer variants are needed.
             const variants = [
-                { name: 'contrast', make: function () { return grayContrast(base, 1.3); } },
                 { name: 'raw',      make: function () { return cloneCanvas(base); } },
-                { name: 'binary',   make: function () { return binarize(base); } },
-                { name: 'upscaled', make: function () { return grayContrast(cloneCanvas(base, 1.6), 1.15); } }
+                { name: 'contrast', make: function () { return grayContrast(base, 1.3); } }
             ];
 
-            const w = await getWorker();
             let best = null, bestLabel = '', bestFlipped = false;
 
             for (let v = 0; v < variants.length; v++) {
                 const canvas = variants[v].make();
 
                 statusCb('Reading board — ' + variants[v].name + ' (upright)…');
-                const r1 = await w.recognize(canvas);
-                const up = toGrid(harvest(r1.data, canvas.width, canvas.height));
+                const up = await ocrCanvas(svc, canvas);
                 if (!best || up.score > best.score) {
                     best = up; bestLabel = variants[v].name; bestFlipped = false;
                 }
+                if (best.filled >= GOOD_ENOUGH) break;
 
                 statusCb('Reading board — ' + variants[v].name + ' (flipped)…');
                 const flipped = rotate180(canvas);
-                const r2 = await w.recognize(flipped);
-                const down = toGrid(harvest(r2.data, flipped.width, flipped.height));
+                const down = await ocrCanvas(svc, flipped);
                 if (down.score > best.score) {
                     best = down; bestLabel = variants[v].name; bestFlipped = true;
                 }
-
-                if (best.filled >= GOOD_ENOUGH) break;   // stop early when it's working
+                if (best.filled >= GOOD_ENOUGH) break;
             }
 
             dedupeGrid(best.grid);
