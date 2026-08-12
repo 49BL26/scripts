@@ -122,17 +122,28 @@
         });
     }
 
+    const GUTEN_BASE = 'https://cdn.jsdelivr.net/npm/@gutenye/ocr-models/assets';
+
     function getService() {
         if (!servicePromise) {
             servicePromise = (async function () {
                 const Ocr = await waitForPaddle();
-                const factory = Ocr.create ? Ocr : (Ocr.default || Ocr);
-                return await factory.create();
+                const factory = (Ocr && typeof Ocr.create === 'function') ? Ocr
+                              : (Ocr.default && typeof Ocr.default.create === 'function') ? Ocr.default
+                              : Ocr;
+                return await factory.create({
+                    models: {
+                        detectionPath:   GUTEN_BASE + '/ch_PP-OCRv4_det_infer.onnx',
+                        recognitionPath: GUTEN_BASE + '/ch_PP-OCRv4_rec_infer.onnx',
+                        dictionaryPath:  GUTEN_BASE + '/ppocr_keys_v1.txt'
+                    }
+                });
             })();
             servicePromise.catch(function () { servicePromise = null; });
         }
         return servicePromise;
     }
+
 
     async function runOcr(svc, canvas) {
         const src = canvas.toDataURL('image/png');
