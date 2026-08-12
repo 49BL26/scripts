@@ -451,11 +451,8 @@
         <div class="modal-buttons" id="modal-buttons"></div>
     </div>
 </div>
-<script type="module">
-  import Ocr from 'https://cdn.jsdelivr.net/npm/@gutenye/ocr-browser/+esm';
-  window.PaddleOcr = Ocr;
-  window.dispatchEvent(new Event('paddle-ready'));
-</script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="keycards.js"></script>
 <script src="wordpairs.js"></script>
