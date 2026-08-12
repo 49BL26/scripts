@@ -46,22 +46,13 @@
     }
 
     /* ---------- string matching ---------- */
-    function norm(s) { 
-        return (s || '').toUpperCase()
-            .replace(/[^A-Z0-9]/g, '') // 1. Keep numbers so we can fix them
-            .replace(/0/g, 'O')         // Convert common OCR number slips
-            .replace(/1/g, 'I')
-            .replace(/5/g, 'S');
-    }
+    function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
     function similarity(a, b) {
         if (!a.length || !b.length) return 0;
-        
-        // 2. Standard Levenshtein Distance Matrix
         const dp = [];
         for (let i = 0; i <= a.length; i++) dp.push([i]);
         for (let j = 1; j <= b.length; j++) dp[0][j] = j;
-        
         for (let i = 1; i <= a.length; i++) {
             for (let j = 1; j <= b.length; j++) {
                 dp[i][j] = Math.min(
@@ -69,23 +60,20 @@
                     dp[i][j - 1] + 1,
                     dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
                 );
-                
-                // Damerau adjustment: Catch adjacent character swaps (e.g., "YORK" vs "YROK")
-                if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-                    dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
-                }
             }
         }
-        
-        let score = 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
+        return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
+    }
 
-        // 3. Substring Bonus: If the OCR text accidentally glued background noise
-        // to the word (e.g., "CATZZ" instead of "CAT"), treat it as a strong match.
-        if (a.includes(b) || b.includes(a)) {
-            score = Math.max(score, 0.70);
+    function bestDictWord(raw) {
+        const dict = getDict();
+        const clean = norm(raw);
+        let best = { display: null, sim: -1 };
+        for (let i = 0; i < dict.length; i++) {
+            const s = similarity(clean, dict[i].norm);
+            if (s > best.sim) best = { display: dict[i].display, sim: s };
         }
-
-        return score;
+        return best;
     }
 
     function bestDictWord(raw) {
