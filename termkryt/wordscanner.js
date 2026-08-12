@@ -2,11 +2,11 @@
    WORD SCANNER — full-board OCR, force-matched to WORD_PAIRS
    ------------------------------------------------------------
    - 2 OCR passes total (upright + flipped 180°); better one wins
-   - Every OCR token is mapped to the CLOSEST dictionary word.
+   - Every OCR token maps to the CLOSEST dictionary word.
      Nothing is rejected; the word list itself is the filter.
    - Adjacent tokens merge when the pair matches a dictionary
      entry better than either alone (NEW + YORK -> NEW YORK).
-   - Words are placed into the 5x5 grid by bounding-box position.
+   - Words placed into the 5x5 grid by bounding-box position.
    - Duplicate dictionary words: better match keeps the cell.
    ------------------------------------------------------------
    Load order in HTML:
@@ -18,19 +18,32 @@
 
     const MAX_DIM = 2000;   // downscale limit for huge photos
 
-    /* ---------- dictionary from WORD_PAIRS ---------- */
-    const DICT_ENTRIES = (function () {
+    let DICT_ENTRIES = null;   // built lazily — see getDict()
+    let worker = null;
+
+    /* ---------- dictionary (lazy; handles `const WORD_PAIRS`) ---------- */
+    function rawPairs() {
+        if (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) return WORD_PAIRS;
+        if (typeof window !== 'undefined' && Array.isArray(window.WORD_PAIRS)) return window.WORD_PAIRS;
+        return null;
+    }
+
+    function getDict() {
+        if (DICT_ENTRIES) return DICT_ENTRIES;
+        const pairs = rawPairs();
+        if (!pairs || !pairs.length) return null;
         const map = new Map();
-        (window.WORD_PAIRS || []).forEach(function (pair) {
-            pair.forEach(function (w) {
+        pairs.forEach(function (pair) {
+            (Array.isArray(pair) ? pair : [pair]).forEach(function (w) {
+                if (typeof w !== 'string') return;
                 const n = w.toUpperCase().replace(/[^A-Z]/g, '');
                 if (n.length >= 2 && !map.has(n)) map.set(n, w.toUpperCase());
             });
         });
-        return Array.from(map, function (e) { return { norm: e[0], display: e[1] }; });
-    })();
-
-    let worker = null;
+        if (!map.size) return null;
+        DICT_ENTRIES = Array.from(map, function (e) { return { norm: e[0], display: e[1] }; });
+        return DICT_ENTRIES;
+    }
 
     /* ---------- helpers ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
@@ -39,7 +52,7 @@
     function similarity(a, b) {
         if (!a.length || !b.length) return 0;
         const dp = [];
-        for (let i = 0; i <= a.length; i++) { dp.push([i]); }
+        for (let i = 0; i <= a.length; i++) dp.push([i]);
         for (let j = 1; j <= b.length; j++) dp[0][j] = j;
         for (let i = 1; i <= a.length; i++) {
             for (let j = 1; j <= b.length; j++) {
@@ -55,11 +68,12 @@
 
     // ALWAYS returns the closest dictionary word — never null.
     function bestDictWord(raw) {
+        const dict = getDict();
         const clean = norm(raw);
         let best = { display: null, sim: -1 };
-        for (let i = 0; i < DICT_ENTRIES.length; i++) {
-            const s = similarity(clean, DICT_ENTRIES[i].norm);
-            if (s > best.sim) best = { display: DICT_ENTRIES[i].display, sim: s };
+        for (let i = 0; i < dict.length; i++) {
+            const s = similarity(clean, dict[i].norm);
+            if (s > best.sim) best = { display: dict[i].display, sim: s };
         }
         return best;
     }
@@ -119,8 +133,8 @@
             });
         });
 
-        // Merge pass: join a token with its right neighbour when the
-        // joined string matches the dictionary better than either alone.
+        // Merge pass: join a token with its right neighbour when the joined
+        // string matches the dictionary better than either token alone.
         tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
         const merged = [];
         let cur = null;
@@ -212,8 +226,8 @@
             if (typeof Tesseract === 'undefined') {
                 throw new Error('Tesseract not loaded — check script tag order.');
             }
-            if (!DICT_ENTRIES.length) {
-                throw new Error('WORD_PAIRS is empty — wordpairs.js must load before wordscanner.js.');
+            if (!getDict()) {
+                throw new Error('WORD_PAIRS not found — wordpairs.js must load before wordscanner.js.');
             }
 
             // Load and downscale the photo
@@ -260,17 +274,20 @@
             }
 
             // Fill the board
-            const cells = Array.prototype.slice.call(board.querySelectorAll('.cell'));
+            const cells = Array.prototype.slice.call(
+                document.getElementById('board').querySelectorAll('.cell')
+            );
             let filled = 0;
             winner.grid.forEach(function (entry, i) {
-                if (entry) {
+                if (entry && cells[i]) {
                     cells[i].querySelector('.cell-text').textContent = entry.word;
                     filled++;
                 }
             });
 
-            updateStats();
-            saveCurrentState();
+            if (typeof updateStats === 'function') updateStats();
+            if (typeof saveCurrentState === 'function') saveCurrentState();
+
             statusCb('Filled ' + filled + ' of 25 cells' +
                 (winner === down ? ' (photo upside down — corrected)' : '') + '.');
             return filled;
