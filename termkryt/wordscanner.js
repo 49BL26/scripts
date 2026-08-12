@@ -341,7 +341,7 @@
             let filled = 0;
             best.grid.forEach(function (entry, i) {
                 if (entry && cells[i]) {
-                    cells[i].querySelector('.cell-text').textContent = entry.word;
+                    cells[i].querySelector('.cell-text').textContent = entry.word.toLowerCase();
                     filled++;
                 }
             });
