@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    const MAX_DIM = 3200;          // downscale ceiling
+    const MAX_DIM = 4000;          // downscale ceiling
     const GOOD_ENOUGH = 20;        // stop trying variants once this many cells fill
 
     let DICT_ENTRIES = null;
