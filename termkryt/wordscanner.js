@@ -1,27 +1,27 @@
 /* ============================================================
    WORD SCANNER — full-board OCR, force-matched to WORD_PAIRS
    ------------------------------------------------------------
-   - 2 OCR passes total (upright + flipped 180°); better one wins
+   - Tries several image variants (raw / contrast / binarized /
+     upscaled) in both orientations; keeps the best result.
    - Every OCR token maps to the CLOSEST dictionary word.
      Nothing is rejected; the word list itself is the filter.
-   - Adjacent tokens merge when the pair matches a dictionary
-     entry better than either alone (NEW + YORK -> NEW YORK).
-   - Words placed into the 5x5 grid by bounding-box position.
-   - Duplicate dictionary words: better match keeps the cell.
+   - Adjacent tokens merge when the pair beats either alone
+     (NEW + YORK -> NEW YORK).
+   - Rows/columns found by gap clustering, so mild tilt is OK.
    ------------------------------------------------------------
-   Load order in HTML:
-     tesseract.js  ->  wordpairs.js  ->  wordscanner.js
+   Load order:  tesseract.js -> wordpairs.js -> wordscanner.js
    Exposes: window.scanWordFromImage(file, statusCb) -> count
    ============================================================ */
 (function () {
     'use strict';
 
-    const MAX_DIM = 2000;   // downscale limit for huge photos
+    const MAX_DIM = 2400;          // downscale ceiling
+    const GOOD_ENOUGH = 14;        // stop trying variants once this many cells fill
 
-    let DICT_ENTRIES = null;   // built lazily — see getDict()
+    let DICT_ENTRIES = null;
     let worker = null;
 
-    /* ---------- dictionary (lazy; handles `const WORD_PAIRS`) ---------- */
+    /* ---------- dictionary (lazy; works with `const WORD_PAIRS`) ---------- */
     function rawPairs() {
         if (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) return WORD_PAIRS;
         if (typeof window !== 'undefined' && Array.isArray(window.WORD_PAIRS)) return window.WORD_PAIRS;
@@ -45,10 +45,9 @@
         return DICT_ENTRIES;
     }
 
-    /* ---------- helpers ---------- */
+    /* ---------- string matching ---------- */
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
-    // Levenshtein similarity ratio, 0..1
     function similarity(a, b) {
         if (!a.length || !b.length) return 0;
         const dp = [];
@@ -66,7 +65,6 @@
         return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
     }
 
-    // ALWAYS returns the closest dictionary word — never null.
     function bestDictWord(raw) {
         const dict = getDict();
         const clean = norm(raw);
@@ -78,7 +76,7 @@
         return best;
     }
 
-    /* ---------- Tesseract worker (cached) ---------- */
+    /* ---------- Tesseract ---------- */
     async function getWorker() {
         if (!worker) {
             worker = await Tesseract.createWorker('eng', 1, {
@@ -89,23 +87,58 @@
             await worker.setParameters({
                 tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
                 preserve_interword_spaces: '1',
-                tessedit_pageseg_mode: '11'   // sparse text with word boxes
+                tessedit_pageseg_mode: '11'
             });
         }
         return worker;
     }
 
-    /* ---------- image processing ---------- */
-    function enhance(canvas) {
-        const ctx = canvas.getContext('2d');
-        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    /* ---------- image variants ---------- */
+    function cloneCanvas(src, scale) {
+        scale = scale || 1;
+        const dst = document.createElement('canvas');
+        dst.width = Math.round(src.width * scale);
+        dst.height = Math.round(src.height * scale);
+        const ctx = dst.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(src, 0, 0, dst.width, dst.height);
+        return dst;
+    }
+
+    function grayContrast(src, amount) {
+        const c = cloneCanvas(src);
+        const ctx = c.getContext('2d');
+        const img = ctx.getImageData(0, 0, c.width, c.height);
         const d = img.data;
         for (let i = 0; i < d.length; i += 4) {
             const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const v = Math.max(0, Math.min(255, (g - 128) * 1.3 + 128));
+            const v = Math.max(0, Math.min(255, (g - 128) * amount + 128));
             d[i] = d[i + 1] = d[i + 2] = v;
         }
         ctx.putImageData(img, 0, 0);
+        return c;
+    }
+
+    // Adaptive-ish threshold using the mean luminance
+    function binarize(src) {
+        const c = cloneCanvas(src);
+        const ctx = c.getContext('2d');
+        const img = ctx.getImageData(0, 0, c.width, c.height);
+        const d = img.data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) {
+            sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        }
+        const mean = sum / (d.length / 4);
+        const cut = mean * 0.92;
+        for (let i = 0; i < d.length; i += 4) {
+            const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            const v = g < cut ? 0 : 255;
+            d[i] = d[i + 1] = d[i + 2] = v;
+        }
+        ctx.putImageData(img, 0, 0);
+        return c;
     }
 
     function rotate180(src) {
@@ -119,12 +152,13 @@
         return dst;
     }
 
-    /* ---------- token harvest + adjacent-token merging ---------- */
+    /* ---------- harvest + merge ---------- */
     function harvest(data, W, H) {
-        const tokens = [];
+        let tokens = [];
         (data.words || []).forEach(function (w) {
             const raw = (w.text || '').toUpperCase().trim();
-            if (norm(raw).length < 2) return;   // skip pure noise fragments
+            if (!norm(raw).length) return;              // single letters now allowed
+            if (!w.bbox) return;
             tokens.push({
                 raw: raw,
                 conf: w.confidence || 0,
@@ -133,23 +167,20 @@
             });
         });
 
-        // Merge pass: join a token with its right neighbour when the joined
-        // string matches the dictionary better than either token alone.
         tokens.sort(function (a, b) { return (a.y0 - b.y0) || (a.x0 - b.x0); });
+
+        // Merge with right neighbour when the pair matches better
         const merged = [];
         let cur = null;
         for (let i = 0; i < tokens.length; i++) {
             const tok = tokens[i];
             if (cur) {
                 const sameLine = tok.y0 < cur.y1 && tok.y1 > cur.y0;
-                const close = (tok.x0 - cur.x1) < 0.05;
+                const close = (tok.x0 - cur.x1) < 0.07;
                 if (sameLine && close) {
                     const joined = bestDictWord(cur.raw + ' ' + tok.raw);
-                    const soloBest = Math.max(
-                        bestDictWord(cur.raw).sim,
-                        bestDictWord(tok.raw).sim
-                    );
-                    if (joined.sim > soloBest) {
+                    const solo = Math.max(bestDictWord(cur.raw).sim, bestDictWord(tok.raw).sim);
+                    if (joined.sim >= solo) {
                         cur = {
                             raw: cur.raw + ' ' + tok.raw,
                             conf: Math.max(cur.conf, tok.conf),
@@ -165,7 +196,6 @@
         }
         if (cur) merged.push(cur);
 
-        // Force-match every merged token to a dictionary word.
         return merged.map(function (item) {
             const m = bestDictWord(item.raw);
             return {
@@ -178,43 +208,67 @@
         });
     }
 
-    /* ---------- map words to the 5x5 grid ---------- */
-    function toGrid(words) {
-        if (!words.length) return { grid: new Array(25).fill(null), score: 0 };
-        const xs = words.map(function (w) { return w.x; });
-        const ys = words.map(function (w) { return w.y; });
-        const x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
-        const y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
-        const spanX = Math.max(x1 - x0, 0.01);
-        const spanY = Math.max(y1 - y0, 0.01);
-
-        const grid = new Array(25).fill(null);
-        let score = 0;
-        words.forEach(function (w) {
-            const col = Math.min(4, Math.max(0, Math.round(((w.x - x0) / spanX) * 4)));
-            const row = Math.min(4, Math.max(0, Math.round(((w.y - y0) / spanY) * 4)));
-            const idx = row * 5 + col;
-            if (!grid[idx] || w.sim > grid[idx].sim) {
-                if (!grid[idx]) score += w.sim;
-                grid[idx] = w;
+    /* ---------- gap clustering: tolerant of tilt / partial boards ---------- */
+    function clusterAxis(values, maxGroups) {
+        const sorted = values.slice().sort(function (a, b) { return a - b; });
+        if (!sorted.length) return [];
+        const span = sorted[sorted.length - 1] - sorted[0];
+        let groups = [[sorted[0]]];
+        const threshold = Math.max(span / (maxGroups * 2.2), 0.012);
+        for (let i = 1; i < sorted.length; i++) {
+            if (sorted[i] - sorted[i - 1] > threshold) groups.push([sorted[i]]);
+            else groups[groups.length - 1].push(sorted[i]);
+        }
+        // Too many clusters: merge the closest neighbours until we fit
+        while (groups.length > maxGroups) {
+            let bestI = 0, bestGap = Infinity;
+            for (let i = 0; i < groups.length - 1; i++) {
+                const gap = groups[i + 1][0] - groups[i][groups[i].length - 1];
+                if (gap < bestGap) { bestGap = gap; bestI = i; }
             }
+            groups[bestI] = groups[bestI].concat(groups[bestI + 1]);
+            groups.splice(bestI + 1, 1);
+        }
+        return groups.map(function (g) {
+            return g.reduce(function (a, b) { return a + b; }, 0) / g.length;
         });
-        return { grid: grid, score: score };
     }
 
-    /* ---------- one dictionary word per board ---------- */
+    function nearestIndex(centers, v) {
+        let bi = 0, bd = Infinity;
+        for (let i = 0; i < centers.length; i++) {
+            const d = Math.abs(centers[i] - v);
+            if (d < bd) { bd = d; bi = i; }
+        }
+        return bi;
+    }
+
+    function toGrid(words) {
+        const grid = new Array(25).fill(null);
+        if (!words.length) return { grid: grid, score: 0, filled: 0 };
+
+        const rowCenters = clusterAxis(words.map(function (w) { return w.y; }), 5);
+        const colCenters = clusterAxis(words.map(function (w) { return w.x; }), 5);
+
+        let score = 0, filled = 0;
+        words.forEach(function (w) {
+            const row = nearestIndex(rowCenters, w.y);
+            const col = nearestIndex(colCenters, w.x);
+            const idx = Math.min(24, row * 5 + col);
+            if (!grid[idx]) { filled++; score += w.sim; grid[idx] = w; }
+            else if (w.sim > grid[idx].sim) { score += w.sim - grid[idx].sim; grid[idx] = w; }
+        });
+        return { grid: grid, score: score, filled: filled };
+    }
+
     function dedupeGrid(grid) {
-        const seen = new Map();   // word -> cell index of best match
+        const seen = new Map();
         grid.forEach(function (cell, i) {
             if (!cell) return;
             const prev = seen.get(cell.word);
             if (prev === undefined) { seen.set(cell.word, i); return; }
-            if (cell.sim > grid[prev].sim) {
-                grid[prev] = null;
-                seen.set(cell.word, i);
-            } else {
-                grid[i] = null;
-            }
+            if (cell.sim > grid[prev].sim) { grid[prev] = null; seen.set(cell.word, i); }
+            else grid[i] = null;
         });
         return grid;
     }
@@ -227,69 +281,81 @@
                 throw new Error('Tesseract not loaded — check script tag order.');
             }
             if (!getDict()) {
-                throw new Error('WORD_PAIRS not found — wordpairs.js must load before wordscanner.js.');
+                throw new Error('WORD_PAIRS not found — wordpairs.js must load first.');
             }
 
-            // Load and downscale the photo
             const url = URL.createObjectURL(file);
             const img = new Image();
             await new Promise(function (res, rej) {
-                img.onload = res;
-                img.onerror = rej;
-                img.src = url;
+                img.onload = res; img.onerror = rej; img.src = url;
             });
             const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(img.width * scale);
-            canvas.height = Math.round(img.height * scale);
-            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            const base = document.createElement('canvas');
+            base.width = Math.round(img.width * scale);
+            base.height = Math.round(img.height * scale);
+            base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
             URL.revokeObjectURL(url);
-            enhance(canvas);
+
+            // Variants, cheapest/most-likely first
+            const variants = [
+                { name: 'contrast', make: function () { return grayContrast(base, 1.3); } },
+                { name: 'raw',      make: function () { return cloneCanvas(base); } },
+                { name: 'binary',   make: function () { return binarize(base); } },
+                { name: 'upscaled', make: function () { return grayContrast(cloneCanvas(base, 1.6), 1.15); } }
+            ];
 
             const w = await getWorker();
+            let best = null, bestLabel = '', bestFlipped = false;
 
-            // Pass 1: upright
-            statusCb('Reading board (pass 1 of 2)…');
-            const res1 = await w.recognize(canvas);
-            const up = toGrid(harvest(res1.data, canvas.width, canvas.height));
+            for (let v = 0; v < variants.length; v++) {
+                const canvas = variants[v].make();
 
-            // Pass 2: flipped 180°
-            statusCb('Reading board (pass 2 of 2)…');
-            const flipped = rotate180(canvas);
-            const res2 = await w.recognize(flipped);
-            const down = toGrid(harvest(res2.data, flipped.width, flipped.height));
+                statusCb('Reading board — ' + variants[v].name + ' (upright)…');
+                const r1 = await w.recognize(canvas);
+                const up = toGrid(harvest(r1.data, canvas.width, canvas.height));
+                if (!best || up.score > best.score) {
+                    best = up; bestLabel = variants[v].name; bestFlipped = false;
+                }
 
-            // Better total match quality wins
-            const winner = down.score > up.score ? down : up;
-            dedupeGrid(winner.grid);
+                statusCb('Reading board — ' + variants[v].name + ' (flipped)…');
+                const flipped = rotate180(canvas);
+                const r2 = await w.recognize(flipped);
+                const down = toGrid(harvest(r2.data, flipped.width, flipped.height));
+                if (down.score > best.score) {
+                    best = down; bestLabel = variants[v].name; bestFlipped = true;
+                }
 
-            console.log('Scan result grid:',
-                winner.grid.map(function (c) {
-                    return c ? c.word + ' (' + c.sim.toFixed(2) + ')' : '—';
-                }));
-
-            if (!winner.grid.some(Boolean)) {
-                statusCb('OCR returned zero tokens — image unreadable.');
-                return 0;
+                if (best.filled >= GOOD_ENOUGH) break;   // stop early when it's working
             }
 
-            // Fill the board
+            dedupeGrid(best.grid);
+
+            console.log('Scan variant used:', bestLabel, bestFlipped ? '(flipped)' : '(upright)');
+            console.log('Scan result grid:', best.grid.map(function (c) {
+                return c ? c.word + ' (' + c.sim.toFixed(2) + ')' : '—';
+            }));
+
             const cells = Array.prototype.slice.call(
                 document.getElementById('board').querySelectorAll('.cell')
             );
             let filled = 0;
-            winner.grid.forEach(function (entry, i) {
+            best.grid.forEach(function (entry, i) {
                 if (entry && cells[i]) {
                     cells[i].querySelector('.cell-text').textContent = entry.word;
                     filled++;
                 }
             });
 
+            if (!filled) {
+                statusCb('OCR found no text in any variant.');
+                return 0;
+            }
+
             if (typeof updateStats === 'function') updateStats();
             if (typeof saveCurrentState === 'function') saveCurrentState();
 
-            statusCb('Filled ' + filled + ' of 25 cells' +
-                (winner === down ? ' (photo upside down — corrected)' : '') + '.');
+            statusCb('Filled ' + filled + ' of 25 cells using ' + bestLabel +
+                (bestFlipped ? ' (photo upside down — corrected)' : '') + '.');
             return filled;
         } catch (e) {
             console.error(e);
