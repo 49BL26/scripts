@@ -269,20 +269,44 @@
     transform: translate(-50%, -50%);
 }
 
+#gridOverlay {
+  /* already has position:fixed; inset:0; etc. */
+  touch-action: none;          /* critical */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#gridOverlay img,
+#gridOverlay svg {
+  touch-action: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* Prevent the whole page from scrolling/bouncing while overlay is open */
+body.grid-align-open {
+  overflow: hidden !important;
+  position: fixed;             /* helps on iOS */
+  width: 100%;
+  height: 100%;
+}
+
+	
 </style>
 </head>
 <body>
 
 
 <!-- Overlay that appears when the button is clicked -->
-<div id="gridOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; display:none; align-items:center; justify-content:center;">
+<div id="gridOverlay">
   <div style="position:relative; max-width:95vw; max-height:90vh;">
-    <img id="gridImage" style="display:block; max-width:95vw; max-height:80vh; user-select:none;">
+    <img id="gridImage" style="display:block; max-width:95vw; max-height:80vh;">
     <svg id="gridSvg" style="position:absolute; top:0; left:0; width:100%; height:100%; overflow:visible;"></svg>
   </div>
-  <div style="position:absolute; bottom:20px; left:50%; transform:translateX(-50%); display:flex; gap:12px;">
-    <button id="confirmGridBtn" style="padding:10px 20px; font-size:16px;">Confirm Grid</button>
-    <button id="cancelGridBtn" style="padding:10px 20px; font-size:16px;">Cancel</button>
+  <div style="position:absolute; bottom:24px; left:50%; transform:translateX(-50%); display:flex; gap:12px;">
+    <button id="confirmGridBtn" style="padding:12px 22px; font-size:16px;">Confirm Grid</button>
+    <button id="cancelGridBtn" style="padding:12px 22px; font-size:16px;">Cancel</button>
   </div>
 </div>
 	
@@ -477,21 +501,43 @@
 (function () {
   'use strict';
 
-  // ---------- state ----------
-  let corners = [];          // [{x, y}, ...] in image pixel coordinates (4 points)
+  let corners = [];
   let activeHandle = null;
   let imgNaturalW = 0;
   let imgNaturalH = 0;
+  let scrollY = 0;
 
-  const overlay   = document.getElementById('gridOverlay');
-  const imgEl     = document.getElementById('gridImage');
-  const svg       = document.getElementById('gridSvg');
+  const overlay    = document.getElementById('gridOverlay');
+  const imgEl      = document.getElementById('gridImage');
+  const svg        = document.getElementById('gridSvg');
   const confirmBtn = document.getElementById('confirmGridBtn');
   const cancelBtn  = document.getElementById('cancelGridBtn');
 
+  // ---------- scroll / gesture lock ----------
+  function lockScroll() {
+    scrollY = window.scrollY;
+    document.body.classList.add('grid-align-open');
+    document.body.style.top = `-${scrollY}px`;
+  }
+
+  function unlockScroll() {
+    document.body.classList.remove('grid-align-open');
+    document.body.style.top = '';
+    window.scrollTo(0, scrollY);
+  }
+
+  function preventTouchMove(e) {
+    e.preventDefault();
+  }
+
+  function closeOverlay() {
+    overlay.style.display = 'none';
+    unlockScroll();
+    document.removeEventListener('touchmove', preventTouchMove);
+  }
+
   // ---------- public entry point ----------
   window.startGridAlign = function (imageSrcOrFile) {
-    // Accept either a URL string or a File/Blob
     const url = typeof imageSrcOrFile === 'string'
       ? imageSrcOrFile
       : URL.createObjectURL(imageSrcOrFile);
@@ -500,16 +546,18 @@
       imgNaturalW = imgEl.naturalWidth;
       imgNaturalH = imgEl.naturalHeight;
 
-      // Initialise corners as a nice inset rectangle
       const inset = 0.08;
       corners = [
-        { x: imgNaturalW * inset,       y: imgNaturalH * inset },       // TL
-        { x: imgNaturalW * (1 - inset), y: imgNaturalH * inset },       // TR
-        { x: imgNaturalW * (1 - inset), y: imgNaturalH * (1 - inset) }, // BR
-        { x: imgNaturalW * inset,       y: imgNaturalH * (1 - inset) }  // BL
+        { x: imgNaturalW * inset,       y: imgNaturalH * inset },
+        { x: imgNaturalW * (1 - inset), y: imgNaturalH * inset },
+        { x: imgNaturalW * (1 - inset), y: imgNaturalH * (1 - inset) },
+        { x: imgNaturalW * inset,       y: imgNaturalH * (1 - inset) }
       ];
 
       overlay.style.display = 'flex';
+      lockScroll();
+      document.addEventListener('touchmove', preventTouchMove, { passive: false });
+
       drawGrid();
     };
     imgEl.src = url;
@@ -517,53 +565,42 @@
 
   // ---------- drawing ----------
   function drawGrid() {
-    // Scale factor between natural image size and displayed size
     const scaleX = imgEl.clientWidth  / imgNaturalW;
     const scaleY = imgEl.clientHeight / imgNaturalH;
 
     svg.setAttribute('viewBox', `0 0 ${imgEl.clientWidth} ${imgEl.clientHeight}`);
     svg.innerHTML = '';
 
-    // Helper: convert natural → display coordinates
     const toDisplay = p => ({ x: p.x * scaleX, y: p.y * scaleY });
 
-    // 1. Outer quadrilateral
+    // Outer quad
     const pts = corners.map(toDisplay);
     const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     poly.setAttribute('points', pts.map(p => `\( {p.x}, \){p.y}`).join(' '));
-    poly.setAttribute('fill', 'none');
+    poly.setAttribute('fill', 'rgba(0,255,136,0.08)');
     poly.setAttribute('stroke', '#00ff88');
     poly.setAttribute('stroke-width', '2.5');
     svg.appendChild(poly);
 
-    // 2. Internal 5×5 grid lines (bilinear interpolation)
+    // Internal 5×5 lines
     for (let i = 1; i < 5; i++) {
       const t = i / 5;
-
-      // Horizontal line
-      const left  = lerp(corners[0], corners[3], t);
-      const right = lerp(corners[1], corners[2], t);
-      drawLine(toDisplay(left), toDisplay(right));
-
-      // Vertical line
-      const top    = lerp(corners[0], corners[1], t);
-      const bottom = lerp(corners[3], corners[2], t);
-      drawLine(toDisplay(top), toDisplay(bottom));
+      drawLine(toDisplay(lerp(corners[0], corners[3], t)), toDisplay(lerp(corners[1], corners[2], t)));
+      drawLine(toDisplay(lerp(corners[0], corners[1], t)), toDisplay(lerp(corners[3], corners[2], t)));
     }
 
-    // 3. Draggable corner handles
+    // Handles
     corners.forEach((c, idx) => {
       const p = toDisplay(c);
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('cx', p.x);
       circle.setAttribute('cy', p.y);
-      circle.setAttribute('r', 14);
+      circle.setAttribute('r', 16);
       circle.setAttribute('fill', '#00ff88');
       circle.setAttribute('stroke', '#003311');
-      circle.setAttribute('stroke-width', '2');
+      circle.setAttribute('stroke-width', '2.5');
       circle.style.cursor = 'grab';
       circle.dataset.idx = idx;
-
       circle.addEventListener('pointerdown', onHandleDown);
       svg.appendChild(circle);
     });
@@ -577,15 +614,12 @@
     line.setAttribute('y2', b.y);
     line.setAttribute('stroke', '#00ff88');
     line.setAttribute('stroke-width', '1.5');
-    line.setAttribute('stroke-opacity', '0.7');
+    line.setAttribute('stroke-opacity', '0.75');
     svg.appendChild(line);
   }
 
   function lerp(a, b, t) {
-    return {
-      x: a.x + (b.x - a.x) * t,
-      y: a.y + (b.y - a.y) * t
-    };
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   }
 
   // ---------- interaction ----------
@@ -604,7 +638,6 @@
       let x = (ev.clientX - rect.left) * scaleX;
       let y = (ev.clientY - rect.top)  * scaleY;
 
-      // clamp to image
       x = Math.max(0, Math.min(imgNaturalW, x));
       y = Math.max(0, Math.min(imgNaturalH, y));
 
@@ -626,23 +659,18 @@
 
   // ---------- buttons ----------
   document.getElementById('alignGridBtn').addEventListener('click', () => {
-    // DEMO: replace this with your real image source
-    // Example: startGridAlign(yourFileOrUrl);
-    startGridAlign('https://picsum.photos/800/800'); // temporary demo image
+    // Replace with your real image source
+    startGridAlign('https://picsum.photos/800/800');
   });
 
   confirmBtn.addEventListener('click', () => {
-    console.log('Final corners (natural image coordinates):', corners);
-    // Here you would later call your crop + OCR routine
-    // e.g. processGrid(corners, imgEl);
-    overlay.style.display = 'none';
+    console.log('Final corners (natural image coords):', corners);
+    // Later: processGrid(corners, imgEl);
+    closeOverlay();
   });
 
-  cancelBtn.addEventListener('click', () => {
-    overlay.style.display = 'none';
-  });
+  cancelBtn.addEventListener('click', closeOverlay);
 
-  // Redraw on window resize so the overlay stays aligned
   window.addEventListener('resize', () => {
     if (overlay.style.display !== 'none') drawGrid();
   });
