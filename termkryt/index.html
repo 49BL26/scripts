@@ -2633,154 +2633,249 @@ document.getElementById('scan-file').addEventListener('change', function (e) {
   }
 
   // ---------- OpenCV crop ----------
-  async function extractCellCrops(corners, imgElement) {
-    if (typeof cv === 'undefined' || !cv.Mat) {
-      await new Promise(resolve => {
-        const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
-        check();
-      });
-    }
-
-    const src = cv.imread(imgElement);
-    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      corners[0].x, corners[0].y,
-      corners[1].x, corners[1].y,
-      corners[2].x, corners[2].y,
-      corners[3].x, corners[3].y
-    ]);
-
-    const size = 1000;
-    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      0, 0, size, 0, size, size, 0, size
-    ]);
-
-    const M = cv.getPerspectiveTransform(srcPts, dstPts);
-    const warped = new cv.Mat();
-    cv.warpPerspective(src, warped, M, new cv.Size(size, size));
-
-    const cellW = size / 5;
-    const cellH = size / 5;
-    const crops = [];
-
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 5; c++) {
-        const x = Math.round(c * cellW);
-        const y = Math.round(r * cellH);
-        const w = Math.round(cellW);
-        const h = Math.round(cellH);
-
-        const rect = new cv.Rect(x, y, w, h);
-        const cellMat = warped.roi(rect);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        cv.imshow(canvas, cellMat);
-
-        crops.push(canvas);
-        cellMat.delete();
-      }
-    }
-
-    src.delete(); warped.delete(); srcPts.delete(); dstPts.delete(); M.delete();
-    return crops;
-  }
-
-  // ---------- improved single-cell OCR (uses variants + dictionary force-match) ----------
-  async function scanSingleCell(canvas) {
-    return new Promise(async (resolve) => {
-      try {
-        const worker = await Tesseract.createWorker('eng');
-        await worker.setParameters({
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
-          tessedit_pageseg_mode: '7'   // single text line
-        });
-
-        // Try a few variants; keep the best dictionary match
-        const variants = [
-          { name: 'contrast', make: () => grayContrast(canvas, 1.3) },
-          { name: 'raw',      make: () => cloneCanvas(canvas) },
-          { name: 'binary',   make: () => binarize(canvas) },
-          { name: 'upscaled', make: () => grayContrast(cloneCanvas(canvas, 1.5), 1.15) }
-        ];
-
-        let best = { display: null, sim: -1 };
-
-        for (const v of variants) {
-          const c = v.make();
-          const { data } = await worker.recognize(c);
-          const raw = (data.text || '').trim().toUpperCase().replace(/[^A-Z ]/g, '');
-          if (!raw) continue;
-
-          const match = bestDictWord(raw);
-          if (match.sim > best.sim) best = match;
-
-          // Early exit if we already have a very strong match
-          if (best.sim >= 0.85) break;
-        }
-
-        await worker.terminate();
-        resolve(best.display || null);
-      } catch (e) {
-        console.warn('single cell OCR failed', e);
-        resolve(null);
-      }
+// ---------- OpenCV crop with perspective-aware height ----------
+async function extractCellCrops(corners, imgElement) {
+  if (typeof cv === 'undefined' || !cv.Mat) {
+    await new Promise(resolve => {
+      const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
+      check();
     });
   }
 
-  // ---------- buttons ----------
-  document.getElementById('alignGridBtn').addEventListener('click', () => {
-    startGridAlign('https://picsum.photos/800/800');
+  const src = cv.imread(imgElement);
+  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    corners[0].x, corners[0].y,
+    corners[1].x, corners[1].y,
+    corners[2].x, corners[2].y,
+    corners[3].x, corners[3].y
+  ]);
+
+  const size = 1400;                         // larger = better OCR
+  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    0, 0, size, 0, size, size, 0, size
+  ]);
+
+  const M = cv.getPerspectiveTransform(srcPts, dstPts);
+  const warped = new cv.Mat();
+  cv.warpPerspective(src, warped, M, new cv.Size(size, size));
+
+  // Perspective scale: how much shorter is the top edge vs bottom edge?
+  const topLen = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+  const botLen = Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y);
+  const topScale = Math.min(1, topLen / (botLen || 1));   // ≤ 1
+
+  const cellW = size / 5;
+  const cellH = size / 5;
+  const crops = [];
+
+  for (let r = 0; r < 5; r++) {
+    // Interpolate: top row gets more aggressive “smaller” crop, bottom row almost full
+    const rowT = r / 4;                          // 0 = top, 1 = bottom
+    const scale = topScale + (1 - topScale) * rowT;
+    // Base upright ratio 0.58, further reduced for upper rows
+    const uprightRatio = 0.58 * (0.75 + 0.25 * scale);
+
+    for (let c = 0; c < 5; c++) {
+      const x = Math.round(c * cellW);
+      const y = Math.round(r * cellH);
+      const w = Math.round(cellW);
+      const h = Math.round(cellH);
+
+      const fullRect = new cv.Rect(x, y, w, h);
+      const fullMat  = warped.roi(fullRect);
+
+      const cropH = Math.max(40, Math.round(h * uprightRatio));
+      const cropY = h - cropH;
+      const bottomRect = new cv.Rect(0, cropY, w, cropH);
+      const bottomMat  = fullMat.roi(bottomRect);
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = w;
+      canvas.height = cropH;
+      cv.imshow(canvas, bottomMat);
+
+      crops.push(canvas);
+      bottomMat.delete();
+      fullMat.delete();
+    }
+  }
+
+  src.delete(); warped.delete(); srcPts.delete(); dstPts.delete(); M.delete();
+  return crops;
+}
+
+// ---------- shared worker ----------
+let sharedWorker = null;
+
+async function getSharedWorker() {
+  if (!sharedWorker) {
+    sharedWorker = await Tesseract.createWorker('eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
+      langPath:   'https://tessdata.projectnaptha.com/4.0.0'
+    });
+    await sharedWorker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
+      preserve_interword_spaces: '1',
+      tessedit_pageseg_mode: '7'
+    });
+  }
+  return sharedWorker;
+}
+
+// ---------- already-used set (words + their partners) ----------
+function buildUsedSet(ignoreIndex) {
+  const used = new Set();
+  const cells = document.querySelectorAll('#board .cell');
+  cells.forEach((cell, i) => {
+    if (i === ignoreIndex) return;
+    const t = (cell.querySelector('.cell-text')?.textContent || '').trim();
+    if (!t || /^Card\s+\d+$/i.test(t)) return;
+    const k = t.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!k) return;
+    used.add(k);
+    // also block the partner if it exists in WORD_PAIRS
+    if (typeof WORD_PAIRS !== 'undefined') {
+      for (const pair of WORD_PAIRS) {
+        const a = (pair[0] || '').toUpperCase().replace(/[^A-Z]/g, '');
+        const b = (pair[1] || '').toUpperCase().replace(/[^A-Z]/g, '');
+        if (a === k && b) used.add(b);
+        if (b === k && a) used.add(a);
+      }
+    }
+  });
+  return used;
+}
+
+// ---------- stronger single-cell OCR ----------
+async function scanSingleCell(canvas, usedSet) {
+  try {
+    const worker = await getSharedWorker();
+
+    const variants = [
+      { name: 'up-contrast', make: () => grayContrast(cloneCanvas(canvas, 2.4), 1.7) },
+      { name: 'up-binary',   make: () => binarize(cloneCanvas(canvas, 2.2)) },
+      { name: 'contrast',    make: () => grayContrast(canvas, 1.55) },
+      { name: 'raw',         make: () => cloneCanvas(canvas) },
+      { name: 'binary',      make: () => binarize(canvas) }
+    ];
+
+    let best = { display: null, sim: -1, len: 0 };
+
+    for (const v of variants) {
+      const c = v.make();
+      const { data } = await worker.recognize(c);
+      let raw = (data.text || '').trim().toUpperCase()
+                  .replace(/[^A-Z ]+/g, ' ')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+      if (!raw || raw.length < 2) continue;
+
+      // Candidate list: whole string + individual tokens
+      const candidates = [raw];
+      raw.split(' ').forEach(t => { if (t.length >= 2) candidates.push(t); });
+
+      for (const cand of candidates) {
+        const match = bestDictWord(cand);
+        if (!match.display) continue;
+
+        const normMatch = match.display.toUpperCase().replace(/[^A-Z]/g, '');
+        if (usedSet.has(normMatch)) continue;          // already on board (or partner)
+
+        // Heavy penalty for very short words so they don’t dominate
+        let score = match.sim;
+        if (normMatch.length <= 3) score *= 0.55;
+        else if (normMatch.length === 4) score *= 0.78;
+        else score *= 1.05;                            // slight bonus for longer words
+
+        // Prefer longer match when scores are close
+        if (score > best.sim + 0.02 ||
+           (Math.abs(score - best.sim) < 0.02 && normMatch.length > best.len)) {
+          best = { display: match.display, sim: score, len: normMatch.length };
+        }
+      }
+
+      if (best.sim >= 0.90) break;                     // good enough
+    }
+
+    return best.display || null;
+  } catch (e) {
+    console.warn('single cell OCR failed', e);
+    return null;
+  }
+}
+
+// ---------- confirm button ----------
+confirmBtn.addEventListener('click', async () => {
+  closeOverlay();
+
+  if (!corners || corners.length !== 4) {
+    uiAlert('No grid corners available.');
+    return;
+  }
+
+  const statusPromise = showModal({
+    title: 'Scanning cells…',
+    message: '0 / 25',
+    buttons: [],
+    dismiss: null
   });
 
-  confirmBtn.addEventListener('click', async () => {
-    closeOverlay();
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-    if (!corners || corners.length !== 4) {
-      uiAlert('No grid corners available.');
-      return;
-    }
+  try {
+    const crops = await extractCellCrops(corners, imgEl);
+    const cells = Array.from(document.querySelectorAll('#board .cell'));
+    let filled = 0;
 
-    const status = await showModal({
-      title: 'Scanning cells…',
-      message: '0 / 25',
-      buttons: [],
-      dismiss: null
-    });
+    // Start with whatever is already on the board
+    const used = buildUsedSet(-1);
 
-    try {
-      const crops = await extractCellCrops(corners, imgEl);
-      const cells = Array.from(document.querySelectorAll('#board .cell'));
+    for (let i = 0; i < 25; i++) {
+      const msgEl = document.getElementById('modal-message');
+      if (msgEl) {
+        msgEl.textContent = `${i + 1} / 25`;
+        void msgEl.offsetHeight;                     // force paint
+      }
 
-      for (let i = 0; i < 25; i++) {
-        const msgEl = document.getElementById('modal-message');
-        if (msgEl) msgEl.textContent = `${i + 1} / 25`;
+      // Skip cells that already have a real word
+      const existing = (cells[i].querySelector('.cell-text')?.textContent || '').trim();
+      if (existing && !/^Card\s+\d+$/i.test(existing)) {
+        const k = existing.toUpperCase().replace(/[^A-Z]/g, '');
+        used.add(k);
+        continue;
+      }
 
-        const word = await scanSingleCell(crops[i]);
+      const word = await scanSingleCell(crops[i], used);
 
-        if (word && cells[i]) {
-          cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
+      if (word && cells[i]) {
+        cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
+        const k = word.toUpperCase().replace(/[^A-Z]/g, '');
+        used.add(k);
+        // also block its partner immediately
+        if (typeof WORD_PAIRS !== 'undefined') {
+          for (const pair of WORD_PAIRS) {
+            const a = (pair[0] || '').toUpperCase().replace(/[^A-Z]/g, '');
+            const b = (pair[1] || '').toUpperCase().replace(/[^A-Z]/g, '');
+            if (a === k && b) used.add(b);
+            if (b === k && a) used.add(a);
+          }
         }
+        filled++;
       }
 
       if (typeof updateStats === 'function') updateStats();
-      if (typeof saveCurrentState === 'function') saveCurrentState();
-
-      settleModal(true);
-      uiAlert('Finished scanning 25 cells.', 'Done');
-    } catch (err) {
-      console.error(err);
-      settleModal(null);
-      uiAlert('Error while scanning cells: ' + err.message);
     }
-  });
 
-  cancelBtn.addEventListener('click', closeOverlay);
-
-  window.addEventListener('resize', () => {
-    if (overlay.style.display !== 'none') drawGrid();
-  });
-})();
+    if (typeof saveCurrentState === 'function') saveCurrentState();
+    settleModal(true);
+    uiAlert(`Finished. Filled ${filled} of 25 cells.`, 'Done');
+  } catch (err) {
+    console.error(err);
+    settleModal(null);
+    uiAlert('Error while scanning cells: ' + err.message);
+  }
+});
 </script>
 
 <script>
