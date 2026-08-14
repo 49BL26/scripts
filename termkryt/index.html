@@ -663,11 +663,147 @@ body.grid-align-open {
     startGridAlign('https://picsum.photos/800/800');
   });
 
-  confirmBtn.addEventListener('click', () => {
-    console.log('Final corners (natural image coords):', corners);
-    // Later: processGrid(corners, imgEl);
-    closeOverlay();
+
+async function extractCellCrops(corners, imgElement) {
+  // Wait for OpenCV if it is still loading
+  if (typeof cv === 'undefined' || !cv.Mat) {
+    await new Promise(resolve => {
+      const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
+      check();
+    });
+  }
+
+  // Load the image into an OpenCV Mat
+  const src = cv.imread(imgElement);
+
+  // Source quad (TL, TR, BR, BL) – already in natural image coordinates
+  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    corners[0].x, corners[0].y,
+    corners[1].x, corners[1].y,
+    corners[2].x, corners[2].y,
+    corners[3].x, corners[3].y
+  ]);
+
+  // Destination: a clean square (pick a size that keeps detail)
+  const size = 1000;                     // 1000×1000 warped board
+  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    0, 0,
+    size, 0,
+    size, size,
+    0, size
+  ]);
+
+  const M = cv.getPerspectiveTransform(srcPts, dstPts);
+  const warped = new cv.Mat();
+  cv.warpPerspective(src, warped, M, new cv.Size(size, size));
+
+  // Now cut the warped image into 25 equal cells (tight – no padding)
+  const cellW = size / 5;
+  const cellH = size / 5;
+  const crops = [];
+
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const x = Math.round(c * cellW);
+      const y = Math.round(r * cellH);
+      const w = Math.round(cellW);
+      const h = Math.round(cellH);
+
+      const rect = new cv.Rect(x, y, w, h);
+      const cellMat = warped.roi(rect);
+
+      // Convert Mat → canvas so the rest of the code stays simple
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      cv.imshow(canvas, cellMat);
+
+      crops.push(canvas);
+      cellMat.delete();
+    }
+  }
+
+  // Cleanup
+  src.delete(); warped.delete(); srcPts.delete(); dstPts.delete(); M.delete();
+
+  return crops;   // array of 25 <canvas> elements
+}
+
+async function scanSingleCell(canvas) {
+  // Temporary: just run the existing full recognizer on the tiny crop
+  // and take the first/best word. You will replace this later.
+  return new Promise(async (resolve) => {
+    try {
+      // Re-use the worker if you expose it, or create a quick one
+      const worker = await Tesseract.createWorker('eng');
+      await worker.setParameters({
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
+        tessedit_pageseg_mode: '7'        // treat as single text line
+      });
+
+      const { data } = await worker.recognize(canvas);
+      await worker.terminate();
+
+      const raw = (data.text || '').trim().toUpperCase().replace(/[^A-Z ]/g, '');
+      if (!raw) return resolve(null);
+
+      // Force-match against the dictionary (same logic you already have)
+      if (typeof bestDictWord === 'function') {
+        const match = bestDictWord(raw);
+        resolve(match && match.display ? match.display : raw);
+      } else {
+        resolve(raw);
+      }
+    } catch (e) {
+      console.warn('single cell OCR failed', e);
+      resolve(null);
+    }
   });
+}
+	
+confirmBtn.addEventListener('click', async () => {
+  closeOverlay();
+
+  if (!corners || corners.length !== 4) {
+    uiAlert('No grid corners available.');
+    return;
+  }
+
+  // Show a simple status while we work
+  const status = await showModal({
+    title: 'Scanning cells…',
+    message: '0 / 25',
+    buttons: [],          // no buttons — we will close it ourselves
+    dismiss: null
+  });
+
+  try {
+    const crops = await extractCellCrops(corners, imgEl);   // returns 25 canvases
+    const cells = Array.from(document.querySelectorAll('#board .cell'));
+
+    for (let i = 0; i < 25; i++) {
+      // Update the modal message
+      const msgEl = document.getElementById('modal-message');
+      if (msgEl) msgEl.textContent = `${i + 1} / 25`;
+
+      const word = await scanSingleCell(crops[i]);   // ← you will implement / adapt this
+
+      if (word && cells[i]) {
+        cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
+      }
+    }
+
+    if (typeof updateStats === 'function') updateStats();
+    if (typeof saveCurrentState === 'function') saveCurrentState();
+
+    settleModal(true);
+    uiAlert('Finished scanning 25 cells.', 'Done');
+  } catch (err) {
+    console.error(err);
+    settleModal(null);
+    uiAlert('Error while scanning cells: ' + err.message);
+  }
+});
 
   cancelBtn.addEventListener('click', closeOverlay);
 
@@ -2149,13 +2285,11 @@ loadSavedState();
 </script>
 
 <script>
-document.getElementById('scan-file').addEventListener('change', async function (e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const n = await scanWordFromImage(file, m => console.log(m));
-    if (n > 0) uiAlert('Scanned and filled ' + n + ' cells. Fix misreads via Manual Edit.', 'Scan Complete');
-    else uiAlert('Still nothing readable. Try: square-on photo, flat lighting, no glare.', 'Scan Failed');
-    e.target.value = '';
+document.getElementById('scan-file').addEventListener('change', function (e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  startGridAlign(file);          // opens the draggable grid on the photo
+  e.target.value = '';
 });
 </script>
 
