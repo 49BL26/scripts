@@ -270,11 +270,29 @@
 }
 
 #gridOverlay {
-  /* already has position:fixed; inset:0; etc. */
-  touch-action: none;          /* critical */
+  position: fixed;
+  inset: 0;
+  z-index: 2000;                 /* above everything */
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.75);
+  padding: 16px;
+  touch-action: none;
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
+}
+
+#gridOverlay > div:first-child {
+  position: relative;
+  max-width: 95vw;
+  max-height: 75vh;
+  background: #111;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
 }
 
 #gridOverlay img,
@@ -282,6 +300,15 @@
   touch-action: none;
   -webkit-user-drag: none;
   user-select: none;
+}
+
+/* buttons stay on top of the overlay */
+#gridOverlay > div:last-child {
+  position: relative;            /* not absolute */
+  z-index: 2001;
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
 }
 
 /* Prevent the whole page from scrolling/bouncing while overlay is open */
@@ -2300,155 +2327,414 @@ document.getElementById('scan-file').addEventListener('change', function (e) {
    Works with mouse and touch.
    ============================================================ */
 (function () {
-    'use strict';
+  'use strict';
 
-    const boardEl = document.getElementById('board');
-    if (!boardEl) return;
+  let corners = [];
+  let activeHandle = null;
+  let imgNaturalW = 0;
+  let imgNaturalH = 0;
+  let scrollY = 0;
 
-    let dragEnabled = false;
-    let srcCell = null;
-    let overCell = null;
-    let ghost = null;
-    let startX = 0, startY = 0, armed = false;
+  const overlay    = document.getElementById('gridOverlay');
+  const imgEl      = document.getElementById('gridImage');
+  const svg        = document.getElementById('gridSvg');
+  const confirmBtn = document.getElementById('confirmGridBtn');
+  const cancelBtn  = document.getElementById('cancelGridBtn');
 
-    const DRAG_THRESHOLD = 6;   // px before a press becomes a drag
+  // ---------- dictionary helpers (from wordscanner methodology) ----------
+  let DICT_ENTRIES = null;
 
-    /* ---- enable/disable based on the mode dropdowns ---- */
-    function refreshDragMode() {
-        const l1 = (document.getElementById('op1') || {}).value;
-        const tool = (document.getElementById('op2-setup') || {}).value;
-        dragEnabled = (l1 === 'setup' && tool === 'words');
-        boardEl.classList.toggle('drag-mode', dragEnabled);
-        if (!dragEnabled) cleanup();
-    }
+  function rawPairs() {
+    if (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) return WORD_PAIRS;
+    if (typeof window !== 'undefined' && Array.isArray(window.WORD_PAIRS)) return window.WORD_PAIRS;
+    return null;
+  }
 
-    ['op1', 'op2-setup'].forEach(function (id) {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('change', function () { setTimeout(refreshDragMode, 0); });
+  function getDict() {
+    if (DICT_ENTRIES) return DICT_ENTRIES;
+    const pairs = rawPairs();
+    if (!pairs || !pairs.length) return null;
+    const map = new Map();
+    pairs.forEach(function (pair) {
+      (Array.isArray(pair) ? pair : [pair]).forEach(function (w) {
+        if (typeof w !== 'string') return;
+        const n = w.toUpperCase().replace(/[^A-Z]/g, '');
+        if (n.length >= 2 && !map.has(n)) map.set(n, w.toUpperCase());
+      });
     });
-    refreshDragMode();
-    window.refreshDragMode = refreshDragMode;   // callable from uiSync if you like
+    if (!map.size) return null;
+    DICT_ENTRIES = Array.from(map, function (e) { return { norm: e[0], display: e[1] }; });
+    return DICT_ENTRIES;
+  }
 
-    /* ---- helpers ---- */
-    function cellAt(x, y) {
-        const el = document.elementFromPoint(x, y);
-        return el ? el.closest('#board .cell') : null;
+  function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
+
+  // Levenshtein-based similarity (handles insertions/deletions/swaps)
+  function matrixSimilarity(a, b) {
+    if (!a.length || !b.length) return 0;
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        dp[i][j] = Math.min(
+          dp[i - 1][j] + 1,
+          dp[i][j - 1] + 1,
+          dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
+        );
+      }
+    }
+    return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
+  }
+
+  function bestDictWord(raw) {
+    const dict = getDict();
+    if (!dict) return { display: null, sim: -1 };
+    const clean = norm(raw);
+    let best = { display: null, sim: -1 };
+    for (let i = 0; i < dict.length; i++) {
+      const s = matrixSimilarity(clean, dict[i].norm);
+      if (s > best.sim) best = { display: dict[i].display, sim: s };
+    }
+    return best;
+  }
+
+  // ---------- image variants for a single cell ----------
+  function cloneCanvas(src, scale) {
+    scale = scale || 1;
+    const dst = document.createElement('canvas');
+    dst.width = Math.round(src.width * scale);
+    dst.height = Math.round(src.height * scale);
+    const ctx = dst.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, dst.width, dst.height);
+    return dst;
+  }
+
+  function grayContrast(src, amount) {
+    const c = cloneCanvas(src);
+    const ctx = c.getContext('2d');
+    const img = ctx.getImageData(0, 0, c.width, c.height);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const v = Math.max(0, Math.min(255, (g - 128) * amount + 128));
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    ctx.putImageData(img, 0, 0);
+    return c;
+  }
+
+  function binarize(src) {
+    const c = cloneCanvas(src);
+    const ctx = c.getContext('2d');
+    const img = ctx.getImageData(0, 0, c.width, c.height);
+    const d = img.data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    }
+    const mean = sum / (d.length / 4);
+    const cut = mean * 0.92;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const v = g < cut ? 0 : 255;
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    ctx.putImageData(img, 0, 0);
+    return c;
+  }
+
+  // ---------- scroll / gesture lock ----------
+  function lockScroll() {
+    scrollY = window.scrollY;
+    document.body.classList.add('grid-align-open');
+    document.body.style.top = `-${scrollY}px`;
+  }
+
+  function unlockScroll() {
+    document.body.classList.remove('grid-align-open');
+    document.body.style.top = '';
+    window.scrollTo(0, scrollY);
+  }
+
+  function preventTouchMove(e) {
+    e.preventDefault();
+  }
+
+  function closeOverlay() {
+    overlay.style.display = 'none';
+    unlockScroll();
+    document.removeEventListener('touchmove', preventTouchMove);
+  }
+
+  // ---------- public entry point ----------
+  window.startGridAlign = function (imageSrcOrFile) {
+    const url = typeof imageSrcOrFile === 'string'
+      ? imageSrcOrFile
+      : URL.createObjectURL(imageSrcOrFile);
+
+    imgEl.onload = () => {
+      imgNaturalW = imgEl.naturalWidth;
+      imgNaturalH = imgEl.naturalHeight;
+
+      const inset = 0.08;
+      corners = [
+        { x: imgNaturalW * inset,       y: imgNaturalH * inset },
+        { x: imgNaturalW * (1 - inset), y: imgNaturalH * inset },
+        { x: imgNaturalW * (1 - inset), y: imgNaturalH * (1 - inset) },
+        { x: imgNaturalW * inset,       y: imgNaturalH * (1 - inset) }
+      ];
+
+      overlay.style.display = 'flex';
+      lockScroll();
+      document.addEventListener('touchmove', preventTouchMove, { passive: false });
+
+      drawGrid();
+    };
+    imgEl.src = url;
+  };
+
+  // ---------- drawing ----------
+  function drawGrid() {
+    const scaleX = imgEl.clientWidth  / imgNaturalW;
+    const scaleY = imgEl.clientHeight / imgNaturalH;
+
+    svg.setAttribute('viewBox', `0 0 ${imgEl.clientWidth} ${imgEl.clientHeight}`);
+    svg.innerHTML = '';
+
+    const toDisplay = p => ({ x: p.x * scaleX, y: p.y * scaleY });
+
+    const pts = corners.map(toDisplay);
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', pts.map(p => `${p.x},${p.y}`).join(' '));
+    poly.setAttribute('fill', 'rgba(0,255,136,0.08)');
+    poly.setAttribute('stroke', '#00ff88');
+    poly.setAttribute('stroke-width', '2.5');
+    svg.appendChild(poly);
+
+    for (let i = 1; i < 5; i++) {
+      const t = i / 5;
+      drawLine(toDisplay(lerp(corners[0], corners[3], t)), toDisplay(lerp(corners[1], corners[2], t)));
+      drawLine(toDisplay(lerp(corners[0], corners[1], t)), toDisplay(lerp(corners[3], corners[2], t)));
     }
 
-    function textOf(cell) {
-        const span = cell.querySelector('.cell-text');
-        return span ? span.textContent : '';
+    corners.forEach((c, idx) => {
+      const p = toDisplay(c);
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', p.x);
+      circle.setAttribute('cy', p.y);
+      circle.setAttribute('r', 16);
+      circle.setAttribute('fill', '#00ff88');
+      circle.setAttribute('stroke', '#003311');
+      circle.setAttribute('stroke-width', '2.5');
+      circle.style.cursor = 'grab';
+      circle.dataset.idx = idx;
+      circle.addEventListener('pointerdown', onHandleDown);
+      svg.appendChild(circle);
+    });
+  }
+
+  function drawLine(a, b) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', a.x);
+    line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x);
+    line.setAttribute('y2', b.y);
+    line.setAttribute('stroke', '#00ff88');
+    line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('stroke-opacity', '0.75');
+    svg.appendChild(line);
+  }
+
+  function lerp(a, b, t) {
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+
+  // ---------- interaction ----------
+  function onHandleDown(e) {
+    e.preventDefault();
+    activeHandle = +e.target.dataset.idx;
+    e.target.setPointerCapture(e.pointerId);
+    e.target.style.cursor = 'grabbing';
+
+    const move = (ev) => {
+      if (activeHandle === null) return;
+      const rect = imgEl.getBoundingClientRect();
+      const scaleX = imgNaturalW / imgEl.clientWidth;
+      const scaleY = imgNaturalH / imgEl.clientHeight;
+
+      let x = (ev.clientX - rect.left) * scaleX;
+      let y = (ev.clientY - rect.top)  * scaleY;
+
+      x = Math.max(0, Math.min(imgNaturalW, x));
+      y = Math.max(0, Math.min(imgNaturalH, y));
+
+      corners[activeHandle] = { x, y };
+      drawGrid();
+    };
+
+    const up = (ev) => {
+      activeHandle = null;
+      e.target.style.cursor = 'grab';
+      e.target.releasePointerCapture(ev.pointerId);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // ---------- OpenCV crop ----------
+  async function extractCellCrops(corners, imgElement) {
+    if (typeof cv === 'undefined' || !cv.Mat) {
+      await new Promise(resolve => {
+        const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
+        check();
+      });
     }
 
-    function setText(cell, value) {
-        const span = cell.querySelector('.cell-text');
-        if (span) span.textContent = value;
+    const src = cv.imread(imgElement);
+    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      corners[0].x, corners[0].y,
+      corners[1].x, corners[1].y,
+      corners[2].x, corners[2].y,
+      corners[3].x, corners[3].y
+    ]);
+
+    const size = 1000;
+    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0, size, 0, size, size, 0, size
+    ]);
+
+    const M = cv.getPerspectiveTransform(srcPts, dstPts);
+    const warped = new cv.Mat();
+    cv.warpPerspective(src, warped, M, new cv.Size(size, size));
+
+    const cellW = size / 5;
+    const cellH = size / 5;
+    const crops = [];
+
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        const x = Math.round(c * cellW);
+        const y = Math.round(r * cellH);
+        const w = Math.round(cellW);
+        const h = Math.round(cellH);
+
+        const rect = new cv.Rect(x, y, w, h);
+        const cellMat = warped.roi(rect);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        cv.imshow(canvas, cellMat);
+
+        crops.push(canvas);
+        cellMat.delete();
+      }
     }
 
-    function makeGhost(cell, x, y) {
-        ghost = document.createElement('div');
-        ghost.id = 'drag-ghost';
-        ghost.textContent = textOf(cell);
-        document.body.appendChild(ghost);
-        moveGhost(x, y);
-    }
+    src.delete(); warped.delete(); srcPts.delete(); dstPts.delete(); M.delete();
+    return crops;
+  }
 
-    function moveGhost(x, y) {
-        if (!ghost) return;
-        ghost.style.left = x + 'px';
-        ghost.style.top = y + 'px';
-    }
+  // ---------- improved single-cell OCR (uses variants + dictionary force-match) ----------
+  async function scanSingleCell(canvas) {
+    return new Promise(async (resolve) => {
+      try {
+        const worker = await Tesseract.createWorker('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
+          tessedit_pageseg_mode: '7'   // single text line
+        });
 
-    function cleanup() {
-        if (ghost) { ghost.remove(); ghost = null; }
-        if (srcCell) srcCell.classList.remove('drag-src');
-        if (overCell) overCell.classList.remove('drag-over');
-        srcCell = null;
-        overCell = null;
-        armed = false;
-    }
+        // Try a few variants; keep the best dictionary match
+        const variants = [
+          { name: 'contrast', make: () => grayContrast(canvas, 1.3) },
+          { name: 'raw',      make: () => cloneCanvas(canvas) },
+          { name: 'binary',   make: () => binarize(canvas) },
+          { name: 'upscaled', make: () => grayContrast(cloneCanvas(canvas, 1.5), 1.15) }
+        ];
 
-    /* ---- press ---- */
-    function onDown(e) {
-        if (!dragEnabled) return;
-        const point = e.touches ? e.touches[0] : e;
-        const cell = cellAt(point.clientX, point.clientY);
-        if (!cell) return;
-        srcCell = cell;
-        startX = point.clientX;
-        startY = point.clientY;
-        armed = false;
-    }
+        let best = { display: null, sim: -1 };
 
-    /* ---- move ---- */
-    function onMove(e) {
-        if (!dragEnabled || !srcCell) return;
-        const point = e.touches ? e.touches[0] : e;
+        for (const v of variants) {
+          const c = v.make();
+          const { data } = await worker.recognize(c);
+          const raw = (data.text || '').trim().toUpperCase().replace(/[^A-Z ]/g, '');
+          if (!raw) continue;
 
-        if (!armed) {
-            const dx = point.clientX - startX;
-            const dy = point.clientY - startY;
-            if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
-            armed = true;
-            srcCell.classList.add('drag-src');
-            makeGhost(srcCell, point.clientX, point.clientY);
+          const match = bestDictWord(raw);
+          if (match.sim > best.sim) best = match;
+
+          // Early exit if we already have a very strong match
+          if (best.sim >= 0.85) break;
         }
 
-        e.preventDefault();
-        moveGhost(point.clientX, point.clientY);
+        await worker.terminate();
+        resolve(best.display || null);
+      } catch (e) {
+        console.warn('single cell OCR failed', e);
+        resolve(null);
+      }
+    });
+  }
 
-        const target = cellAt(point.clientX, point.clientY);
-        if (target !== overCell) {
-            if (overCell) overCell.classList.remove('drag-over');
-            overCell = (target && target !== srcCell) ? target : null;
-            if (overCell) overCell.classList.add('drag-over');
-        }
+  // ---------- buttons ----------
+  document.getElementById('alignGridBtn').addEventListener('click', () => {
+    startGridAlign('https://picsum.photos/800/800');
+  });
+
+  confirmBtn.addEventListener('click', async () => {
+    closeOverlay();
+
+    if (!corners || corners.length !== 4) {
+      uiAlert('No grid corners available.');
+      return;
     }
 
-    /* ---- release ---- */
-    function onUp(e) {
-        if (!dragEnabled || !srcCell) { cleanup(); return; }
+    const status = await showModal({
+      title: 'Scanning cells…',
+      message: '0 / 25',
+      buttons: [],
+      dismiss: null
+    });
 
-        if (armed) {
-            const point = e.changedTouches ? e.changedTouches[0] : e;
-            const target = cellAt(point.clientX, point.clientY);
-            if (target && target !== srcCell) {
-                const cells = Array.prototype.slice.call(boardEl.querySelectorAll('.cell'));
-                const from = cells.indexOf(srcCell);
-                const to = cells.indexOf(target);
+    try {
+      const crops = await extractCellCrops(corners, imgEl);
+      const cells = Array.from(document.querySelectorAll('#board .cell'));
 
-                if (from >= 0 && to >= 0) {
-                    const words = cells.map(textOf);
-                    const moved = words.splice(from, 1)[0];   // pull it out
-                    words.splice(to, 0, moved);               // drop it in; rest shift one
-                    cells.forEach(function (cell, i) { setText(cell, words[i]); });
+      for (let i = 0; i < 25; i++) {
+        const msgEl = document.getElementById('modal-message');
+        if (msgEl) msgEl.textContent = `${i + 1} / 25`;
 
-                    if (typeof updateStats === 'function') updateStats();
-                    if (typeof saveCurrentState === 'function') saveCurrentState();
-                }
-            }
+        const word = await scanSingleCell(crops[i]);
 
-            // Swallow the click that follows a real drag
-            const swallow = function (ev) {
-                ev.stopPropagation();
-                ev.preventDefault();
-                boardEl.removeEventListener('click', swallow, true);
-            };
-            boardEl.addEventListener('click', swallow, true);
+        if (word && cells[i]) {
+          cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
         }
+      }
 
-        cleanup();
+      if (typeof updateStats === 'function') updateStats();
+      if (typeof saveCurrentState === 'function') saveCurrentState();
+
+      settleModal(true);
+      uiAlert('Finished scanning 25 cells.', 'Done');
+    } catch (err) {
+      console.error(err);
+      settleModal(null);
+      uiAlert('Error while scanning cells: ' + err.message);
     }
+  });
 
-    /* ---- listeners ---- */
-    boardEl.addEventListener('mousedown', onDown);
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+  cancelBtn.addEventListener('click', closeOverlay);
 
-    boardEl.addEventListener('touchstart', onDown, { passive: true });
-    document.addEventListener('touchmove', onMove, { passive: false });
-    document.addEventListener('touchend', onUp);
-    document.addEventListener('touchcancel', function () { cleanup(); });
+  window.addEventListener('resize', () => {
+    if (overlay.style.display !== 'none') drawGrid();
+  });
 })();
 </script>
 
