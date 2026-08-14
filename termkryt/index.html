@@ -691,8 +691,8 @@ body.grid-align-open {
   });
 
 
+// ---------- OpenCV crop (now returns bottom-focused crops) ----------
 async function extractCellCrops(corners, imgElement) {
-  // Wait for OpenCV if it is still loading
   if (typeof cv === 'undefined' || !cv.Mat) {
     await new Promise(resolve => {
       const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
@@ -700,10 +700,7 @@ async function extractCellCrops(corners, imgElement) {
     });
   }
 
-  // Load the image into an OpenCV Mat
   const src = cv.imread(imgElement);
-
-  // Source quad (TL, TR, BR, BL) – already in natural image coordinates
   const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
     corners[0].x, corners[0].y,
     corners[1].x, corners[1].y,
@@ -711,20 +708,15 @@ async function extractCellCrops(corners, imgElement) {
     corners[3].x, corners[3].y
   ]);
 
-  // Destination: a clean square (pick a size that keeps detail)
-  const size = 1000;                     // 1000×1000 warped board
+  const size = 1200;                         // a bit larger for better OCR
   const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    0, 0,
-    size, 0,
-    size, size,
-    0, size
+    0, 0, size, 0, size, size, 0, size
   ]);
 
   const M = cv.getPerspectiveTransform(srcPts, dstPts);
   const warped = new cv.Mat();
   cv.warpPerspective(src, warped, M, new cv.Size(size, size));
 
-  // Now cut the warped image into 25 equal cells (tight – no padding)
   const cellW = size / 5;
   const cellH = size / 5;
   const crops = [];
@@ -736,58 +728,107 @@ async function extractCellCrops(corners, imgElement) {
       const w = Math.round(cellW);
       const h = Math.round(cellH);
 
-      const rect = new cv.Rect(x, y, w, h);
-      const cellMat = warped.roi(rect);
+      // Full cell first
+      const fullRect = new cv.Rect(x, y, w, h);
+      const fullMat  = warped.roi(fullRect);
 
-      // Convert Mat → canvas so the rest of the code stays simple
+      // Keep only the BOTTOM 58 % – this is the upright word.
+      // The top ~42 % contains the upside-down reverse-side word.
+      const cropH = Math.round(h * 0.58);
+      const cropY = h - cropH;
+      const bottomRect = new cv.Rect(0, cropY, w, cropH);
+      const bottomMat  = fullMat.roi(bottomRect);
+
       const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      cv.imshow(canvas, cellMat);
+      canvas.width  = w;
+      canvas.height = cropH;
+      cv.imshow(canvas, bottomMat);
 
       crops.push(canvas);
-      cellMat.delete();
+
+      bottomMat.delete();
+      fullMat.delete();
     }
   }
 
-  // Cleanup
   src.delete(); warped.delete(); srcPts.delete(); dstPts.delete(); M.delete();
+  return crops;
+}
 
-  return crops;   // array of 25 <canvas> elements
+// ---------- shared worker + stronger single-cell OCR ----------
+let sharedWorker = null;
+
+async function getSharedWorker() {
+  if (!sharedWorker) {
+    sharedWorker = await Tesseract.createWorker('eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
+      langPath:   'https://tessdata.projectnaptha.com/4.0.0'
+    });
+    await sharedWorker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
+      preserve_interword_spaces: '1',
+      tessedit_pageseg_mode: '7'          // single line
+    });
+  }
+  return sharedWorker;
 }
 
 async function scanSingleCell(canvas) {
-  // Temporary: just run the existing full recognizer on the tiny crop
-  // and take the first/best word. You will replace this later.
-  return new Promise(async (resolve) => {
-    try {
-      // Re-use the worker if you expose it, or create a quick one
-      const worker = await Tesseract.createWorker('eng');
-      await worker.setParameters({
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
-        tessedit_pageseg_mode: '7'        // treat as single text line
-      });
+  try {
+    const worker = await getSharedWorker();
 
-      const { data } = await worker.recognize(canvas);
-      await worker.terminate();
+    // Aggressive variants – small upright crops need heavy help
+    const variants = [
+      { name: 'up-contrast', make: () => grayContrast(cloneCanvas(canvas, 2.2), 1.6) },
+      { name: 'up-binary',   make: () => binarize(cloneCanvas(canvas, 2.0)) },
+      { name: 'contrast',    make: () => grayContrast(canvas, 1.5) },
+      { name: 'raw',         make: () => cloneCanvas(canvas) },
+      { name: 'binary',      make: () => binarize(canvas) }
+    ];
 
-      const raw = (data.text || '').trim().toUpperCase().replace(/[^A-Z ]/g, '');
-      if (!raw) return resolve(null);
+    let best = { display: null, sim: -1, raw: '' };
 
-      // Force-match against the dictionary (same logic you already have)
-      if (typeof bestDictWord === 'function') {
-        const match = bestDictWord(raw);
-        resolve(match && match.display ? match.display : raw);
-      } else {
-        resolve(raw);
+    for (const v of variants) {
+      const c = v.make();
+      const { data } = await worker.recognize(c);
+      const raw = (data.text || '').trim().toUpperCase().replace(/[^A-Z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!raw || raw.length < 2) continue;
+
+      // Try the whole string first
+      let match = bestDictWord(raw);
+
+      // Also try the longest token if the whole string is weak
+      if (match.sim < 0.75) {
+        const tokens = raw.split(' ').filter(t => t.length >= 2);
+        for (const t of tokens) {
+          const m = bestDictWord(t);
+          if (m.sim > match.sim) match = m;
+        }
       }
-    } catch (e) {
-      console.warn('single cell OCR failed', e);
-      resolve(null);
+
+      // Special case for multi-word cards (NEW YORK, etc.)
+      if (match.sim < 0.8 && raw.includes(' ')) {
+        const joined = bestDictWord(raw.replace(/ /g, ''));
+        if (joined.sim > match.sim) match = joined;
+      }
+
+      if (match.sim > best.sim) {
+        best = { display: match.display, sim: match.sim, raw };
+      }
+
+      // Very strong match → stop early
+      if (best.sim >= 0.88) break;
     }
-  });
+
+    return best.display || null;
+  } catch (e) {
+    console.warn('single cell OCR failed', e);
+    return null;
+  }
 }
-	
+
+// ---------- confirm button (live progress + force UI update) ----------
 confirmBtn.addEventListener('click', async () => {
   closeOverlay();
 
@@ -796,48 +837,52 @@ confirmBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Show a simple status while we work
-  const status = await showModal({
+  // Open progress modal once
+  const statusPromise = showModal({
     title: 'Scanning cells…',
     message: '0 / 25',
-    buttons: [],          // no buttons — we will close it ourselves
+    buttons: [],
     dismiss: null
   });
 
+  // Force the modal to paint before we start the heavy work
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
   try {
-    const crops = await extractCellCrops(corners, imgEl);   // returns 25 canvases
+    const crops = await extractCellCrops(corners, imgEl);
     const cells = Array.from(document.querySelectorAll('#board .cell'));
+    let filled = 0;
 
     for (let i = 0; i < 25; i++) {
-      // Update the modal message
+      // Live update – force a reflow so the user actually sees the count change
       const msgEl = document.getElementById('modal-message');
-      if (msgEl) msgEl.textContent = `${i + 1} / 25`;
+      if (msgEl) {
+        msgEl.textContent = `${i + 1} / 25`;
+        // Force layout
+        void msgEl.offsetHeight;
+      }
 
-      const word = await scanSingleCell(crops[i]);   // ← you will implement / adapt this
+      const word = await scanSingleCell(crops[i]);
 
       if (word && cells[i]) {
         cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
+        filled++;
       }
+
+      // Optional: also update the board live so the user sees words appear
+      if (typeof updateStats === 'function') updateStats();
     }
 
-    if (typeof updateStats === 'function') updateStats();
     if (typeof saveCurrentState === 'function') saveCurrentState();
 
     settleModal(true);
-    uiAlert('Finished scanning 25 cells.', 'Done');
+    uiAlert(`Finished scanning. Filled ${filled} of 25 cells.`, 'Done');
   } catch (err) {
     console.error(err);
     settleModal(null);
     uiAlert('Error while scanning cells: ' + err.message);
   }
 });
-
-  cancelBtn.addEventListener('click', closeOverlay);
-
-  window.addEventListener('resize', () => {
-    if (overlay.style.display !== 'none') drawGrid();
-  });
-})();
 
 </script>
 <script>
