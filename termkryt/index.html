@@ -273,6 +273,19 @@
 </head>
 <body>
 
+
+<!-- Overlay that appears when the button is clicked -->
+<div id="gridOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; display:none; align-items:center; justify-content:center;">
+  <div style="position:relative; max-width:95vw; max-height:90vh;">
+    <img id="gridImage" style="display:block; max-width:95vw; max-height:80vh; user-select:none;">
+    <svg id="gridSvg" style="position:absolute; top:0; left:0; width:100%; height:100%; overflow:visible;"></svg>
+  </div>
+  <div style="position:absolute; bottom:20px; left:50%; transform:translateX(-50%); display:flex; gap:12px;">
+    <button id="confirmGridBtn" style="padding:10px 20px; font-size:16px;">Confirm Grid</button>
+    <button id="cancelGridBtn" style="padding:10px 20px; font-size:16px;">Cancel</button>
+  </div>
+</div>
+	
 <!-- ================= CONTROLS ================= -->
 <div class="panel controls-container">
 
@@ -372,6 +385,7 @@
 		<button onclick="shiftDown()">Shift Down</button>
 		<button onclick="shiftLeft()">Shift Left</button>
 		<button onclick="shiftRight()">Shift Right</button>
+		<button id="alignGridBtn">Align 5×5 Grid</button>
     </div>
 
     <div class="control-group" id="g-clear">
@@ -458,7 +472,183 @@
 <script src="wordpairs.js"></script>
 <script src="wordscanner.js"></script>
 <script src="shareboard.js"></script>
+<script>
 
+(function () {
+  'use strict';
+
+  // ---------- state ----------
+  let corners = [];          // [{x, y}, ...] in image pixel coordinates (4 points)
+  let activeHandle = null;
+  let imgNaturalW = 0;
+  let imgNaturalH = 0;
+
+  const overlay   = document.getElementById('gridOverlay');
+  const imgEl     = document.getElementById('gridImage');
+  const svg       = document.getElementById('gridSvg');
+  const confirmBtn = document.getElementById('confirmGridBtn');
+  const cancelBtn  = document.getElementById('cancelGridBtn');
+
+  // ---------- public entry point ----------
+  window.startGridAlign = function (imageSrcOrFile) {
+    // Accept either a URL string or a File/Blob
+    const url = typeof imageSrcOrFile === 'string'
+      ? imageSrcOrFile
+      : URL.createObjectURL(imageSrcOrFile);
+
+    imgEl.onload = () => {
+      imgNaturalW = imgEl.naturalWidth;
+      imgNaturalH = imgEl.naturalHeight;
+
+      // Initialise corners as a nice inset rectangle
+      const inset = 0.08;
+      corners = [
+        { x: imgNaturalW * inset,       y: imgNaturalH * inset },       // TL
+        { x: imgNaturalW * (1 - inset), y: imgNaturalH * inset },       // TR
+        { x: imgNaturalW * (1 - inset), y: imgNaturalH * (1 - inset) }, // BR
+        { x: imgNaturalW * inset,       y: imgNaturalH * (1 - inset) }  // BL
+      ];
+
+      overlay.style.display = 'flex';
+      drawGrid();
+    };
+    imgEl.src = url;
+  };
+
+  // ---------- drawing ----------
+  function drawGrid() {
+    // Scale factor between natural image size and displayed size
+    const scaleX = imgEl.clientWidth  / imgNaturalW;
+    const scaleY = imgEl.clientHeight / imgNaturalH;
+
+    svg.setAttribute('viewBox', `0 0 ${imgEl.clientWidth} ${imgEl.clientHeight}`);
+    svg.innerHTML = '';
+
+    // Helper: convert natural → display coordinates
+    const toDisplay = p => ({ x: p.x * scaleX, y: p.y * scaleY });
+
+    // 1. Outer quadrilateral
+    const pts = corners.map(toDisplay);
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', pts.map(p => `\( {p.x}, \){p.y}`).join(' '));
+    poly.setAttribute('fill', 'none');
+    poly.setAttribute('stroke', '#00ff88');
+    poly.setAttribute('stroke-width', '2.5');
+    svg.appendChild(poly);
+
+    // 2. Internal 5×5 grid lines (bilinear interpolation)
+    for (let i = 1; i < 5; i++) {
+      const t = i / 5;
+
+      // Horizontal line
+      const left  = lerp(corners[0], corners[3], t);
+      const right = lerp(corners[1], corners[2], t);
+      drawLine(toDisplay(left), toDisplay(right));
+
+      // Vertical line
+      const top    = lerp(corners[0], corners[1], t);
+      const bottom = lerp(corners[3], corners[2], t);
+      drawLine(toDisplay(top), toDisplay(bottom));
+    }
+
+    // 3. Draggable corner handles
+    corners.forEach((c, idx) => {
+      const p = toDisplay(c);
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', p.x);
+      circle.setAttribute('cy', p.y);
+      circle.setAttribute('r', 14);
+      circle.setAttribute('fill', '#00ff88');
+      circle.setAttribute('stroke', '#003311');
+      circle.setAttribute('stroke-width', '2');
+      circle.style.cursor = 'grab';
+      circle.dataset.idx = idx;
+
+      circle.addEventListener('pointerdown', onHandleDown);
+      svg.appendChild(circle);
+    });
+  }
+
+  function drawLine(a, b) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', a.x);
+    line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x);
+    line.setAttribute('y2', b.y);
+    line.setAttribute('stroke', '#00ff88');
+    line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('stroke-opacity', '0.7');
+    svg.appendChild(line);
+  }
+
+  function lerp(a, b, t) {
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t
+    };
+  }
+
+  // ---------- interaction ----------
+  function onHandleDown(e) {
+    e.preventDefault();
+    activeHandle = +e.target.dataset.idx;
+    e.target.setPointerCapture(e.pointerId);
+    e.target.style.cursor = 'grabbing';
+
+    const move = (ev) => {
+      if (activeHandle === null) return;
+      const rect = imgEl.getBoundingClientRect();
+      const scaleX = imgNaturalW / imgEl.clientWidth;
+      const scaleY = imgNaturalH / imgEl.clientHeight;
+
+      let x = (ev.clientX - rect.left) * scaleX;
+      let y = (ev.clientY - rect.top)  * scaleY;
+
+      // clamp to image
+      x = Math.max(0, Math.min(imgNaturalW, x));
+      y = Math.max(0, Math.min(imgNaturalH, y));
+
+      corners[activeHandle] = { x, y };
+      drawGrid();
+    };
+
+    const up = (ev) => {
+      activeHandle = null;
+      e.target.style.cursor = 'grab';
+      e.target.releasePointerCapture(ev.pointerId);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // ---------- buttons ----------
+  document.getElementById('alignGridBtn').addEventListener('click', () => {
+    // DEMO: replace this with your real image source
+    // Example: startGridAlign(yourFileOrUrl);
+    startGridAlign('https://picsum.photos/800/800'); // temporary demo image
+  });
+
+  confirmBtn.addEventListener('click', () => {
+    console.log('Final corners (natural image coordinates):', corners);
+    // Here you would later call your crop + OCR routine
+    // e.g. processGrid(corners, imgEl);
+    overlay.style.display = 'none';
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    overlay.style.display = 'none';
+  });
+
+  // Redraw on window resize so the overlay stays aligned
+  window.addEventListener('resize', () => {
+    if (overlay.style.display !== 'none') drawGrid();
+  });
+})();
+
+</script>
 <script>
 /* ============================================================
    MODAL SYSTEM (replaces alert / confirm / prompt)
