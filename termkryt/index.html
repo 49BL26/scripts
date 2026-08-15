@@ -2807,5 +2807,159 @@ document.getElementById('scan-file').addEventListener('change', handleScanFile);
 document.getElementById('scan-camera').addEventListener('change', handleScanFile);
 
 </script>
+
+<script>
+/* ============================================================
+   CELL DRAG-REORDER — active only in Setup -> Word Input
+   Swaps word text between cells. Colours/reveals stay put.
+   Works with mouse and touch.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  const boardEl = document.getElementById('board');
+  if (!boardEl) return;
+
+  let dragEnabled = false;
+  let srcCell = null;
+  let overCell = null;
+  let ghost = null;
+  let startX = 0, startY = 0, armed = false;
+
+  const DRAG_THRESHOLD = 6;   // px before a press becomes a drag
+
+  function refreshDragMode() {
+    const l1 = (document.getElementById('op1') || {}).value;
+    const tool = (document.getElementById('op2-setup') || {}).value;
+    dragEnabled = (l1 === 'setup' && tool === 'words');
+    boardEl.classList.toggle('drag-mode', dragEnabled);
+    if (!dragEnabled) cleanup();
+  }
+
+  ['op1', 'op2-setup'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', function () { setTimeout(refreshDragMode, 0); });
+  });
+  refreshDragMode();
+  window.refreshDragMode = refreshDragMode;
+
+  function cellAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el ? el.closest('#board .cell') : null;
+  }
+
+  function textOf(cell) {
+    const span = cell.querySelector('.cell-text');
+    return span ? span.textContent : '';
+  }
+
+  function setText(cell, value) {
+    const span = cell.querySelector('.cell-text');
+    if (span) span.textContent = value;
+  }
+
+  function makeGhost(cell, x, y) {
+    ghost = document.createElement('div');
+    ghost.id = 'drag-ghost';
+    ghost.textContent = textOf(cell);
+    document.body.appendChild(ghost);
+    moveGhost(x, y);
+  }
+
+  function moveGhost(x, y) {
+    if (!ghost) return;
+    ghost.style.left = x + 'px';
+    ghost.style.top  = y + 'px';
+  }
+
+  function cleanup() {
+    if (ghost) { ghost.remove(); ghost = null; }
+    if (srcCell) srcCell.classList.remove('drag-src');
+    if (overCell) overCell.classList.remove('drag-over');
+    srcCell = null;
+    overCell = null;
+    armed = false;
+  }
+
+  function onDown(e) {
+    if (!dragEnabled) return;
+    const point = e.touches ? e.touches[0] : e;
+    const cell = cellAt(point.clientX, point.clientY);
+    if (!cell) return;
+    srcCell = cell;
+    startX = point.clientX;
+    startY = point.clientY;
+    armed = false;
+  }
+
+  function onMove(e) {
+    if (!dragEnabled || !srcCell) return;
+    const point = e.touches ? e.touches[0] : e;
+
+    if (!armed) {
+      const dx = point.clientX - startX;
+      const dy = point.clientY - startY;
+      if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+      armed = true;
+      srcCell.classList.add('drag-src');
+      makeGhost(srcCell, point.clientX, point.clientY);
+    }
+
+    e.preventDefault();
+    moveGhost(point.clientX, point.clientY);
+
+    const target = cellAt(point.clientX, point.clientY);
+    if (target !== overCell) {
+      if (overCell) overCell.classList.remove('drag-over');
+      overCell = (target && target !== srcCell) ? target : null;
+      if (overCell) overCell.classList.add('drag-over');
+    }
+  }
+
+  function onUp(e) {
+    if (!dragEnabled || !srcCell) { cleanup(); return; }
+
+    if (armed) {
+      const point = e.changedTouches ? e.changedTouches[0] : e;
+      const target = cellAt(point.clientX, point.clientY);
+      if (target && target !== srcCell) {
+        const cells = Array.prototype.slice.call(boardEl.querySelectorAll('.cell'));
+        const from = cells.indexOf(srcCell);
+        const to   = cells.indexOf(target);
+
+        if (from >= 0 && to >= 0) {
+          const words = cells.map(textOf);
+          const moved = words.splice(from, 1)[0];
+          words.splice(to, 0, moved);
+          cells.forEach(function (cell, i) { setText(cell, words[i]); });
+
+          if (typeof updateStats === 'function') updateStats();
+          if (typeof saveCurrentState === 'function') saveCurrentState();
+        }
+      }
+
+      // swallow the click that follows a real drag
+      const swallow = function (ev) {
+        ev.stopPropagation();
+        ev.preventDefault();
+        boardEl.removeEventListener('click', swallow, true);
+      };
+      boardEl.addEventListener('click', swallow, true);
+    }
+
+    cleanup();
+  }
+
+  boardEl.addEventListener('mousedown', onDown);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+
+  boardEl.addEventListener('touchstart', onDown, { passive: true });
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onUp);
+  document.addEventListener('touchcancel', function () { cleanup(); });
+})();
+</script>
+	
 </body>
 </html>
