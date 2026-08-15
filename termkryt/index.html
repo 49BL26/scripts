@@ -1678,6 +1678,7 @@ function executeCommand(raw) {
         'rot-words':       () => rotateWordsClockwise(),
         'flip-cards':      () => toggleCellFlip(),
         'clear':           () => clearBoard(),
+		'clear.':          () => clearBoard(true)
         'randomize':       () => randomizeBoard(),
         'add-word':        () => addWordPrompt(),
         'import-words':    () => importWordsPrompt(),
@@ -2385,14 +2386,16 @@ async function addWordPrompt() {
     }
 }
 
-async function clearBoard() {
-    if (!await uiConfirm('Clear every word, colour and selection on the board?', 'Clear board')) return;
+async function clearBoard(skipConfirm = false) {
+    // 2. Short-circuit the confirmation if skipConfirm is true
+    if (!skipConfirm && !await uiConfirm('Clear every word, colour and selection on the board?', 'Clear board')) return;
+    
     Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
         cell.className = 'cell white';
         delete cell.dataset.seq;
         cell.querySelector('.cell-text').textContent = `Card ${i + 1}`;
     });
-	keyReset();  
+    keyReset();  
     currentRotation = 0;
     thinkCounter = 1;
     board.querySelectorAll('.cell-text').forEach(w => w.style.transform = 'rotate(0deg)');
