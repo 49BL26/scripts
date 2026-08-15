@@ -2386,21 +2386,29 @@ async function addWordPrompt() {
     }
 }
 
-async function clearBoard(skipConfirm = false) {
-    // 2. Short-circuit the confirmation if skipConfirm is true
-    if (!skipConfirm && !await uiConfirm('Clear every word, colour and selection on the board?', 'Clear board')) return;
+async function clearBoard(skipConfirm = false) {     
+    // 1. Short-circuit the confirmation if skipConfirm is true     
+    if (!skipConfirm && !await uiConfirm('Clear every word, colour and selection on the board?', 'Clear board')) return;          
     
-    Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {
-        cell.className = 'cell white';
-        delete cell.dataset.seq;
-        cell.querySelector('.cell-text').textContent = `Card ${i + 1}`;
-    });
-    keyReset();  
-    currentRotation = 0;
-    thinkCounter = 1;
-    board.querySelectorAll('.cell-text').forEach(w => w.style.transform = 'rotate(0deg)');
-    board.classList.toggle('flipped', isFlipped);
-    updateStats(); saveCurrentState();
+    // 2. Reset all cells
+    Array.from(board.getElementsByClassName('cell')).forEach((cell, i) => {         
+        cell.className = 'cell white';         
+        delete cell.dataset.seq;         
+        cell.querySelector('.cell-text').textContent = `Card ${i + 1}`;     
+    });     
+    
+    // 3. Reset state variables
+    keyReset();       
+    currentRotation = 0;     
+    thinkCounter = 1;     
+    
+    // 4. Update UI transforms
+    board.querySelectorAll('.cell-text').forEach(w => w.style.transform = 'rotate(0deg)');     
+    board.classList.toggle('flipped', isFlipped);     
+    
+    // 5. Update stats and persist state safely
+    updateStats(); 
+    await saveCurrentState(); 
 }
 
 async function clearBoardColors() {
