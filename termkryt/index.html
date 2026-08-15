@@ -388,8 +388,14 @@ body.grid-align-open {
     <div class="control-group" id="g-words">
         <button onclick="importWordsPrompt()">Import Words</button>
         <button onclick="addWordPrompt()">Add Words</button>
-	    <button onclick="document.getElementById('scan-file').click()">Scan Word</button>
-    	<input type="file" id="scan-file" accept="image/*" style="display:none;">
+		<button onclick="document.getElementById('scan-file').click()">Select Scan</button>
+		<button onclick="document.getElementById('scan-camera').click()">Scan Board</button>
+		
+<!-- Keep your existing hidden input for gallery -->
+<input type="file" id="scan-file" accept="image/*" style="display:none;">
+
+<!-- New hidden input that forces the camera -->
+<input type="file" id="scan-camera" accept="image/*" capture="environment" style="display:none;">
     </div>
 
     <div class="control-group" id="g-key">
@@ -409,7 +415,6 @@ body.grid-align-open {
             <option value="clear">Clear</option>
             <option value="data">Export/Import Data</option>
         </select>
-		<button onclick="printLog()">Print Logs</button>
     </div>
 
     <div class="control-group" id="g-colors">
@@ -2790,6 +2795,17 @@ document.getElementById('scan-file').addEventListener('change', function (e) {
   startGridAlign(file);          // opens the draggable grid on the photo
   e.target.value = '';
 });
+
+function handleScanFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  startGridAlign(file);          // your existing function
+  e.target.value = '';           // allow re-selecting the same file
+}
+
+document.getElementById('scan-file').addEventListener('change', handleScanFile);
+document.getElementById('scan-camera').addEventListener('change', handleScanFile);
+
 </script>
 </body>
 </html>
