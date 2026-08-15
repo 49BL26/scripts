@@ -2501,6 +2501,103 @@ function updateStats() {
     if (aw) aw.textContent = groups.black.join('  ·  ');
 }
 
+/* ============================================================
+   SECRET UNLOCK → "Enter command" button
+   Sequence:  h3 (Tile Statistics) → Red stat → Blue stat
+   Extra requirement: first column of the board must contain
+   at least one Red and one Blue cell.
+   Once unlocked it stays unlocked (localStorage).
+   ============================================================ */
+(function () {
+  const STORAGE_KEY = 'termkrytCmdUnlocked';
+  const SEQUENCE = ['h3', 'red', 'blue'];   // the required tap order
+  let progress = [];
+
+  // ---------- helpers ----------
+  function firstColumnHasBothColors() {
+    const cells = Array.from(document.querySelectorAll('#board .cell'));
+    if (cells.length < 25) return false;
+    const col0 = [0, 5, 10, 15, 20].map(i => cells[i]);
+    const hasRed  = col0.some(c => c.classList.contains('red'));
+    const hasBlue = col0.some(c => c.classList.contains('blue'));
+    return hasRed && hasBlue;
+  }
+
+  function isUnlocked() {
+    return localStorage.getItem(STORAGE_KEY) === '1';
+  }
+
+  function unlock() {
+    localStorage.setItem(STORAGE_KEY, '1');
+    addCommandButton();
+    console.log('%cCommand palette unlocked', 'color:#2e7d32;font-weight:bold');
+  }
+
+  function addCommandButton() {
+    if (document.getElementById('cmd-unlock-btn')) return; // already present
+
+    const btn = document.createElement('button');
+    btn.id = 'cmd-unlock-btn';
+    btn.textContent = 'Enter command';
+    btn.style.cssText = 'margin:8px 0 0;padding:8px 14px;font-size:13px;';
+    btn.addEventListener('click', () => {
+      // Re-uses the existing backtick command palette
+      uiPrompt('Enter a command:', '', { title: 'Command palette', okLabel: 'Run' })
+        .then(cmd => {
+          if (cmd !== null && cmd.trim() !== '') executeCommand(cmd);
+        });
+    });
+
+    // Place it under the Tile Statistics panel
+    const stats = document.getElementById('stats-blurb');
+    if (stats) stats.appendChild(btn);
+  }
+
+  // ---------- tap tracking ----------
+  function onTap(kind) {
+    if (isUnlocked()) return;
+
+    progress.push(kind);
+    // keep only the last N taps
+    if (progress.length > SEQUENCE.length) progress.shift();
+
+    // exact sequence match?
+    const match = progress.length === SEQUENCE.length &&
+                  progress.every((v, i) => v === SEQUENCE[i]);
+
+    if (match && firstColumnHasBothColors()) {
+      unlock();
+      progress = [];
+    } else if (match) {
+      // sequence was right but board condition failed – reset
+      progress = [];
+      console.log('Sequence correct, but first column needs both a Red and a Blue');
+    }
+  }
+
+  // ---------- wire the three elements ----------
+  function wire() {
+    const h3 = document.querySelector('#stats-blurb h3');
+    const red = document.getElementById('stat-red');
+    const blue = document.getElementById('stat-blue');
+
+    if (h3)  h3.addEventListener('click', () => onTap('h3'));
+    if (red) red.addEventListener('click', () => onTap('red'));
+    if (blue) blue.addEventListener('click', () => onTap('blue'));
+
+    // If already unlocked from a previous visit, show the button immediately
+    if (isUnlocked()) addCommandButton();
+  }
+
+  // Run after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+})();
+
+	
 function renderThinkPanel(cells, mode, team) {
     const picked = cells.filter(c => c.classList.contains('think'))
                         .sort((a, b) => (+a.dataset.seq || 0) - (+b.dataset.seq || 0));
