@@ -2502,114 +2502,108 @@ function updateStats() {
 }
 
 /* ============================================================
-   SECRET UNLOCK / LOCK
-   Unlock sequence = colors of the TOP ROW of the board
-     white/black → h3
-     red         → red stat
-     blue        → blue stat
-   Extra rule    : first column must contain at least one red AND one blue
-   Lock sequence : red → blue → white (h3)
+   SECRET UNLOCK / LOCK  (stable version)
+   Unlock = tap sequence matching the TOP ROW colors
+            (white/black → h3, red → red stat, blue → blue stat)
+            + first column must contain both a red and a blue
+   Lock   = red → blue → h3
    ============================================================ */
 (function () {
   const STORAGE_KEY = 'termkrytCmdUnlocked';
-  let progress = [];
+  let buf = [];                     // rolling buffer of recent taps
 
-  function topRowSequence() {
-    const cells = Array.from(document.querySelectorAll('#board .cell'));
+  // ---------- helpers ----------
+  function topRowSeq() {
+    const cells = [...document.querySelectorAll('#board .cell')];
     if (cells.length < 5) return [];
     return [0,1,2,3,4].map(i => {
       const c = cells[i];
-      if (c.classList.contains('red'))   return 'red';
-      if (c.classList.contains('blue'))  return 'blue';
-      return 'white';          // white or black both map to h3
+      if (c.classList.contains('red'))  return 'red';
+      if (c.classList.contains('blue')) return 'blue';
+      return 'white';               // white or black
     });
   }
 
-  function firstColumnHasBothColors() {
-    const cells = Array.from(document.querySelectorAll('#board .cell'));
+  function firstColHasBoth() {
+    const cells = [...document.querySelectorAll('#board .cell')];
     if (cells.length < 25) return false;
-    const col0 = [0,5,10,15,20].map(i => cells[i]);
-    return col0.some(c => c.classList.contains('red')) &&
-           col0.some(c => c.classList.contains('blue'));
+    const col = [0,5,10,15,20].map(i => cells[i]);
+    return col.some(c => c.classList.contains('red')) &&
+           col.some(c => c.classList.contains('blue'));
   }
 
   function isUnlocked() {
     return localStorage.getItem(STORAGE_KEY) === '1';
   }
 
-  function addCommandButton() {
+  function addBtn() {
     if (document.getElementById('cmd-unlock-btn')) return;
     const btn = document.createElement('button');
     btn.id = 'cmd-unlock-btn';
     btn.textContent = 'Enter command';
     btn.style.cssText = 'margin:8px 0 0;padding:8px 14px;font-size:13px;';
-    btn.addEventListener('click', () => {
+    btn.onclick = () => {
       uiPrompt('Enter a command:', '', { title: 'Command palette', okLabel: 'Run' })
-        .then(cmd => {
-          if (cmd !== null && cmd.trim() !== '') executeCommand(cmd);
-        });
-    });
-    const stats = document.getElementById('stats-blurb');
-    if (stats) stats.appendChild(btn);
+        .then(cmd => { if (cmd && cmd.trim()) executeCommand(cmd); });
+    };
+    document.getElementById('stats-blurb')?.appendChild(btn);
   }
 
-  function removeCommandButton() {
-    const btn = document.getElementById('cmd-unlock-btn');
-    if (btn) btn.remove();
+  function removeBtn() {
+    document.getElementById('cmd-unlock-btn')?.remove();
   }
 
   function unlock() {
     localStorage.setItem(STORAGE_KEY, '1');
-    addCommandButton();
+    addBtn();
     console.log('%cCommand palette unlocked', 'color:#2e7d32;font-weight:bold');
   }
 
   function lock() {
     localStorage.removeItem(STORAGE_KEY);
-    removeCommandButton();
+    removeBtn();
     console.log('%cCommand palette locked', 'color:#c62828;font-weight:bold');
   }
 
+  // ---------- core logic ----------
   function onTap(kind) {
-    progress.push(kind);
-    if (progress.length > 5) progress.shift();
+    buf.push(kind);
+    if (buf.length > 5) buf.shift();
 
-    // 1. Lock sequence (red → blue → white) – checked first
-    if (progress.length >= 3) {
-      const last3 = progress.slice(-3);
-      if (last3[0] === 'red' && last3[1] === 'blue' && last3[2] === 'white') {
+    // 1. Lock sequence (length 3) – highest priority
+    if (buf.length >= 3) {
+      const s = buf.slice(-3).join('');
+      if (s === 'redbluewhite') {
         lock();
-        progress = [];
+        buf = [];
         return;
       }
     }
 
-    // 2. Unlock sequence (matches current top-row colors)
-    const needed = topRowSequence();
-    if (needed.length === 5 && progress.length >= 5) {
-      const last5 = progress.slice(-5);
-      const matches = last5.every((v, i) => v === needed[i]);
-      if (matches && firstColumnHasBothColors()) {
+    // 2. Unlock sequence (length 5)
+    const needed = topRowSeq();
+    if (needed.length === 5 && buf.length >= 5) {
+      const got = buf.slice(-5);
+      const match = got.every((v, i) => v === needed[i]);
+      if (match && firstColHasBoth()) {
         unlock();
       }
-      // whether it matched or not, clear so the user can try again
-      progress = [];
+      // always clear after a full 5-tap attempt
+      buf = [];
     }
   }
 
+  // ---------- wire events (only once each) ----------
   function wire() {
     const h3   = document.querySelector('#stats-blurb h3');
     const red  = document.getElementById('stat-red');
     const blue = document.getElementById('stat-blue');
 
-    if (h3) {
-      h3.addEventListener('click', () => onTap('white')); // white/black
-      h3.addEventListener('click', () => onTap('h3'));    // also used in older mental model
-    }
-    if (red)  red.addEventListener('click',  () => onTap('red'));
+    if (h3)  h3.addEventListener('click',  () => onTap('white'));
+    if (red) red.addEventListener('click',  () => onTap('red'));
     if (blue) blue.addEventListener('click', () => onTap('blue'));
 
-    if (isUnlocked()) addCommandButton();
+    if (isUnlocked()) addBtn();
   }
 
   if (document.readyState === 'loading') {
