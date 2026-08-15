@@ -754,149 +754,6 @@ body.grid-align-open {
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   }
 
-// ---------- MULTI-SCAN GRAPH ALIGNMENT CONTEXT ----------
-let scanHistory = []; // Array to store raw arrays from each scan
-
-/**
- * Records a new scan matrix and processes a cross-scan positional consensus.
- * @param {Array<Array<string>>} currentScanGrid - 2D array of raw OCR words from the current scan.
- * @returns {Array<Array<string>>} The optimized, consensus-corrected 2D grid layout.
- */
-function recordAndAlignScan(currentScanGrid) {
-  // 1. Record the fresh scan into memory history
-  scanHistory.push(currentScanGrid);
-
-  // 2. Global registry to track word variations and structural adjacencies
-  const wordRegistry = new Map(); // Key: Normalized Display Word -> Data object
-
-  // Helper to extract neighbors safely from any given 2D grid layout
-  const getNeighbors = (grid, r, c) => {
-    return {
-      top:    grid[r - 1] ? grid[r - 1][c] || null : null,
-      bottom: grid[r + 1] ? grid[r + 1][c] || null : null,
-      left:   grid[r][c - 1] || null,
-      right:  grid[r][c + 1] || null
-    };
-  };
-
-  // 3. Populate adjacency metrics across all past scans
-  scanHistory.forEach((grid) => {
-    for (let r = 0; r < grid.length; r++) {
-      for (let c = 0; c < grid[r].length; c++) {
-        const rawWord = grid[r][c];
-        if (!rawWord) continue;
-
-        // Clean and run dictionary match using your existing functions
-        const dictMatch = bestDictWord(rawWord);
-        const resolvedWord = (dictMatch && dictMatch.sim > 0.65) ? dictMatch.display : norm(rawWord);
-
-        if (!wordRegistry.has(resolvedWord)) {
-          wordRegistry.set(resolvedWord, {
-            word: resolvedWord,
-            confidenceSum: dictMatch ? dictMatch.sim : 0.5,
-            seenCount: 1,
-            adjacencies: { top: new Map(), bottom: new Map(), left: new Map(), right: new Map() }
-          });
-        } else {
-          const entry = wordRegistry.get(resolvedWord);
-          entry.seenCount++;
-          entry.confidenceSum += dictMatch ? dictMatch.sim : 0.5;
-        }
-
-        // Track what words were physically next to it in this frame
-        const entry = wordRegistry.get(resolvedWord);
-        const neighbors = getNeighbors(grid, r, c);
-
-        Object.keys(neighbors).forEach((dir) => {
-          const nWord = neighbors[dir];
-          if (nWord) {
-            const nClean = bestDictWord(nWord).display || norm(nWord);
-            const dirMap = entry.adjacencies[dir];
-            dirMap.set(nClean, (dirMap.get(nClean) || 0) + 1);
-          }
-        });
-      }
-    });
-  });
-
-  // 4. Resolve the highest-voted direct structural neighbor for any word token
-  const getBestNeighbor = (wordToken, direction) => {
-    const entry = wordRegistry.get(wordToken);
-    if (!entry) return null;
-    let bestN = null;
-    let maxVotes = 0;
-    entry.adjacencies[direction].forEach((votes, neighbor) => {
-      if (votes > maxVotes) {
-        maxVotes = votes;
-        bestN = neighbor;
-      }
-    });
-    return bestN;
-  };
-
-  // 5. Determine the base size parameters from the grid variants
-  const maxRows = Math.round(scanHistory.reduce((sum, g) => sum + g.length, 0) / scanHistory.length);
-  const maxCols = Math.round(scanHistory.reduce((sum, g) => sum + Math.max(...g.map(r => r.length)), 0) / scanHistory.length);
-
-  // Prepare a clear canvas grid to fill out anchor positions
-  const outputGrid = Array.from({ length: maxRows }, () => new Array(maxCols).fill(""));
-
-  // Sort unique items found by confidence to place anchor words down first
-  const sortedAnchors = Array.from(wordRegistry.values()).sort((a, b) => {
-    return (b.confidenceSum / b.seenCount) - (a.confidenceSum / a.seenCount);
-  });
-
-  // Keep tracking mapping coordinates for placed items
-  const placedMap = new Map(); // Word -> { r, c }
-
-  // 6. Use Adjacency anchors to construct final placements safely
-  sortedAnchors.forEach((node) => {
-    if (placedMap.has(node.word)) return; // Already placed via neighborhood walk
-
-    // Try finding an existing placed neighbor to align this next to
-    let targetedPos = null;
-    const directions = [
-      { key: 'left',   dr: 0,  dc: 1 },  // If node is to the left of target
-      { key: 'right',  dr: 0,  dc: -1 }, // If node is to the right of target
-      { key: 'top',    dr: 1,  dc: 0 },  // If node is above target
-      { key: 'bottom', dr: -1, dc: 0 }   // If node is below target
-    ];
-
-    for (let d of directions) {
-      const adjacentWord = getBestNeighbor(node.word, d.key);
-      if (adjacentWord && placedMap.has(adjacentWord)) {
-        const p = placedMap.get(adjacentWord);
-        targetedPos = { r: p.r + d.dr, c: p.c + d.dc };
-        break;
-      }
-    }
-
-    // If isolated, find the first available slot that reflects its general profile coordinates
-    if (!targetedPos) {
-      findSlotLoop:
-      for (let r = 0; r < maxRows; r++) {
-        for (let c = 0; c < maxCols; c++) {
-          if (!outputGrid[r][c]) {
-            targetedPos = { r, c };
-            break findSlotLoop;
-          }
-        }
-      }
-    }
-
-    // Safety verify position boundaries and commit values
-    if (targetedPos && targetedPos.r >= 0 && targetedPos.r < maxRows && targetedPos.c >= 0 && targetedPos.c < maxCols) {
-      if (!outputGrid[targetedPos.r][targetedPos.c]) {
-        outputGrid[targetedPos.r][targetedPos.c] = node.word;
-        placedMap.set(node.word, targetedPos);
-      }
-    }
-  });
-
-  return outputGrid;
-}
-
-	
   // ---------- interaction ----------
   function onHandleDown(e) {
     e.preventDefault();
@@ -1351,38 +1208,34 @@ confirmBtn.addEventListener('click', async () => {
     }
 
     function toGrid(words) {
-      const rowCenters = clusterAxis(words.map(w => w.y), 15);
-      const colCenters = clusterAxis(words.map(w => w.x), 15);
-      
-      rowCenters.sort((a, b) => a - b);
-      colCenters.sort((a, b) => a - b);
+      const grid = Array.from({ length: 25 }, () => []);
+      if (!words.length) return { grid, score: 0, filled: 0 };
 
-      const grid = Array.from({ length: rowCenters.length }, () => new Array(colCenters.length).fill(""));
-      
+      const rowCenters = clusterAxis(words.map(w => w.y), 5);
+      const colCenters = clusterAxis(words.map(w => w.x), 5);
+
       words.forEach(w => {
-        const r = nearestIndex(rowCenters, w.y);
-        const c = nearestIndex(colCenters, w.x);
-        if (w.word) grid[r][c] = w.word;
+        if (!w.word) return;
+        const row = nearestIndex(rowCenters, w.y);
+        const col = nearestIndex(colCenters, w.x);
+        const idx = Math.min(24, row * 5 + col);
+        if (!grid[idx].some(c => c.word === w.word)) {
+          grid[idx].push({ word: w.word, sim: w.sim, conf: w.conf });
+        }
       });
 
-      return grid;
+      let score = 0, filled = 0;
+      grid.forEach((list, i) => {
+        list.sort((a, b) => b.sim - a.sim);
+        grid[i] = list.slice(0, 5);
+        if (list.length) {
+          filled++;
+          score += list[0].sim;
+        }
+      });
+
+      return { grid, score, filled };
     }
-
-    // ---------- Process and Paint Output ----------
-    // 1. Convert current full-context OCR words to a raw grid layout
-    const rawGrid = toGrid(harvest(ocrResultData, size, size)); // Adjust arguments if your variable names differ
-
-    // 2. Feed raw snapshot into your pasted relative history graph 
-    const finalOptimizedGrid = recordAndAlignScan(rawGrid);
-
-    // 3. Paint the consensus layout to your UI elements
-    paintFinalGridToUI(finalOptimizedGrid);
-
-  } catch (err) {
-    console.error(err);
-    if (typeof hideModal === 'function') hideModal();
-  }
-});
 
     function mergeAgreeingCells(primary, secondary) {
       for (let i = 0; i < 25; i++) {
@@ -1448,60 +1301,6 @@ function dedupeWords(result) {
   });
 
   return { grid: newGrid, score, filled };
-}
-
-function boostShiftedPairs(result) {
-  if (!result || !result.grid) return result;
-
-  // Collect the current best word for every cell
-  const board = result.grid.map(list => list.length ? list[0].word : null);
-
-  // Directions we care about: right and down (so we only look at each pair once)
-  const dirs = [
-    { dr: 0, dc: 1 },  // horizontal neighbour
-    { dr: 1, dc: 0 }   // vertical neighbour
-  ];
-
-  // Record every neighbouring pair that currently exists
-  const pairs = [];
-  for (let r = 0; r < 5; r++) {
-    for (let c = 0; c < 5; c++) {
-      const idx = r * 5 + c;
-      const w1 = board[idx];
-      if (!w1) continue;
-
-      for (const { dr, dc } of dirs) {
-        const nr = r + dr, nc = c + dc;
-        if (nr > 4 || nc > 4) continue;
-        const nidx = nr * 5 + nc;
-        const w2 = board[nidx];
-        if (!w2) continue;
-        pairs.push({ w1, w2, idx, nidx });
-      }
-    }
-  }
-
-  // Very light boost: if the same two words appear as neighbours,
-  // slightly raise the confidence of both cells
-  pairs.forEach(p => {
-    const list1 = result.grid[p.idx];
-    const list2 = result.grid[p.nidx];
-    if (list1.length) list1[0].sim = Math.min(1, list1[0].sim + 0.04);
-    if (list2.length) list2[0].sim = Math.min(1, list2[0].sim + 0.04);
-  });
-
-  // Recompute score
-  let score = 0, filled = 0;
-  result.grid.forEach(list => {
-    if (list.length) {
-      filled++;
-      score += list[0].sim;
-    }
-  });
-  result.score = score;
-  result.filled = filled;
-
-  return result;
 }
 	  
     function paintGrid(result, label) {
@@ -1582,7 +1381,6 @@ await worker.terminate();
 
 // Remove duplicate words – keep only the strongest occurrence of each word
 best = dedupeWords(best);
-best = boostShiftedPairs(best);   // ← new line
 
 paintGrid(best, 'Final');
 
