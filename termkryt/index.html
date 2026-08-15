@@ -1390,7 +1390,7 @@ cells.forEach(cell => {
   const text = (cell.querySelector('.cell-text')?.textContent || '').trim().toLowerCase();
   if (!text || text.startsWith('card ')) return;
   if (seen.has(text)) {
-    cell.querySelector('.cell-text').textContent = '';   // or `Card ${i+1}` if you prefer
+    cell.querySelector('.cell-text').textContent = `Card ${i+1}`;   // or `Card ${i+1}` if you prefer
   } else {
     seen.add(text);
   }
