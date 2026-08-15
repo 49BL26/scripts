@@ -970,7 +970,6 @@ confirmBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Open progress modal
   showModal({
     title: 'Scanning board…',
     message: 'Warping image…',
@@ -981,7 +980,7 @@ confirmBtn.addEventListener('click', async () => {
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   try {
-    // ---------- 1. Wait for OpenCV ----------
+    // ---------- Wait for OpenCV ----------
     if (typeof cv === 'undefined' || !cv.Mat) {
       await new Promise(resolve => {
         const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
@@ -989,7 +988,7 @@ confirmBtn.addEventListener('click', async () => {
       });
     }
 
-    // ---------- 2. Warp whole board to clean square ----------
+    // ---------- Warp whole board ----------
     const src = cv.imread(imgEl);
     const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
       corners[0].x, corners[0].y,
@@ -1012,10 +1011,9 @@ confirmBtn.addEventListener('click', async () => {
     baseCanvas.height = size;
     cv.imshow(baseCanvas, warpedMat);
 
-    // cleanup
     src.delete(); warpedMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
 
-    // ---------- 3. Helpers (copied from the good full-scanner methodology) ----------
+    // ---------- Helpers ----------
     function cloneCanvas(src, scale = 1) {
       const dst = document.createElement('canvas');
       dst.width  = Math.round(src.width  * scale);
@@ -1072,15 +1070,14 @@ confirmBtn.addEventListener('click', async () => {
       return dst;
     }
 
-function flipTokens180(tokens) {
-  // tokens have normalized x,y in [0,1]
-  return tokens.map(t => ({
-    ...t,
-    x: 1 - t.x,
-    y: 1 - t.y
-  }));
-}	  
-    // Dictionary helpers (reuse if already present, otherwise minimal versions)
+    function flipTokens180(tokens) {
+      return tokens.map(t => ({
+        ...t,
+        x: 1 - t.x,
+        y: 1 - t.y
+      }));
+    }
+
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
     function matrixSimilarity(a, b) {
@@ -1128,7 +1125,6 @@ function flipTokens180(tokens) {
       return best;
     }
 
-    // Harvest + clustering (same methodology as the good full scanner)
     function harvest(data, W, H) {
       let tokens = [];
       (data.words || []).forEach(w => {
@@ -1143,7 +1139,6 @@ function flipTokens180(tokens) {
       });
       tokens.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
 
-      // merge adjacent when pair is better
       const merged = [];
       let cur = null;
       for (const tok of tokens) {
@@ -1213,27 +1208,88 @@ function flipTokens180(tokens) {
     }
 
     function toGrid(words) {
-      const grid = new Array(25).fill(null);
+      const grid = Array.from({ length: 25 }, () => []);
       if (!words.length) return { grid, score: 0, filled: 0 };
+
       const rowCenters = clusterAxis(words.map(w => w.y), 5);
       const colCenters = clusterAxis(words.map(w => w.x), 5);
-      let score = 0, filled = 0;
+
       words.forEach(w => {
         if (!w.word) return;
         const row = nearestIndex(rowCenters, w.y);
         const col = nearestIndex(colCenters, w.x);
         const idx = Math.min(24, row * 5 + col);
-        if (!grid[idx] || w.sim > grid[idx].sim) {
-          if (!grid[idx]) filled++;
-          else score -= grid[idx].sim;
-          score += w.sim;
-          grid[idx] = w;
+        if (!grid[idx].some(c => c.word === w.word)) {
+          grid[idx].push({ word: w.word, sim: w.sim, conf: w.conf });
         }
       });
+
+      let score = 0, filled = 0;
+      grid.forEach((list, i) => {
+        list.sort((a, b) => b.sim - a.sim);
+        grid[i] = list.slice(0, 5);
+        if (list.length) {
+          filled++;
+          score += list[0].sim;
+        }
+      });
+
       return { grid, score, filled };
     }
 
-    // ---------- 4. Progressive full-board OCR ----------
+    function mergeAgreeingCells(primary, secondary) {
+      for (let i = 0; i < 25; i++) {
+        const pList = primary.grid[i] || [];
+        const sList = secondary.grid[i] || [];
+        if (!pList.length || !sList.length) continue;
+
+        const pBest = pList[0];
+        const sBest = sList[0];
+
+        if (pBest.word === sBest.word) {
+          pBest.sim = Math.min(1, pBest.sim + 0.15);
+          pBest.conf = Math.max(pBest.conf, sBest.conf);
+        } else {
+          if (sBest.sim > pBest.sim) {
+            primary.grid[i] = [sBest, ...pList].slice(0, 5);
+          } else if (!pList.some(c => c.word === sBest.word)) {
+            primary.grid[i].push(sBest);
+            primary.grid[i].sort((a, b) => b.sim - a.sim);
+            primary.grid[i] = primary.grid[i].slice(0, 5);
+          }
+        }
+      }
+
+      let score = 0, filled = 0;
+      primary.grid.forEach(list => {
+        if (list.length) {
+          filled++;
+          score += list[0].sim;
+        }
+      });
+      primary.score = score;
+      primary.filled = filled;
+    }
+
+    function paintGrid(result, label) {
+      if (!result) return;
+      let filled = 0;
+      result.grid.forEach((list, i) => {
+        if (list.length && list[0].word && cells[i]) {
+          cells[i].querySelector('.cell-text').textContent = list[0].word.toLowerCase();
+          filled++;
+        }
+      });
+      if (typeof updateStats === 'function') updateStats();
+
+      const msgEl = document.getElementById('modal-message');
+      if (msgEl) {
+        msgEl.textContent = `${label} → ${filled}/25 cells`;
+        void msgEl.offsetHeight;
+      }
+    }
+
+    // ---------- Progressive OCR ----------
     const worker = await Tesseract.createWorker('eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
       corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
@@ -1255,25 +1311,6 @@ function flipTokens180(tokens) {
     let best = null;
     const cells = Array.from(document.querySelectorAll('#board .cell'));
 
-    // helper that paints current best grid live
-    function paintGrid(result, label) {
-      if (!result) return;
-      let filled = 0;
-      result.grid.forEach((entry, i) => {
-        if (entry && entry.word && cells[i]) {
-          cells[i].querySelector('.cell-text').textContent = entry.word.toLowerCase();
-          filled++;
-        }
-      });
-      if (typeof updateStats === 'function') updateStats();
-
-      const msgEl = document.getElementById('modal-message');
-      if (msgEl) {
-        msgEl.textContent = `${label} → ${filled}/25 cells`;
-        void msgEl.offsetHeight; // force paint
-      }
-    }
-
     for (const v of variants) {
       // upright
       const canvas = v.make();
@@ -1287,63 +1324,28 @@ function flipTokens180(tokens) {
         paintGrid(best, v.name + ' upright');
       }
 
-// flipped
-if (msgEl) msgEl.textContent = `Reading — ${v.name} (flipped)…`;
-const flippedCanvas = rotate180(canvas);
-const r2 = await worker.recognize(flippedCanvas);
+      // flipped (with coordinate correction + synergy)
+      if (msgEl) msgEl.textContent = `Reading — ${v.name} (flipped)…`;
+      const flippedCanvas = rotate180(canvas);
+      const r2 = await worker.recognize(flippedCanvas);
 
-// harvest, then correct the coordinates back to upright space
-let flippedTokens = harvest(r2.data, flippedCanvas.width, flippedCanvas.height);
-flippedTokens = flipTokens180(flippedTokens);   // ← critical line
+      let flippedTokens = harvest(r2.data, flippedCanvas.width, flippedCanvas.height);
+      flippedTokens = flipTokens180(flippedTokens);
 
-const down = toGrid(flippedTokens);
+      const down = toGrid(flippedTokens);
 
-if (!best || down.score > best.score) {
-  best = down;
-  paintGrid(best, v.name + ' flipped');
-} else {
-  // even if score is lower, merge agreeing cells to raise certainty
-  mergeAgreeingCells(best, down);
-  paintGrid(best, v.name + ' merged');
-}
-function mergeAgreeingCells(primary, secondary) {
-  for (let i = 0; i < 25; i++) {
-    const pList = primary.grid[i] || [];
-    const sList = secondary.grid[i] || [];
-    if (!pList.length || !sList.length) continue;
-
-    const pBest = pList[0];
-    const sBest = sList[0];
-
-    if (pBest.word === sBest.word) {
-      // both orientations agree → boost confidence
-      pBest.sim = Math.min(1, pBest.sim + 0.15);
-      pBest.conf = Math.max(pBest.conf, sBest.conf);
-    } else {
-      if (sBest.sim > pBest.sim) {
-        primary.grid[i] = [sBest, ...pList].slice(0, 5);
-      } else if (!pList.some(c => c.word === sBest.word)) {
-        primary.grid[i].push(sBest);
-        primary.grid[i].sort((a, b) => b.sim - a.sim);
-        primary.grid[i] = primary.grid[i].slice(0, 5);
+      if (!best || down.score > best.score) {
+        best = down;
+        paintGrid(best, v.name + ' flipped');
+      } else {
+        mergeAgreeingCells(best, down);
+        paintGrid(best, v.name + ' merged');
       }
-    }
-  }
 
-  // recalculate score & filled
-  let score = 0, filled = 0;
-  primary.grid.forEach(list => {
-    if (list.length) {
-      filled++;
-      score += list[0].sim;
+      if (best && best.filled >= 22) break;
     }
-  });
-  primary.score = score;
-  primary.filled = filled;
-}
+
     await worker.terminate();
-
-    // final paint
     paintGrid(best, 'Final');
 
     if (typeof saveCurrentState === 'function') saveCurrentState();
