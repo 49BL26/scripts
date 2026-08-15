@@ -1271,6 +1271,56 @@ confirmBtn.addEventListener('click', async () => {
       primary.filled = filled;
     }
 
+function dedupeWords(result) {
+  if (!result || !result.grid) return result;
+
+  // Collect the single best candidate for every cell
+  const candidates = [];
+  result.grid.forEach((list, idx) => {
+    if (list.length && list[0].word) {
+      candidates.push({
+        idx,
+        word: list[0].word,
+        sim: list[0].sim,
+        conf: list[0].conf || 0
+      });
+    }
+  });
+
+  // Group by word
+  const byWord = new Map();
+  candidates.forEach(c => {
+    if (!byWord.has(c.word)) byWord.set(c.word, []);
+    byWord.get(c.word).push(c);
+  });
+
+  // For each word that appears more than once, keep only the strongest
+  const keep = new Set(); // cell indexes we will keep
+  byWord.forEach(list => {
+    if (list.length === 1) {
+      keep.add(list[0].idx);
+    } else {
+      // sort by similarity (then confidence) and keep only the best
+      list.sort((a, b) => b.sim - a.sim || b.conf - a.conf);
+      keep.add(list[0].idx);
+    }
+  });
+
+  // Rebuild the grid: only the kept cells stay, others become empty
+  const newGrid = Array.from({ length: 25 }, () => []);
+  let score = 0, filled = 0;
+
+  result.grid.forEach((list, idx) => {
+    if (keep.has(idx) && list.length) {
+      newGrid[idx] = list;
+      filled++;
+      score += list[0].sim;
+    }
+  });
+
+  return { grid: newGrid, score, filled };
+}
+	  
     function paintGrid(result, label) {
       if (!result) return;
       let filled = 0;
@@ -1345,8 +1395,12 @@ confirmBtn.addEventListener('click', async () => {
       if (best && best.filled >= 22) break;
     }
 
-    await worker.terminate();
-    paintGrid(best, 'Final');
+await worker.terminate();
+
+// Remove duplicate words – keep only the strongest occurrence of each word
+best = dedupeWords(best);
+
+paintGrid(best, 'Final');
 
     if (typeof saveCurrentState === 'function') saveCurrentState();
 
