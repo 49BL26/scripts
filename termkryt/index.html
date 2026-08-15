@@ -1274,48 +1274,30 @@ confirmBtn.addEventListener('click', async () => {
 function dedupeWords(result) {
   if (!result || !result.grid) return result;
 
-  // Collect the single best candidate for every cell
-  const candidates = [];
+  // Find the single strongest cell for every unique word
+  const bestForWord = new Map(); // word → { idx, sim, conf }
+
   result.grid.forEach((list, idx) => {
-    if (list.length && list[0].word) {
-      candidates.push({
-        idx,
-        word: list[0].word,
-        sim: list[0].sim,
-        conf: list[0].conf || 0
-      });
+    if (!list.length || !list[0].word) return;
+    const w = list[0].word;
+    const sim = list[0].sim;
+    const conf = list[0].conf || 0;
+
+    const prev = bestForWord.get(w);
+    if (!prev || sim > prev.sim || (sim === prev.sim && conf > prev.conf)) {
+      bestForWord.set(w, { idx, sim, conf });
     }
   });
 
-  // Group by word
-  const byWord = new Map();
-  candidates.forEach(c => {
-    if (!byWord.has(c.word)) byWord.set(c.word, []);
-    byWord.get(c.word).push(c);
-  });
-
-  // For each word that appears more than once, keep only the strongest
-  const keep = new Set(); // cell indexes we will keep
-  byWord.forEach(list => {
-    if (list.length === 1) {
-      keep.add(list[0].idx);
-    } else {
-      // sort by similarity (then confidence) and keep only the best
-      list.sort((a, b) => b.sim - a.sim || b.conf - a.conf);
-      keep.add(list[0].idx);
-    }
-  });
-
-  // Rebuild the grid: only the kept cells stay, others become empty
+  // Build a clean grid: only the winning cell for each word is kept
   const newGrid = Array.from({ length: 25 }, () => []);
   let score = 0, filled = 0;
 
-  result.grid.forEach((list, idx) => {
-    if (keep.has(idx) && list.length) {
-      newGrid[idx] = list;
-      filled++;
-      score += list[0].sim;
-    }
+  bestForWord.forEach((info, word) => {
+    const originalList = result.grid[info.idx];
+    newGrid[info.idx] = originalList;           // keep the full candidate list for that cell
+    filled++;
+    score += info.sim;
   });
 
   return { grid: newGrid, score, filled };
@@ -1402,6 +1384,18 @@ best = dedupeWords(best);
 
 paintGrid(best, 'Final');
 
+// Final safety pass: force any remaining duplicate text to blank
+const seen = new Set();
+cells.forEach(cell => {
+  const text = (cell.querySelector('.cell-text')?.textContent || '').trim().toLowerCase();
+  if (!text || text.startsWith('card ')) return;
+  if (seen.has(text)) {
+    cell.querySelector('.cell-text').textContent = '';   // or `Card ${i+1}` if you prefer
+  } else {
+    seen.add(text);
+  }
+});
+	  
     if (typeof saveCurrentState === 'function') saveCurrentState();
 
     settleModal(true);
