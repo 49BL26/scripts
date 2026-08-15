@@ -958,73 +958,353 @@ body.grid-align-open {
     });
   }
 
-  confirmBtn.addEventListener('click', async () => {
-    closeOverlay();
+confirmBtn.addEventListener('click', async () => {
+  closeOverlay();
 
-    if (!corners || corners.length !== 4) {
-      uiAlert('No grid corners available.');
-      return;
+  if (!corners || corners.length !== 4) {
+    uiAlert('No grid corners available.');
+    return;
+  }
+
+  // Open progress modal
+  showModal({
+    title: 'Scanning board…',
+    message: 'Warping image…',
+    buttons: [],
+    dismiss: null
+  });
+
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  try {
+    // ---------- 1. Wait for OpenCV ----------
+    if (typeof cv === 'undefined' || !cv.Mat) {
+      await new Promise(resolve => {
+        const check = () => (typeof cv !== 'undefined' && cv.Mat) ? resolve() : setTimeout(check, 50);
+        check();
+      });
     }
 
-    showModal({
-      title: 'Scanning cells…',
-      message: '0 / 25',
-      buttons: [],
-      dismiss: null
-    });
+    // ---------- 2. Warp whole board to clean square ----------
+    const src = cv.imread(imgEl);
+    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      corners[0].x, corners[0].y,
+      corners[1].x, corners[1].y,
+      corners[2].x, corners[2].y,
+      corners[3].x, corners[3].y
+    ]);
 
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const size = 1600;
+    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0, size, 0, size, size, 0, size
+    ]);
 
-    try {
-      const crops = await extractCellCrops(corners, imgEl);
-      const cells = Array.from(document.querySelectorAll('#board .cell'));
-      let filled = 0;
+    const M = cv.getPerspectiveTransform(srcPts, dstPts);
+    const warpedMat = new cv.Mat();
+    cv.warpPerspective(src, warpedMat, M, new cv.Size(size, size));
 
-      const used = buildUsedSet(-1);
+    const baseCanvas = document.createElement('canvas');
+    baseCanvas.width = size;
+    baseCanvas.height = size;
+    cv.imshow(baseCanvas, warpedMat);
 
-      for (let i = 0; i < 25; i++) {
-        const msgEl = document.getElementById('modal-message');
-        if (msgEl) {
-          msgEl.textContent = `${i + 1} / 25`;
-          void msgEl.offsetHeight;
+    // cleanup
+    src.delete(); warpedMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
+
+    // ---------- 3. Helpers (copied from the good full-scanner methodology) ----------
+    function cloneCanvas(src, scale = 1) {
+      const dst = document.createElement('canvas');
+      dst.width  = Math.round(src.width  * scale);
+      dst.height = Math.round(src.height * scale);
+      const ctx = dst.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src, 0, 0, dst.width, dst.height);
+      return dst;
+    }
+
+    function grayContrast(src, amount) {
+      const c = cloneCanvas(src);
+      const ctx = c.getContext('2d');
+      const img = ctx.getImageData(0, 0, c.width, c.height);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const v = Math.max(0, Math.min(255, (g - 128) * amount + 128));
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(img, 0, 0);
+      return c;
+    }
+
+    function binarize(src) {
+      const c = cloneCanvas(src);
+      const ctx = c.getContext('2d');
+      const img = ctx.getImageData(0, 0, c.width, c.height);
+      const d = img.data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      }
+      const mean = sum / (d.length / 4);
+      const cut = mean * 0.92;
+      for (let i = 0; i < d.length; i += 4) {
+        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const v = g < cut ? 0 : 255;
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(img, 0, 0);
+      return c;
+    }
+
+    function rotate180(src) {
+      const dst = document.createElement('canvas');
+      dst.width = src.width;
+      dst.height = src.height;
+      const ctx = dst.getContext('2d');
+      ctx.translate(src.width / 2, src.height / 2);
+      ctx.rotate(Math.PI);
+      ctx.drawImage(src, -src.width / 2, -src.height / 2);
+      return dst;
+    }
+
+    // Dictionary helpers (reuse if already present, otherwise minimal versions)
+    function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
+
+    function matrixSimilarity(a, b) {
+      if (!a.length || !b.length) return 0;
+      const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+      for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+      for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+      for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+          dp[i][j] = Math.min(
+            dp[i - 1][j] + 1,
+            dp[i][j - 1] + 1,
+            dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
+          );
         }
+      }
+      return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
+    }
 
-        const existing = (cells[i].querySelector('.cell-text')?.textContent || '').trim();
-        if (existing && !/^Card\s+\d+$/i.test(existing)) {
-          const k = existing.toUpperCase().replace(/[^A-Z]/g, '');
-          used.add(k);
-          continue;
-        }
+    let DICT_ENTRIES = null;
+    function getDict() {
+      if (DICT_ENTRIES) return DICT_ENTRIES;
+      const pairs = (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS)) ? WORD_PAIRS : [];
+      const map = new Map();
+      pairs.forEach(pair => {
+        (Array.isArray(pair) ? pair : [pair]).forEach(w => {
+          if (typeof w !== 'string') return;
+          const n = w.toUpperCase().replace(/[^A-Z]/g, '');
+          if (n.length >= 2 && !map.has(n)) map.set(n, w.toUpperCase());
+        });
+      });
+      DICT_ENTRIES = Array.from(map, e => ({ norm: e[0], display: e[1] }));
+      return DICT_ENTRIES;
+    }
 
-        const word = await scanSingleCell(crops[i], used);
+    function bestDictWord(raw) {
+      const dict = getDict();
+      if (!dict || !dict.length) return { display: null, sim: -1 };
+      const clean = norm(raw);
+      let best = { display: null, sim: -1 };
+      for (const d of dict) {
+        const s = matrixSimilarity(clean, d.norm);
+        if (s > best.sim) best = { display: d.display, sim: s };
+      }
+      return best;
+    }
 
-        if (word && cells[i]) {
-          cells[i].querySelector('.cell-text').textContent = word.toLowerCase();
-          const k = word.toUpperCase().replace(/[^A-Z]/g, '');
-          used.add(k);
-          if (typeof WORD_PAIRS !== 'undefined') {
-            for (const pair of WORD_PAIRS) {
-              const a = (pair[0] || '').toUpperCase().replace(/[^A-Z]/g, '');
-              const b = (pair[1] || '').toUpperCase().replace(/[^A-Z]/g, '');
-              if (a === k && b) used.add(b);
-              if (b === k && a) used.add(a);
+    // Harvest + clustering (same methodology as the good full scanner)
+    function harvest(data, W, H) {
+      let tokens = [];
+      (data.words || []).forEach(w => {
+        const raw = (w.text || '').toUpperCase().trim();
+        if (!norm(raw).length || !w.bbox) return;
+        tokens.push({
+          raw,
+          conf: w.confidence || 0,
+          x0: w.bbox.x0 / W, y0: w.bbox.y0 / H,
+          x1: w.bbox.x1 / W, y1: w.bbox.y1 / H
+        });
+      });
+      tokens.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+
+      // merge adjacent when pair is better
+      const merged = [];
+      let cur = null;
+      for (const tok of tokens) {
+        if (cur) {
+          const sameLine = tok.y0 < cur.y1 && tok.y1 > cur.y0;
+          const close = (tok.x0 - cur.x1) < 0.07;
+          if (sameLine && close) {
+            const joined = bestDictWord(cur.raw + ' ' + tok.raw);
+            const solo = Math.max(bestDictWord(cur.raw).sim, bestDictWord(tok.raw).sim);
+            if (joined.sim >= solo) {
+              cur = {
+                raw: cur.raw + ' ' + tok.raw,
+                conf: Math.max(cur.conf, tok.conf),
+                x0: Math.min(cur.x0, tok.x0), y0: Math.min(cur.y0, tok.y0),
+                x1: Math.max(cur.x1, tok.x1), y1: Math.max(cur.y1, tok.y1)
+              };
+              continue;
             }
           }
+          merged.push(cur);
+        }
+        cur = tok;
+      }
+      if (cur) merged.push(cur);
+
+      return merged.map(item => {
+        const m = bestDictWord(item.raw);
+        return {
+          word: m.display,
+          sim: m.sim,
+          conf: item.conf,
+          x: (item.x0 + item.x1) / 2,
+          y: (item.y0 + item.y1) / 2
+        };
+      });
+    }
+
+    function clusterAxis(values, maxGroups) {
+      const sorted = values.slice().sort((a, b) => a - b);
+      if (!sorted.length) return [];
+      const span = sorted[sorted.length - 1] - sorted[0];
+      let groups = [[sorted[0]]];
+      const threshold = Math.max(span / (maxGroups * 2.2), 0.012);
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] - sorted[i - 1] > threshold) groups.push([sorted[i]]);
+        else groups[groups.length - 1].push(sorted[i]);
+      }
+      while (groups.length > maxGroups) {
+        let bestI = 0, bestGap = Infinity;
+        for (let i = 0; i < groups.length - 1; i++) {
+          const gap = groups[i + 1][0] - groups[i][groups[i].length - 1];
+          if (gap < bestGap) { bestGap = gap; bestI = i; }
+        }
+        groups[bestI] = groups[bestI].concat(groups[bestI + 1]);
+        groups.splice(bestI + 1, 1);
+      }
+      return groups.map(g => g.reduce((a, b) => a + b, 0) / g.length);
+    }
+
+    function nearestIndex(centers, v) {
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < centers.length; i++) {
+        const d = Math.abs(centers[i] - v);
+        if (d < bd) { bd = d; bi = i; }
+      }
+      return bi;
+    }
+
+    function toGrid(words) {
+      const grid = new Array(25).fill(null);
+      if (!words.length) return { grid, score: 0, filled: 0 };
+      const rowCenters = clusterAxis(words.map(w => w.y), 5);
+      const colCenters = clusterAxis(words.map(w => w.x), 5);
+      let score = 0, filled = 0;
+      words.forEach(w => {
+        if (!w.word) return;
+        const row = nearestIndex(rowCenters, w.y);
+        const col = nearestIndex(colCenters, w.x);
+        const idx = Math.min(24, row * 5 + col);
+        if (!grid[idx] || w.sim > grid[idx].sim) {
+          if (!grid[idx]) filled++;
+          else score -= grid[idx].sim;
+          score += w.sim;
+          grid[idx] = w;
+        }
+      });
+      return { grid, score, filled };
+    }
+
+    // ---------- 4. Progressive full-board OCR ----------
+    const worker = await Tesseract.createWorker('eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@6',
+      langPath:   'https://tessdata.projectnaptha.com/4.0.0'
+    });
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ ',
+      preserve_interword_spaces: '1',
+      tessedit_pageseg_mode: '11'
+    });
+
+    const variants = [
+      { name: 'contrast',  make: () => grayContrast(baseCanvas, 1.3) },
+      { name: 'raw',       make: () => cloneCanvas(baseCanvas) },
+      { name: 'binary',    make: () => binarize(baseCanvas) },
+      { name: 'upscaled',  make: () => grayContrast(cloneCanvas(baseCanvas, 1.6), 1.15) }
+    ];
+
+    let best = null;
+    const cells = Array.from(document.querySelectorAll('#board .cell'));
+
+    // helper that paints current best grid live
+    function paintGrid(result, label) {
+      if (!result) return;
+      let filled = 0;
+      result.grid.forEach((entry, i) => {
+        if (entry && entry.word && cells[i]) {
+          cells[i].querySelector('.cell-text').textContent = entry.word.toLowerCase();
           filled++;
         }
+      });
+      if (typeof updateStats === 'function') updateStats();
 
-        if (typeof updateStats === 'function') updateStats();
+      const msgEl = document.getElementById('modal-message');
+      if (msgEl) {
+        msgEl.textContent = `${label} → ${filled}/25 cells`;
+        void msgEl.offsetHeight; // force paint
+      }
+    }
+
+    for (const v of variants) {
+      // upright
+      const canvas = v.make();
+      const msgEl = document.getElementById('modal-message');
+      if (msgEl) msgEl.textContent = `Reading — ${v.name} (upright)…`;
+
+      const r1 = await worker.recognize(canvas);
+      const up = toGrid(harvest(r1.data, canvas.width, canvas.height));
+      if (!best || up.score > best.score) {
+        best = up;
+        paintGrid(best, v.name + ' upright');
       }
 
-      if (typeof saveCurrentState === 'function') saveCurrentState();
-      settleModal(true);
-      uiAlert(`Finished. Filled ${filled} of 25 cells.`, 'Done');
-    } catch (err) {
-      console.error(err);
-      settleModal(null);
-      uiAlert('Error while scanning cells: ' + err.message);
+      // flipped
+      if (msgEl) msgEl.textContent = `Reading — ${v.name} (flipped)…`;
+      const flipped = rotate180(canvas);
+      const r2 = await worker.recognize(flipped);
+      const down = toGrid(harvest(r2.data, flipped.width, flipped.height));
+      if (down.score > best.score) {
+        best = down;
+        paintGrid(best, v.name + ' flipped');
+      }
+
+      // early stop if already excellent
+      if (best && best.filled >= 22) break;
     }
-  });
+
+    await worker.terminate();
+
+    // final paint
+    paintGrid(best, 'Final');
+
+    if (typeof saveCurrentState === 'function') saveCurrentState();
+
+    settleModal(true);
+    uiAlert(`Finished. Filled ${best ? best.filled : 0} of 25 cells.`, 'Done');
+
+  } catch (err) {
+    console.error(err);
+    settleModal(null);
+    uiAlert('Error while scanning: ' + err.message);
+  }
+});
 
   cancelBtn.addEventListener('click', closeOverlay);
 
