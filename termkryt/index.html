@@ -1072,6 +1072,14 @@ confirmBtn.addEventListener('click', async () => {
       return dst;
     }
 
+function flipTokens180(tokens) {
+  // tokens have normalized x,y in [0,1]
+  return tokens.map(t => ({
+    ...t,
+    x: 1 - t.x,
+    y: 1 - t.y
+  }));
+}	  
     // Dictionary helpers (reuse if already present, otherwise minimal versions)
     function norm(s) { return (s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
 
@@ -1279,20 +1287,60 @@ confirmBtn.addEventListener('click', async () => {
         paintGrid(best, v.name + ' upright');
       }
 
-      // flipped
-      if (msgEl) msgEl.textContent = `Reading — ${v.name} (flipped)…`;
-      const flipped = rotate180(canvas);
-      const r2 = await worker.recognize(flipped);
-      const down = toGrid(harvest(r2.data, flipped.width, flipped.height));
-      if (down.score > best.score) {
-        best = down;
-        paintGrid(best, v.name + ' flipped');
+// flipped
+if (msgEl) msgEl.textContent = `Reading — ${v.name} (flipped)…`;
+const flippedCanvas = rotate180(canvas);
+const r2 = await worker.recognize(flippedCanvas);
+
+// harvest, then correct the coordinates back to upright space
+let flippedTokens = harvest(r2.data, flippedCanvas.width, flippedCanvas.height);
+flippedTokens = flipTokens180(flippedTokens);   // ← critical line
+
+const down = toGrid(flippedTokens);
+
+if (!best || down.score > best.score) {
+  best = down;
+  paintGrid(best, v.name + ' flipped');
+} else {
+  // even if score is lower, merge agreeing cells to raise certainty
+  mergeAgreeingCells(best, down);
+  paintGrid(best, v.name + ' merged');
+}
+function mergeAgreeingCells(primary, secondary) {
+  for (let i = 0; i < 25; i++) {
+    const pList = primary.grid[i] || [];
+    const sList = secondary.grid[i] || [];
+    if (!pList.length || !sList.length) continue;
+
+    const pBest = pList[0];
+    const sBest = sList[0];
+
+    if (pBest.word === sBest.word) {
+      // both orientations agree → boost confidence
+      pBest.sim = Math.min(1, pBest.sim + 0.15);
+      pBest.conf = Math.max(pBest.conf, sBest.conf);
+    } else {
+      if (sBest.sim > pBest.sim) {
+        primary.grid[i] = [sBest, ...pList].slice(0, 5);
+      } else if (!pList.some(c => c.word === sBest.word)) {
+        primary.grid[i].push(sBest);
+        primary.grid[i].sort((a, b) => b.sim - a.sim);
+        primary.grid[i] = primary.grid[i].slice(0, 5);
       }
-
-      // early stop if already excellent
-      if (best && best.filled >= 22) break;
     }
+  }
 
+  // recalculate score & filled
+  let score = 0, filled = 0;
+  primary.grid.forEach(list => {
+    if (list.length) {
+      filled++;
+      score += list[0].sim;
+    }
+  });
+  primary.score = score;
+  primary.filled = filled;
+}
     await worker.terminate();
 
     // final paint
