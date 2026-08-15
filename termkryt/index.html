@@ -2502,29 +2502,60 @@ function updateStats() {
 }
 
 /* ============================================================
-   SECRET UNLOCK → "Enter command" button
-   Sequence:  h3 (Tile Statistics) → Red stat → Blue stat
-   Extra requirement: first column of the board must contain
-   at least one Red and one Blue cell.
-   Once unlocked it stays unlocked (localStorage).
+   SECRET UNLOCK / LOCK
+   Unlock sequence = colors of the TOP ROW of the board
+     white/black → h3
+     red         → red stat
+     blue        → blue stat
+   Extra rule    : first column must contain at least one red AND one blue
+   Lock sequence : red → blue → white (h3)
    ============================================================ */
 (function () {
   const STORAGE_KEY = 'termkrytCmdUnlocked';
-  const SEQUENCE = ['h3', 'red', 'blue'];   // the required tap order
   let progress = [];
 
-  // ---------- helpers ----------
+  function topRowSequence() {
+    const cells = Array.from(document.querySelectorAll('#board .cell'));
+    if (cells.length < 5) return [];
+    return [0,1,2,3,4].map(i => {
+      const c = cells[i];
+      if (c.classList.contains('red'))   return 'red';
+      if (c.classList.contains('blue'))  return 'blue';
+      return 'white';          // white or black both map to h3
+    });
+  }
+
   function firstColumnHasBothColors() {
     const cells = Array.from(document.querySelectorAll('#board .cell'));
     if (cells.length < 25) return false;
-    const col0 = [0, 5, 10, 15, 20].map(i => cells[i]);
-    const hasRed  = col0.some(c => c.classList.contains('red'));
-    const hasBlue = col0.some(c => c.classList.contains('blue'));
-    return hasRed && hasBlue;
+    const col0 = [0,5,10,15,20].map(i => cells[i]);
+    return col0.some(c => c.classList.contains('red')) &&
+           col0.some(c => c.classList.contains('blue'));
   }
 
   function isUnlocked() {
     return localStorage.getItem(STORAGE_KEY) === '1';
+  }
+
+  function addCommandButton() {
+    if (document.getElementById('cmd-unlock-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'cmd-unlock-btn';
+    btn.textContent = 'Enter command';
+    btn.style.cssText = 'margin:8px 0 0;padding:8px 14px;font-size:13px;';
+    btn.addEventListener('click', () => {
+      uiPrompt('Enter a command:', '', { title: 'Command palette', okLabel: 'Run' })
+        .then(cmd => {
+          if (cmd !== null && cmd.trim() !== '') executeCommand(cmd);
+        });
+    });
+    const stats = document.getElementById('stats-blurb');
+    if (stats) stats.appendChild(btn);
+  }
+
+  function removeCommandButton() {
+    const btn = document.getElementById('cmd-unlock-btn');
+    if (btn) btn.remove();
   }
 
   function unlock() {
@@ -2533,63 +2564,54 @@ function updateStats() {
     console.log('%cCommand palette unlocked', 'color:#2e7d32;font-weight:bold');
   }
 
-  function addCommandButton() {
-    if (document.getElementById('cmd-unlock-btn')) return; // already present
-
-    const btn = document.createElement('button');
-    btn.id = 'cmd-unlock-btn';
-    btn.textContent = 'Enter command';
-    btn.style.cssText = 'margin:8px 0 0;padding:8px 14px;font-size:13px;';
-    btn.addEventListener('click', () => {
-      // Re-uses the existing backtick command palette
-      uiPrompt('Enter a command:', '', { title: 'Command palette', okLabel: 'Run' })
-        .then(cmd => {
-          if (cmd !== null && cmd.trim() !== '') executeCommand(cmd);
-        });
-    });
-
-    // Place it under the Tile Statistics panel
-    const stats = document.getElementById('stats-blurb');
-    if (stats) stats.appendChild(btn);
+  function lock() {
+    localStorage.removeItem(STORAGE_KEY);
+    removeCommandButton();
+    console.log('%cCommand palette locked', 'color:#c62828;font-weight:bold');
   }
 
-  // ---------- tap tracking ----------
   function onTap(kind) {
-    if (isUnlocked()) return;
-
     progress.push(kind);
-    // keep only the last N taps
-    if (progress.length > SEQUENCE.length) progress.shift();
+    if (progress.length > 5) progress.shift();
 
-    // exact sequence match?
-    const match = progress.length === SEQUENCE.length &&
-                  progress.every((v, i) => v === SEQUENCE[i]);
+    // 1. Lock sequence (red → blue → white) – checked first
+    if (progress.length >= 3) {
+      const last3 = progress.slice(-3);
+      if (last3[0] === 'red' && last3[1] === 'blue' && last3[2] === 'white') {
+        lock();
+        progress = [];
+        return;
+      }
+    }
 
-    if (match && firstColumnHasBothColors()) {
-      unlock();
+    // 2. Unlock sequence (matches current top-row colors)
+    const needed = topRowSequence();
+    if (needed.length === 5 && progress.length >= 5) {
+      const last5 = progress.slice(-5);
+      const matches = last5.every((v, i) => v === needed[i]);
+      if (matches && firstColumnHasBothColors()) {
+        unlock();
+      }
+      // whether it matched or not, clear so the user can try again
       progress = [];
-    } else if (match) {
-      // sequence was right but board condition failed – reset
-      progress = [];
-      console.log('Sequence correct, but first column needs both a Red and a Blue');
     }
   }
 
-  // ---------- wire the three elements ----------
   function wire() {
-    const h3 = document.querySelector('#stats-blurb h3');
-    const red = document.getElementById('stat-red');
+    const h3   = document.querySelector('#stats-blurb h3');
+    const red  = document.getElementById('stat-red');
     const blue = document.getElementById('stat-blue');
 
-    if (h3)  h3.addEventListener('click', () => onTap('h3'));
-    if (red) red.addEventListener('click', () => onTap('red'));
+    if (h3) {
+      h3.addEventListener('click', () => onTap('white')); // white/black
+      h3.addEventListener('click', () => onTap('h3'));    // also used in older mental model
+    }
+    if (red)  red.addEventListener('click',  () => onTap('red'));
     if (blue) blue.addEventListener('click', () => onTap('blue'));
 
-    // If already unlocked from a previous visit, show the button immediately
     if (isUnlocked()) addCommandButton();
   }
 
-  // Run after DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', wire);
   } else {
