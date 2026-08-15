@@ -1663,7 +1663,7 @@ function executeCommand(raw) {
     const args = raw.trim().split(/\s+/);
     const name = args[0].toLowerCase();
     const arg = args.slice(1).join(' ');
-
+	
     const commands = {
         'invert':          () => invertColors(),
         'flip-h':          () => flipBoardH(),
