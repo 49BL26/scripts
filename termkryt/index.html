@@ -444,7 +444,7 @@ body.grid-align-open {
     </div>
 
     <div class="control-group" id="g-clear">
-        <button onclick="clearBoard()">Clear Board</button>
+        <button onclick="clearBoard(false)">Clear Board</button>
         <button onclick="clearBoardColors()">Clear Colors</button>
         <button onclick="clearBoardSelections()">Clear Selection</button>
     </div>
@@ -1677,7 +1677,7 @@ function executeCommand(raw) {
         'rotate':          () => rotateBoardOuterRing(),
         'rot-words':       () => rotateWordsClockwise(),
         'flip-cards':      () => toggleCellFlip(),
-        'clear':           () => clearBoard(),
+        'clear':           () => clearBoard(false),
 		'clear.':          () => clearBoard(true)
         'randomize':       () => randomizeBoard(),
         'add-word':        () => addWordPrompt(),
