@@ -1,0 +1,347 @@
+<html>
+<script>
+
+//English
+var Englishalphabet = new Array("a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z")
+var EnglishALPHABET = new Array("A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z")
+var EnglishAlphaBeta = new Array("ay","bee","cee","dee","ey","ef","gee","aitch","ie","jay","kay","ell","em","en","oh","pee","cue","ar","ess","tee","yu","vee","double-u","ex","wy","zee")
+var Englishchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+//Futhorc
+var FUTHOAlphaBeta = new Array("feoh","uur","thorn","oos","raad","ceen","gyfu","wynn","haegl","nyyd","iis","ger","eeoh","peordh","eolh","sigel","Tiir","beorc","eh","mann","lagu","Ing","eedhel","daeg","aac","aesc","yyr","iior","eear","cweorth","calc","stan","gar")
+var FUTHOALPHABET = new Array("ᚠ","ᚢ","ᚦ","ᚩ","ᚱ","ᚳ","ᚷ","ᚹ","ᚻ","ᚾ","ᛁ","ᛄ","ᛇ","ᛈ","ᛉ","ᛋ","ᛏ","ᛒ","ᛖ","ᛗ","ᛚ","ᛝ","ᛟ","ᛞ","ᚪ","ᚫ","ᚣ","ᛡ","ᛠ","ᛢ","ᛣ","ᛥ","ᚸ")
+var FUTHOchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+//Hiragana
+var Hiragana = new Array("あ","か","さ","た","な","は","ま","や","ら","わ","い","き","し","ち","に","ひ","み","り","ゐ","う","く","す","つ","ぬ","ふ","む","ゆ","る","え","け","せ","て","ね","へ","め","れ","ゑ","お","こ","そ","と","の","ほ","も","よ","ろ","を","が","ざ","だ","ば","ぱ","ぎ","じ","ぢ","び","ぴ","ぐ","ず","づ","ぶ","ぷ","げ","ぜ","で","べ","ぺ","ご","ぞ","ど","ぼ","ぽ","ん")
+var BaseHiragana = new Array("あ","か","さ","た","な","は","ま","や","ら","わ","い","き","し","ち","に","ひ","み","り","ゐ","う","く","す","つ","ぬ","ふ","む","ゆ","る","え","け","せ","て","ね","へ","め","れ","ゑ","お","こ","そ","と","の","ほ","も","よ","ろ","を","ん")
+var BaseHIRAGANAchance = new Array("0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0")
+var HIRAGANAchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+var Katakana = new Array("ア","カ","サ","タ","ナ","ハ","マ","ヤ","ラ","ワ","イ","キ","シ","チ","ニ","ヒ","ミ","リ","ヰ","ウ","ク","ス","ツ","ヌ","フ","ム","ユ","ル","エ","ケ","セ","テ","ネ","ヘ","メ","レ","ヱ","オ","コ","ソ","ト","ノ","ホ","モ","ヨ","ロ","ヲ","ガ","ザ","ダ","バ","パ","ギ","ジ","ヂ","ビ","ピ","グ","ズ","ヅ","ブ","プ","ゲ","ゼ","デ","ベ","ペ","ゴ","ゾ","ド","ボ","ポ","ン")
+var KATAKANAchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+var BaseJapNames = new Array("a","ka","sa","ta","na","ha","ma","ya","ra","wa","i","ki","si","ti","ni","hi","mi","ri","wi","u","ku","su","tu","nu","hu","mu","yu","ru","e","ke","se","te","ne","he","me","re","we","o","ko","so","to","no","ho","mo","yo","ro","wo","n")
+
+var _aJapNames = new Array("a","ka","sa","ta","na","ha","ma","ya","ra","wa")
+var _aHIRAGANA = new Array("あ","か","さ","た","な","は","ま","や","ら","わ")
+var _aHIRAGANAch = new Array("0","0","0","0","0","0","0","0","0","0")
+var _iJapNames = new Array("i","ki","si","ti","ni","hi","mi","ri","wi")
+var _iHIRAGANA = new Array("い","き","し","ち","に","ひ","み","り","ゐ")
+var _iHIRAGANAch = new Array("","","","","","","","","")
+var _uJapNames = new Array("u","ku","su","tu","nu","hu","mu","yu","ru")
+var _uHIRAGANA = new Array("う","く","す","つ","ぬ","ふ","む","ゆ","る")
+var _uHIRAGANAch = new Array("","","","","","","","","")
+var _eJapNames = new Array("e","ke","se","te","ne","he","me","re","we")
+var _eHIRAGANA = new Array("え","け","せ","て","ね","へ","め","れ","ゑ")
+var _eHIRAGANAch = new Array("","","","","","","","","")
+var _oJapNames = new Array("o","ko","so","to","no","ho","mo","yo","ro","wo")
+var _oHIRAGANA = new Array("お","こ","そ","と","の","ほ","も","よ","ろ","を")
+var _oHIRAGANAch = new Array("","","","","","","","","","")
+var JapNames = new Array("a","ka","sa","ta","na","ha","ma","ya","ra","wa","i","ki","si","ti","ni","hi","mi","ri","wi","u","ku","su","tu","nu","hu","mu","yu","ru","e","ke","se","te","ne","he","me","re","we","o","ko","so","to","no","ho","mo","yo","ro","wo","ga","za","da","ba","pa","gi","zi","di","bi","pi","gu","zu","du","bu","pu","ge","ze","de","be","pe","go","zo","do","bo","po","n")
+
+//Katakana
+var Katakana = new Array("ア","カ","サ","タ","ナ","ハ","マ","ヤ","ラ","ワ","イ","キ","シ","チ","ニ","ヒ","ミ","リ","ヰ","ウ","ク","ス","ツ","ヌ","フ","ム","ユ","ル","エ","ケ","セ","テ","ネ","ヘ","メ","レ","ヱ","オ","コ","ソ","ト","ノ","ホ","モ","ヨ","ロ","ヲ","ガ","ザ","ダ","バ","パ","ギ","ジ","ヂ","ビ","ピ","グ","ズ","ヅ","ブ","プ","ゲ","ゼ","デ","ベ","ペ","ゴ","ゾ","ド","ボ","ポ","ン")
+var KATAKANAchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+var JapNames = new Array("a","ka","sa","ta","na","ha","ma","ya","ra","wa","i","ki","si","ti","ni","hi","mi","ri","wi","u","ku","su","tu","nu","hu","mu","yu","ru","e","ke","se","te","ne","he","me","re","we","o","ko","so","to","no","ho","mo","yo","ro","wo","ga","za","da","ba","pa","gi","zi","di","bi","pi","gu","zu","du","bu","pu","ge","ze","de","be","pe","go","zo","do","bo","po","n")
+
+//Hangeul
+var Hangeulalphabet = new Array("ᄀ","ᄂ","ᄃ","ᄅ","ᄆ","ᄇ","ᄉ","ᄋ","ᄌ","ᄎ","ᄏ","ᄐ","ᄑ","ᄒ","ᅡ","ᅢ","ᅣ","ᅤ","ᅥ","ᅦ","ᅧ","ᅨ","ᅩ","ᅪ","ᅫ","ᅬ","ᅭ","ᅮ","ᅯ","ᅰ","ᅱ","ᅲ","ᅳ","ᅴ","ᅵ")
+var HangeulAlphaBeta = new Array("giyeok","nieun","digeut","rieul","mieum","bieup","shiot","ieung","jieut","chieut","kieuk","tieut","pieup","hieut","a","ae","ya","yae","eo","e","yeo","ye","o","wa","wae","oe","yo","u","wo","we","wi","yu","eu","ui","i")
+var Hangeulchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+var HangeulalphabetC = new Array("ᄀ","ᄂ","ᄃ","ᄅ","ᄆ","ᄇ","ᄉ","ᄋ","ᄌ","ᄎ","ᄏ","ᄐ","ᄑ","ᄒ")
+var HangeulalphabetV = new Array("ᅡ","ᅢ","ᅣ","ᅤ","ᅥ","ᅦ","ᅧ","ᅨ","ᅩ","ᅪ","ᅫ","ᅬ","ᅭ","ᅮ","ᅯ","ᅰ","ᅱ","ᅲ","ᅳ","ᅴ","ᅵ")
+var HangeulAlphaBetaC = new Array("giyeok","nieun","digeut","rieul","mieum","bieup","shiot","ieung","jieut","chieut","kieuk","tieut","pieup","hieut")
+var HangeulAlphaBetaV = new Array("a","ae","ya","yae","eo","e","yeo","ye","o","wa","wae","oe","yo","u","wo","we","wi","yu","eu","ui","i")
+var HangeulchanceC = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+var HangeulchanceV = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+//Elderfuthark
+var FUTALPHABET = new Array("ᚠ","ᚢ","ᚦ","ᚨ","ᚱ","ᚲ","ᚷ","ᚹ","ᚺ","ᛀ","ᛁ","ᛃ","ᛇ","ᛈ","ᛉ","ᛋ","ᛏ","ᛒ","ᛖ","ᛗ","ᛚ","ᛜ","ᛞ","ᛟ")
+var FUTAlphaBeta = new Array("fehu","uruz","thurisaz","ansuz","raitho","kaunaz","gebo","wunjo","hagalaz","nauthiz","isa","jera","eihwaz","perth","algiz","sowulo","teiwaz","berkana","ehwaz","mannaz","laguz","inguz","dagaz","othila")
+var FUTchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+//Hebrew
+var HEBALPHABET = new Array("א","ב","ג","ד","ה","ו","ז","ח","ט","י","כ","ל","מ","נ","ס","ע","פ","צ","ק","ר","ש","ת")
+var HEBAlphaBeta = new Array("aleph","beth","gimel","daleth","he","waw","zayin","heth","teth","yod","kaph","lamed","mem","nun","samekh","ayin","pe","sadhe","qoph","resh","shin","taw")
+var HEBchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+//Cyrillic
+var CYRALPHABET = new Array("А","Б","В","Г","Д","Е","Ё","Ж","З","И","Й","К","Л","М","Н","О","П","Р","С","Т","У","Ф","Х","Ц","Ч","Ш","Щ","Ъ","Ы","Ь","Э","Ю","Я")
+var CYRalphabet = new Array("а","б","в","г","д","е","ё","ж","з","и","й","к","л","м","н","о","п","р","с","т","у","ф","х","ц","Ч","ш","щ","ъ","ы","ь","э","ю","я")
+var CYRAlphaBeta = new Array("ah","beh","veh","geh","deh","yeh","yo","zheh","zeh","ee","ee kratkoyeh","kah","ehl","ehm","ehn","oh","peh","ehr","ehs","teh","oo","ehf","khah","tseh","cheh","shah","schyah","tvyordiy znahk","i","myagkeey znahk","eh","yoo","yah")
+var CYRchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
+//Greek
+var GRKALPHABET = new Array("Α","Β","Γ","Δ","Ε","Ζ","Η","Θ","Ι","Κ","Λ","Μ","Ν","Ξ","Ο","Π","Ρ","Σ","Τ","Υ","Φ","Χ","Ψ","Ω");
+var GRKalphabet = new Array("α","β","γ","δ","ε","ζ","η","θ","ι","κ","λ","μ","ν","ξ","ο","π","ρ","σ","τ","υ","φ","χ","ψ","ω");
+var GRKchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+var GRKAlphaBeta = new Array("alpha","beta","gamma","delta","epsilon","zeta","eta","theta","iota","kappa","lambda","mu","nu","xi","omicron","pi","rho","sigma","tau","upsilon","phi","chi","psi","omega","");
+var GRKchance = new Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+var Font = new Array("48pt Times New Roman","48pt Arial","48pt Zapf-Chancery","48pt Western","48pt Courier")
+var CG=0;
+
+alphabet = CYRalphabet;
+ALPHABET = CYRALPHABET;
+AlphaBeta = CYRAlphaBeta;
+chance = CYRchance;
+
+function Roll(n)
+{
+J=Math.floor(Math.random()*Number(n));
+if(J==0){J=n;}
+return J;
+En.focus();
+}
+
+function LETTERATE()
+{
+En.value="";
+Gr.style.font=Font[Roll(5)-1];
+for (j = 0; j < 1; j--){
+c=Roll(2);
+d=Roll(alphabet.length);
+if(c==1)
+{
+Gr.value=ALPHABET[d-1];
+}
+if(c==2)
+{
+Gr.value=alphabet[d-1];
+}
+if(chance[d-1]<Number(Roll(5))){j=2;}
+if(Number(Roll(100))==100){j=2;}
+}
+En.focus();
+}
+
+function GRADE()
+{
+
+for (i = 0; i < alphabet.length; i++)
+{
+if(AlphaBeta[i]==En.value)
+{
+if(alphabet[i]!=Gr.value&&ALPHABET[i]!=Gr.value){tt.value="Incorrect, try again.";CG=0;chance[i]-=1;En.value="";}
+
+if(i!=alphabet.length+1)
+{
+if(alphabet[i]==Gr.value||ALPHABET[i]==Gr.value){tt.value="Correct!\nThe characters "+ALPHABET[i]+" and "+alphabet[i]+" are respectively the uppercase and lowercase "+En.value+".\nStreak: "+CG;LETTERATE();CG+=1;chance[i]+=1;}
+}
+ABN=alphabet.length;
+}
+}
+En.focus();
+}
+
+function GIVEUP()
+{
+for (i = 0; i < alphabet.length; i++)
+{
+if(alphabet[i]==Gr.value||ALPHABET[i]==Gr.value){tt.value="Uppercase: "+ALPHABET[i]+"\nLowercase: "+alphabet[i]+"\nEnglish: "+AlphaBeta[i];}
+}
+En.focus();
+}
+
+ABN=alphabet.length;
+
+function CYCLE()
+{
+if(event.keyCode==38){ABN=ABN-1;}
+if(event.keyCode==40){ABN=ABN+1;}
+if(ABN==alphabet.length-1){ABN=0;}
+if(ABN==-1){ABN=alphabet.length-1;}
+if(event.keyCode==38||event.keyCode==40){
+En.value=AlphaBeta[ABN];
+}
+En.focus();
+}
+
+ABCs="";
+for (l = 0; l < alphabet.length; l++){
+ABCs+=AlphaBeta[l]+": "+ALPHABET[l]+", "+alphabet[l]+"\n";
+En.focus();
+}
+
+function CHEAT()
+{
+tt.value=ABCs;
+En.focus();
+}
+
+function AlfalfabetChange(a)
+{
+if(a.value=='Cyrillic'){
+alphabet = CYRalphabet;
+ALPHABET = CYRALPHABET;
+AlphaBeta = CYRAlphaBeta;
+chance = CYRchance;
+}
+if(a.value=='Futhark'){
+alphabet = FUTALPHABET;
+ALPHABET = FUTALPHABET;
+AlphaBeta = FUTAlphaBeta;
+chance = FUTchance;
+}
+if(a.value=='Greek'){
+alphabet = GRKalphabet;
+ALPHABET = GRKALPHABET;
+AlphaBeta = GRKAlphaBeta;
+chance = GRKchance;
+}
+if(a.value=='Hebrew'){
+alphabet = HEBALPHABET;
+ALPHABET = HEBALPHABET;
+AlphaBeta = HEBAlphaBeta;
+chance = HEBchance;
+}
+if(a.value=='Hiragana'){
+alphabet = Hiragana;
+ALPHABET = Hiragana;
+AlphaBeta = JapNames;
+chance = HIRAGANAchance;
+
+}
+if(a.value=='BaseHiragana'){
+alphabet = BaseHiragana;
+ALPHABET = BaseHiragana;
+AlphaBeta = BaseJapNames;
+chance = BaseHIRAGANAchance;
+
+}
+if(a.value=='-a'){
+alphabet = _aHIRAGANA;
+ALPHABET = _aHIRAGANA;
+AlphaBeta = _aJapNames;
+chance = _aHIRAGANAch;
+
+}
+if(a.value=='-i'){
+alphabet = _iHIRAGANA;
+ALPHABET = _iHIRAGANA;
+AlphaBeta = _iJapNames;
+chance = _iHIRAGANAch;
+
+}
+if(a.value=='-u'){
+alphabet = _uHIRAGANA;
+ALPHABET = _uHIRAGANA;
+AlphaBeta = _uJapNames;
+chance = _uHIRAGANAch;
+
+}
+if(a.value=='-e'){
+alphabet = _eHIRAGANA;
+ALPHABET = _eHIRAGANA;
+AlphaBeta = _eJapNames;
+chance = _eHIRAGANAch;
+
+}
+if(a.value=='-o'){
+alphabet = _oHIRAGANA;
+ALPHABET = _oHIRAGANA;
+AlphaBeta = _oJapNames;
+chance = _oHIRAGANAch;
+}
+
+if(a.value=='Katakana'){
+alphabet = Katakana;
+ALPHABET = Katakana;
+AlphaBeta = JapNames;
+chance = KATAKANAchance;
+}
+
+if(a.value=='Hangeul'){
+alphabet = Hangeulalphabet;
+ALPHABET = Hangeulalphabet;
+AlphaBeta = HangeulAlphaBeta;
+chance = Hangeulchance;
+Case = false;
+}
+
+if(a.value=='HangeulC'){
+alphabet = HangeulalphabetC;
+ALPHABET = HangeulalphabetC;
+AlphaBeta = HangeulAlphaBetaC;
+chance = HangeulchanceC;
+Case = false;
+}
+
+if(a.value=='HangeulV'){
+alphabet = HangeulalphabetV;
+ALPHABET = HangeulalphabetV;
+AlphaBeta = HangeulAlphaBetaV;
+chance = HangeulchanceV;
+Case = false;
+}
+
+
+
+if(a.value=='English'){
+alphabet = Englishalphabet;
+ALPHABET = EnglishALPHABET;
+AlphaBeta = EnglishAlphaBeta;
+chance = Englishchance;
+}
+if(a.value=='Futhorc'){
+alphabet = FUTHOALPHABET;
+ALPHABET = FUTHOALPHABET;
+AlphaBeta = FUTHOAlphaBeta;
+chance = FUTHOchance;
+}
+ABCs="";
+for (l = 0; l < alphabet.length; l++){
+ABCs+=AlphaBeta[l]+": "+ALPHABET[l]+", "+alphabet[l]+"\n";
+alphabet_.value=ABCs;
+}
+LETTERATE();
+En.focus();
+}
+</script>
+
+<body onload="LETTERATE()" style="margin:0;border:0;">
+
+<input type="text" style="font-size:400%;width:14%;" value="" name="En" id="En" onkeyup="if(event.keyCode==13){GRADE();}CYCLE();">
+
+<textarea style="width:14%;height:85;" value="" name="tt" id="tt"></textarea>
+
+<br>
+<input type="text" style="line-height:100;font:Times New Roman;font-size:1600%;height:85;width:30%;" value="" name="Gr" id="Gr" size="1" maxlength="1" readonly onfocus="this.blur()">
+<br>
+<input type="button" value="Submit" onclick="GRADE()">
+
+<input type="button" value="Give up" onclick="GIVEUP()">
+
+<input type="button" value="Reset" onclick="LETTERATE()">
+
+<input type="button" value="View Alphabet" onclick="CHEAT()">
+<br />
+<select onblur="AlfalfabetChange(this)">
+	<option value="Cyrillic">Cyrillic</option>
+	<option value="Futhark">Elder Futhark</option>
+	<option value="Futhorc">Futhorc</option>
+	<option value="Greek">Greek</option>
+	<option value="Hebrew">Hebrew</option>
+	<optgroup label="Hiragana">
+		<option value="-a">Hiragana -a</option>
+		<option value="-i">Hiragana -i</option>
+		<option value="-u">Hiragana -u</option>
+		<option value="-e">Hiragana -e</option>
+		<option value="-o">Hiragana -o</option>
+		<option value="BaseHiragana">Basic Hiragana</option>
+		<option value="Hiragana">Hiragana</option>
+	</optgroup>
+	<option value="Katakana">Katakana</option>
+<optgroup label="Hangeul">
+		<option value="Hangeul">Hangeul</option>
+		<option value="HangeulC">Hangeul Consonants</option>
+		<option value="HangeulV">Hangeul Vowels</option>
+	</optgroup>
+	<option value="English">English</option>
+</select>
+<br />
+<textarea id="alphabet_" name="alphabet_" style="font-size:32;width:0px;height:0px;"></textarea>
+
+</body>
+<script>
+En.focus(); 
+</script>
+</html>
