@@ -165,39 +165,62 @@
     box-sizing: border-box;
 }
 
-/* 2. Turn the input group into a row so elements sit side-by-side and match heights */
-.input-group {
+/* 1. Make the whole app card a horizontal flex container */
+.game-card {
     display: flex;
-    flex-direction: row; /* Aligns input and textarea horizontally */
-    gap: 15px;          /* Space between the input and the notes */
-    align-items: stretch; /* FORCES both elements to have the exact same height */
-    min-height: 120px;   /* Sets a comfortable minimum height for this section */
-}
-
-/* 3. Style the input box to play nice with the flex layout */
-.input-group input[type="text"] {
-    flex: 1;            /* Takes up equal proportional width */
-    padding: 12px;
-    font-size: 16px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
+    flex-direction: row;     /* Creates two distinct columns */
+    align-items: stretch;    /* Forces both columns to be exactly the same height */
+    gap: 20px;               /* Space between the interactive app and the notes */
+    max-width: 800px;        /* Wide enough to accommodate two side-by-side columns */
+    margin: 30px auto;
+    padding: 20px;
     box-sizing: border-box;
-    height: auto;       /* Lets flex layout dictate its structural height */
+    border: 1px solid #ddd;  /* Keeps everything visually in the same visual div/card */
+    border-radius: 8px;
+    background: #fff;
 }
 
-/* 4. Style the Notes/Status textarea to stretch flawlessly */
-.input-group textarea {
-    flex: 1;            /* Takes up equal proportional width */
-    padding: 12px;
+/* 2. Left Column: Houses your Selector, Display Area, Input, and Buttons */
+.game-card > :not(#tt):not(.input-group) {
+    /* Target elements that aren't the textarea to bundle them logically */
+}
+
+/* Create structural wrappers in your HTML or use this clean CSS split: */
+.left-column {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    flex: 1;                 /* Takes up half the card width */
+}
+
+/* 3. Right Column: The Notes / Status textarea */
+.game-card textarea#tt {
+    flex: 1;                 /* Takes up the other half of the card width */
+    height: 100%;            /* Fills 100% of the entire game-card's vertical height */
+    min-height: 300px;       /* Sets a baseline height for the whole app */
+    padding: 15px;
     font-size: 14px;
     border: 1px solid #ccc;
     border-radius: 6px;
     box-sizing: border-box;
-    resize: none;       /* Prevents manual dragging from breaking your beautiful UI layout */
-    font-family: inherit; 
+    resize: none;            /* Stops manual resizing from breaking the layout */
+    font-family: inherit;
 }
 
-        
+/* 4. Fix the input group so it only contains the text input now */
+.input-group {
+    display: flex;
+    flex-direction: column;
+}
+.input-group input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    box-sizing: border-box;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+}
+
     </style>
 <script>
 
@@ -501,6 +524,8 @@ En.focus();
 
 <div class="game-card">
 
+    <!-- LEFT COLUMN: All game elements bundled together -->
+    <div class="left-column">
     <!-- Alphabet Selector Dropdown -->
     <div class="select-wrapper">
         <select onblur="AlfalfabetChange(this)">
@@ -527,25 +552,33 @@ En.focus();
             <option value="English">English</option>
         </select>
     </div>
+        <div class="select-wrapper">
+            <select onblur="AlfalfabetChange(this)">
+                <!-- ... your options stay exactly the same ... -->
+            </select>
+        </div>
 
-    <!-- Big Character Display Area -->
-    <div class="character-display">
-        <input type="text" id="Gr" name="Gr" value="A" readonly onfocus="this.blur()">
+        <!-- Big Character Display Area -->
+        <div class="character-display">
+            <input type="text" id="Gr" name="Gr" value="A" readonly onfocus="this.blur()">
+        </div>
+
+        <!-- User Interaction Fields (Input only) -->
+        <div class="input-group">
+            <input type="text" placeholder="Type here..." name="En" id="En" onkeyup="if(event.keyCode==13){GRADE();}CYCLE();}">
+        </div>
+
+        <!-- Actions Control Panel -->
+        <div class="button-grid">
+            <input type="button" value="Submit" onclick="GRADE()">
+            <input type="button" value="Give up" onclick="GIVEUP()">
+            <input type="button" value="Reset" onclick="LETTERATE()">
+            <input type="button" value="View Alphabet" onclick="CHEAT()">
+        </div>
     </div>
 
-    <!-- User Interaction Fields -->
-    <div class="input-group">
-        <input type="text" placeholder="Type here..." name="En" id="En" onkeyup="if(event.keyCode==13){GRADE();}CYCLE();">
-        <textarea placeholder="Notes / Status" name="tt" id="tt"></textarea>
-    </div>
-
-    <!-- Actions Control Panel -->
-    <div class="button-grid">
-        <input type="button" value="Submit" onclick="GRADE()">
-        <input type="button" value="Give up" onclick="GIVEUP()">
-        <input type="button" value="Reset" onclick="LETTERATE()">
-        <input type="button" value="View Alphabet" onclick="CHEAT()">
-    </div>
+    <!-- RIGHT COLUMN: Notes area spans the entire height of the game-card container -->
+    <textarea placeholder="Notes / Status" name="tt" id="tt"></textarea>
 
 </div>
 
