@@ -1,4 +1,159 @@
 <html>
+<head>
+    <style>
+        /* Modern Reset & Warm Cozy Theme */
+        body {
+            margin: 0;
+            padding: 40px 20px;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: #f8fafc;
+            color: #334155;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        /* Container Card */
+        .game-card {
+            background: #ffffff;
+            padding: 32px;
+            border-radius: 24px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* Top Dropdown Menu */
+        .select-wrapper {
+            margin-bottom: 24px;
+        }
+
+        select {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 1rem;
+            border-radius: 12px;
+            border: 2px solid #e2e8f0;
+            background-color: #fff;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+        }
+
+        select:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
+        /* Big Character Display Box */
+        .character-display {
+            background-color: #f1f5f9;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 180px;
+        }
+
+        /* Large Character Input (Gr) */
+        #Gr {
+            background: transparent;
+            border: none;
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 8rem;
+            font-weight: bold;
+            color: #1e293b;
+            text-align: center;
+            width: 100%;
+            outline: none;
+            pointer-events: none; /* Keeps focus off this read-only field */
+        }
+
+        /* Input Grid Area */
+        .input-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        /* Text Input & Textarea */
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 14px;
+            font-size: 1.1rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            box-sizing: border-box;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        input[type="text"]:focus, textarea:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
+        textarea {
+            height: 54px;
+            resize: none;
+            font-size: 0.95rem;
+            color: #64748b;
+        }
+
+        /* Action Buttons Grid */
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        /* Styled Buttons */
+        input[type="button"] {
+            padding: 14px 20px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+        }
+
+        /* Primary Submit Button */
+        input[type="button"][value="Submit"] {
+            grid-column: span 2;
+            background-color: #6366f1;
+            color: white;
+        }
+
+        input[type="button"][value="Submit"]:hover {
+            background-color: #4f46e5;
+        }
+
+        /* Secondary Utility Buttons */
+        input[type="button"]:not([value="Submit"]) {
+            background-color: #f1f5f9;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+
+        input[type="button"]:not([value="Submit"]):hover {
+            background-color: #e2e8f0;
+            color: #1e293b;
+        }
+
+        /* Hidden Alphabet Data Box */
+        #alphabet_ {
+            display: none;
+        }
+    </style>
 <script>
 
 //English
@@ -296,49 +451,66 @@ LETTERATE();
 En.focus();
 }
 </script>
-
+</head>
 <body onload="LETTERATE()" style="margin:0;border:0;">
 
-<input type="text" style="font-size:400%;width:14%;" value="" name="En" id="En" onkeyup="if(event.keyCode==13){GRADE();}CYCLE();">
+<div class="game-card">
 
-<textarea style="width:14%;height:85;" value="" name="tt" id="tt"></textarea>
+    <!-- Alphabet Selector Dropdown -->
+    <div class="select-wrapper">
+        <select onblur="AlfalfabetChange(this)">
+            <option value="Cyrillic">Cyrillic</option>
+            <option value="Futhark">Elder Futhark</option>
+            <option value="Futhorc">Futhorc</option>
+            <option value="Greek">Greek</option>
+            <option value="Hebrew">Hebrew</option>
+            <optgroup label="Hiragana">
+                <option value="-a">Hiragana -a</option>
+                <option value="-i">Hiragana -i</option>
+                <option value="-u">Hiragana -u</option>
+                <option value="-e">Hiragana -e</option>
+                <option value="-o">Hiragana -o</option>
+                <option value="BaseHiragana">Basic Hiragana</option>
+                <option value="Hiragana">Hiragana</option>
+            </optgroup>
+            <option value="Katakana">Katakana</option>
+            <optgroup label="Hangeul">
+                <option value="Hangeul">Hangeul</option>
+                <option value="HangeulC">Hangeul Consonants</option>
+                <option value="HangeulV">Hangeul Vowels</option>
+            </optgroup>
+            <option value="English">English</option>
+        </select>
+    </div>
 
-<br>
-<input type="text" style="line-height:100;font:Times New Roman;font-size:1600%;height:85;width:30%;" value="" name="Gr" id="Gr" size="1" maxlength="1" readonly onfocus="this.blur()">
-<br>
-<input type="button" value="Submit" onclick="GRADE()">
+    <!-- Big Character Display Area -->
+    <div class="character-display">
+        <input type="text" id="Gr" name="Gr" value="A" readonly onfocus="this.blur()">
+    </div>
 
-<input type="button" value="Give up" onclick="GIVEUP()">
+    <!-- User Interaction Fields -->
+    <div class="input-group">
+        <input type="text" placeholder="Type here..." name="En" id="En" onkeyup="if(event.keyCode==13){GRADE();}CYCLE();">
+        <textarea placeholder="Notes / Status" name="tt" id="tt"></textarea>
+    </div>
 
-<input type="button" value="Reset" onclick="LETTERATE()">
+    <!-- Actions Control Panel -->
+    <div class="button-grid">
+        <input type="button" value="Submit" onclick="GRADE()">
+        <input type="button" value="Give up" onclick="GIVEUP()">
+        <input type="button" value="Reset" onclick="LETTERATE()">
+        <input type="button" value="View Alphabet" onclick="CHEAT()">
+    </div>
 
-<input type="button" value="View Alphabet" onclick="CHEAT()">
-<br />
-<select onblur="AlfalfabetChange(this)">
-	<option value="Cyrillic">Cyrillic</option>
-	<option value="Futhark">Elder Futhark</option>
-	<option value="Futhorc">Futhorc</option>
-	<option value="Greek">Greek</option>
-	<option value="Hebrew">Hebrew</option>
-	<optgroup label="Hiragana">
-		<option value="-a">Hiragana -a</option>
-		<option value="-i">Hiragana -i</option>
-		<option value="-u">Hiragana -u</option>
-		<option value="-e">Hiragana -e</option>
-		<option value="-o">Hiragana -o</option>
-		<option value="BaseHiragana">Basic Hiragana</option>
-		<option value="Hiragana">Hiragana</option>
-	</optgroup>
-	<option value="Katakana">Katakana</option>
-<optgroup label="Hangeul">
-		<option value="Hangeul">Hangeul</option>
-		<option value="HangeulC">Hangeul Consonants</option>
-		<option value="HangeulV">Hangeul Vowels</option>
-	</optgroup>
-	<option value="English">English</option>
-</select>
-<br />
-<textarea id="alphabet_" name="alphabet_" style="font-size:32;width:0px;height:0px;"></textarea>
+</div>
+
+<!-- Hidden alphabet data storage element -->
+<textarea id="alphabet_" name="alphabet_"></textarea>
+
+<script>
+    // Automatically focus the input field when the app loads
+    document.getElementById('En').focus(); 
+</script>
 
 </body>
 <script>
