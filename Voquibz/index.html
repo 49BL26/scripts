@@ -291,27 +291,31 @@ function renderTable(list) {
                     return; 
                 }
 
-                // CASE B: Standard text execution from memory
+                // CASE B: Standard memory extraction run (No hint is currently on-screen)
                 const score = gradeEntry(userValue, item.target);
                 quizState[index].attempts.push(score);
-                
-                // Permanently record score left-to-right in the column
                 appendScoreBadge(`score-container-${index}`, score);
 
-                if (score === 1.00) {
+                // Calculate the true running collective sum of ALL historical attempts
+                let collectiveScoreSum = 0;
+                for (let m = 0; m < quizState[index].attempts.length; m++) {
+                    collectiveScoreSum += quizState[index].attempts[m];
+                }
+
+                // A row is ONLY completed if the absolute final answer is a 100% match 
+                // AND the collective accumulated score of all historical errors is >= 1.00 (100%)
+                if (score === 1.00 && collectiveScoreSum >= 1.00) {
+                    
                     // Check spacing lock requirement based on remaining active items
                     if (quizState[index].hintClearedAtCount !== null) {
-                        // Count how many words in the entire list are STILL not finished
                         let uncompletedCount = 0;
                         for (let k = 0; k < list.length; k++) {
                             if (!quizState[k].finished) uncompletedCount++;
                         }
 
-                        // Required gap is either 5 or the remaining uncompleted elements minus 1
                         const requiredGap = Math.min(5, uncompletedCount - 1);
                         const uniqueInterventions = historyQueue.length - quizState[index].hintClearedAtCount;
                         
-                        // Only enforce spacing if there are actually alternative elements available to test
                         if (requiredGap > 0 && uniqueInterventions <= requiredGap) {
                             alert(`Memory trace too fresh! Complete at least ${requiredGap - uniqueInterventions + 1} more separate entries before verifying this term.`);
                             this.value = '';
@@ -323,11 +327,25 @@ function renderTable(list) {
                     this.disabled = true; 
                     focusNextInput(index, list.length);
                     checkQuizCompletion(list.length);
+                    
+                } else if (score === 1.00 && collectiveScoreSum < 1.00) {
+                    // CRITICAL: They typed it perfectly from memory, but their running debt is still negative!
+                    quizState[index].finished = false;
+                    
+                    // Trigger a temporary visual message warning them they are working off debt
+                    const remainingDebtPercent = ((1.00 - collectiveScoreSum) * 100).toFixed(0);
+                    alert(`Correct translation from memory, but your running history is still penalized. You must type it correctly from memory ${Math.ceil(1.00 - collectiveScoreSum)} more times to offset the previous typo.`);
+                    
+                    this.value = '';
+                    focusNextInput(index, list.length);
+                    
                 } else {
+                    // Trigger dynamic layout penalty rules due to a fresh incorrect attempt
                     quizState[index].finished = false;
                     quizState[index].hasHintActive = true;
                     currentHint.innerHTML = `<span class="hint-text">Correction required: <strong>${item.target}</strong></span>`;
                 }
+
             }
         });
         
