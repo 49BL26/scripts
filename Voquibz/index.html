@@ -299,11 +299,20 @@ function renderTable(list) {
                 appendScoreBadge(`score-container-${index}`, score);
 
                 if (score === 1.00) {
+                    // Check spacing lock requirement based on remaining active items
                     if (quizState[index].hintClearedAtCount !== null) {
-                        const requiredGap = Math.min(5, list.length - 1);
+                        // Count how many words in the entire list are STILL not finished
+                        let uncompletedCount = 0;
+                        for (let k = 0; k < list.length; k++) {
+                            if (!quizState[k].finished) uncompletedCount++;
+                        }
+
+                        // Required gap is either 5 or the remaining uncompleted elements minus 1
+                        const requiredGap = Math.min(5, uncompletedCount - 1);
                         const uniqueInterventions = historyQueue.length - quizState[index].hintClearedAtCount;
                         
-                        if (uniqueInterventions <= requiredGap) {
+                        // Only enforce spacing if there are actually alternative elements available to test
+                        if (requiredGap > 0 && uniqueInterventions <= requiredGap) {
                             alert(`Memory trace too fresh! Complete at least ${requiredGap - uniqueInterventions + 1} more separate entries before verifying this term.`);
                             this.value = '';
                             return;
