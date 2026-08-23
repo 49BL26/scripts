@@ -267,29 +267,29 @@ function renderTable(list) {
         input.id = `input-field-${index}`;
         input.placeholder = 'Type answer...';
         
-        input.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                const userValue = this.value.trim();
-                const currentHint = document.getElementById(`hint-container-${index}`);
-                
-                if (!historyQueue.includes(index)) {
-                    historyQueue.push(index);
-                }
+input.addEventListener('keyup', function(e) {
+    if (e.key !== 'Enter') return;
+    const userValue = this.value.trim();
+    const currentHint = document.getElementById(`hint-container-${index}`);
+    
+    if (!historyQueue.includes(index)) {
+        historyQueue.push(index);
+    }
 
-                // CASE A: User is working through a visible typo correction block
-                if (quizState[index].hasHintActive) {
-                    if (userValue.toLowerCase() === item.target.trim().toLowerCase()) {
-                        quizState[index].hasHintActive = false;
-                        quizState[index].hintClearedAtCount = historyQueue.length; 
-                        
-                        currentHint.innerHTML = ''; 
-                        this.value = ''; 
-                        
-                        // Shift focus immediately upon successful hint correction
-                        focusNextInput(index, list.length);
-                    }
-                    return; 
-                }
+    // CASE A: User is working through a visible typo correction block
+    if (quizState[index].hasHintActive) {
+        if (userValue.toLowerCase() === item.target.trim().toLowerCase()) {
+            quizState[index].hasHintActive = false;
+            quizState[index].hintClearedAtCount = historyQueue.length; 
+            
+            currentHint.innerHTML = ''; 
+            this.value = ''; 
+            
+            // Shift focus immediately upon successful hint correction
+            focusNextInput(index, list.length);
+        }
+        return; 
+    }
 
                 // CASE B: Standard memory extraction run (No hint is currently on-screen)
                 const score = gradeEntry(userValue, item.target);
