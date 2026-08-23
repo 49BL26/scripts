@@ -9,13 +9,20 @@ body {
     font-family: Arial, sans-serif;
     background-color: #f4f4f9;
     margin: 0;
-    padding: 20px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
 h1 {
     color: #333;
+    font-size: 1.5rem;
+    margin: 10px 0;
+}
+p {
+    font-size: 0.9rem;
+    margin: 0 0 10px 0;
+    text-align: center;
 }
 .utility-bar {
     width: 100%;
@@ -32,41 +39,62 @@ h1 {
     border-radius: 4px;
     cursor: pointer;
     font-weight: bold;
-    font-size: 13px;
+    font-size: 12px;
+    width: 100%;
 }
-.toggle-panel-btn:hover {
-    background-color: #95a5a6;
+#paste-panel {
+    width: 100%;
+    max-width: 950px;
+    margin-bottom: 15px;
+    background: #fff;
+    padding: 12px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+#raw-vocab {
+    font-size: 14px;
+}
+#load-vocab-btn, #load-preset-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 14px;
 }
 table {
     border-collapse: collapse;
     width: 100%;
     max-width: 950px;
     background: #fff;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     border-radius: 8px;
-    overflow: hidden;
 }
-th, td {
-    padding: 12px 15px;
-    text-align: left;
-    vertical-align: middle;
+thead {
+    display: none; /* Hides headers on mobile; transforms table into a clean list card view */
 }
-th {
-    background-color: #4A90E2;
-    color: white;
-    text-transform: uppercase;
-    font-size: 14px;
+tr {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 2px solid #e0e0e0;
+    padding: 10px;
+    background: #fff !important;
 }
-tr:nth-child(even) {
-    background-color: #f9f9f9;
+td {
+    padding: 6px 0;
+    width: 100% !important;
+    box-sizing: border-box;
+}
+td:nth-child(1) {
+    font-weight: bold;
+    color: #333;
+    font-size: 0.95rem;
 }
 input[type="text"] {
     width: 100%;
-    padding: 8px;
+    padding: 12px 10px; /* Larger tap target for fingers */
     box-sizing: border-box;
     border: 1px solid #ccc;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 16px; /* Prevents iOS browser auto-zooming on input focus */
 }
 input[type="text"]:focus {
     border-color: #4A90E2;
@@ -75,18 +103,19 @@ input[type="text"]:focus {
 input[type="text"]:disabled {
     background-color: #eaeded;
     color: #7f8c8d;
-    cursor: not-allowed;
 }
 .score-cell {
-    width: 300px;
-    word-break: break-word;
+    width: 100% !important;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
 }
 .score-badge {
     display: inline-block;
-    padding: 3px 6px;
+    padding: 4px 8px;
     margin: 2px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: bold;
     color: #fff;
 }
@@ -95,10 +124,31 @@ input[type="text"]:disabled {
 .bad { background-color: #e67e22; }
 .terrible { background-color: #e74c3c; }
 .hint-text {
-    font-size: 12px;
+    font-size: 13px;
     color: #e74c3c;
-    margin-bottom: 4px;
+    font-style: italic;
+    margin-bottom: 6px;
     display: block;
+}
+#finish-banner {
+    font-size: 14px;
+    padding: 12px;
+}
+
+/* Desktop optimization layout layer overrides */
+@media (min-width: 600px) {
+    body { padding: 20px; }
+    h1 { font-size: 2rem; }
+    p { font-size: 1rem; }
+    .toggle-panel-btn { width: auto; }
+    #load-vocab-btn, #load-preset-btn { width: auto; padding: 10px 15px; }
+    thead { display: table-header-group; }
+    tr { display: table-row; border-bottom: none; }
+    tr:nth-child(even) { background-color: #f9f9f9 !important; }
+    td { display: table-cell; padding: 12px 15px; }
+    td:nth-child(1) { font-weight: normal; font-size: 14px; }
+    input[type="text"] { padding: 8px; font-size: 14px; }
+    .score-cell { width: 300px !important; }
 }
 
     </style>
