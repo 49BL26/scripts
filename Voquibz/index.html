@@ -9,7 +9,7 @@ body {
     font-family: Arial, sans-serif;
     background-color: #f4f4f9;
     margin: 0;
-    padding: 10px;
+    padding: 5px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -17,11 +17,11 @@ body {
 h1 {
     color: #333;
     font-size: 1.5rem;
-    margin: 10px 0;
+    margin: 5px 0;
 }
 p {
     font-size: 0.9rem;
-    margin: 0 0 10px 0;
+    margin: 0 0 5px 0;
     text-align: center;
 }
 .utility-bar {
@@ -35,8 +35,8 @@ p {
     background-color: #7f8c8d;
     color: white;
     border: none;
-    padding: 8px 12px;
-    border-radius: 4px;
+    padding: 4px 6px;
+    border-radius: 2px;
     cursor: pointer;
     font-weight: bold;
     font-size: 12px;
@@ -45,9 +45,9 @@ p {
 #paste-panel {
     width: 100%;
     max-width: 950px;
-    margin-bottom: 15px;
+    margin-bottom: 7px;
     background: #fff;
-    padding: 12px;
+    padding: 6px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     border-radius: 8px;
     box-sizing: border-box;
@@ -65,8 +65,8 @@ table {
     width: 100%;
     max-width: 950px;
     background: #fff;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    border-radius: 4px;
 }
 thead {
     display: none; /* Hides headers on mobile; transforms table into a clean list card view */
@@ -74,12 +74,12 @@ thead {
 tr {
     display: flex;
     flex-direction: column;
-    border-bottom: 2px solid #e0e0e0;
-    padding: 10px;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 5px;
     background: #fff !important;
 }
 td {
-    padding: 6px 0;
+    padding: 3px 0;
     width: 100% !important;
     box-sizing: border-box;
 }
@@ -90,7 +90,7 @@ td:nth-child(1) {
 }
 input[type="text"] {
     width: 100%;
-    padding: 12px 10px; /* Larger tap target for fingers */
+    padding: 6px 5px; /* Larger tap target for fingers */
     box-sizing: border-box;
     border: 1px solid #ccc;
     border-radius: 4px;
@@ -112,9 +112,9 @@ input[type="text"]:disabled {
 }
 .score-badge {
     display: inline-block;
-    padding: 4px 8px;
-    margin: 2px;
-    border-radius: 4px;
+    padding: 2px 4px;
+    margin: 1px;
+    border-radius: 2px;
     font-size: 11px;
     font-weight: bold;
     color: #fff;
@@ -127,12 +127,12 @@ input[type="text"]:disabled {
     font-size: 13px;
     color: #e74c3c;
     font-style: italic;
-    margin-bottom: 6px;
+    margin-bottom: 3px;
     display: block;
 }
 #finish-banner {
     font-size: 14px;
-    padding: 12px;
+    padding: 6px;
 }
 
 /* Desktop optimization layout layer overrides */
@@ -141,13 +141,13 @@ input[type="text"]:disabled {
     h1 { font-size: 2rem; }
     p { font-size: 1rem; }
     .toggle-panel-btn { width: auto; }
-    #load-vocab-btn, #load-preset-btn { width: auto; padding: 10px 15px; }
+    #load-vocab-btn, #load-preset-btn { width: auto; padding: 5px 7px; }
     thead { display: table-header-group; }
     tr { display: table-row; border-bottom: none; }
     tr:nth-child(even) { background-color: #f9f9f9 !important; }
-    td { display: table-cell; padding: 12px 15px; }
+    td { display: table-cell; padding: 6px 7px; }
     td:nth-child(1) { font-weight: normal; font-size: 14px; }
-    input[type="text"] { padding: 8px; font-size: 14px; }
+    input[type="text"] { padding: 4px; font-size: 14px; }
     .score-cell { width: 300px !important; }
 }
 
