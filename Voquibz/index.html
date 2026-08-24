@@ -554,6 +554,13 @@ function loadActiveChunk() {
     renderTable(visibleChunk);
 }
 
+// Button pagination wiring
+document.getElementById('next-set-btn').addEventListener('click', navigateNextSet);
+document.getElementById('prev-set-btn').addEventListener('click', navigatePrevSet);
+
+// Start with sample (or empty) data in chunks
+loadActiveChunk();
+        
 function navigateNextSet() {
     const chunkSize = getChunkSize();
     if (currentStartIndex + chunkSize < fullMasterList.length) {
@@ -584,29 +591,71 @@ document.getElementById('chunk-size-select').addEventListener('change', function
 document.getElementById('next-set-btn').addEventListener('click', navigateNextSet);
 document.getElementById('prev-set-btn').addEventListener('click', navigatePrevSet);
 
-// MODIFIED: Update custom tab loader to update master state instead of passing direct
 document.getElementById('load-vocab-btn').addEventListener('click', function() {
-    // ... your parsing logic loops ...
-    // where you successfully create 'customList':
-    
-    if (customList.length === 0) { return; } // error caught
-    
-    fullMasterList = customList; 
-    currentStartIndex = 0; 
+    const rawText = document.getElementById('raw-vocab').value;
+    if (!rawText.trim()) {
+        alert('Please paste some vocabulary data first!');
+        return;
+    }
+
+    const customList = [];
+    const lines = rawText.split(/\r?\n/);
+
+    for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+            const definition = parts[0].trim();
+            const target = parts[1].trim();
+            if (definition && target) {
+                customList.push({ definition, target });
+            }
+        }
+    }
+
+    if (customList.length === 0) {
+        alert('Could not find valid data. Make sure definitions and words are separated by a TAB on each line.');
+        return;
+    }
+
+    fullMasterList = customList;
+    currentStartIndex = 0;
     loadActiveChunk();
     document.getElementById('paste-panel').style.display = 'none';
 });
 
-// MODIFIED: Update json preset loader to update master state instead of passing direct
-// Inside the final .then(data => { ... }) loop block:
-    const optimizedList = data.map(item => { return { definition: item[0], target: item[1] }; });
-    
-    fullMasterList = optimizedList;
-    currentStartIndex = 0;
-    loadActiveChunk();
-    document.getElementById('paste-panel').style.display = 'none';
+document.getElementById('load-preset-btn').addEventListener('click', function() {
+    const jsonFile = document.getElementById('language-select').value;
 
-        
+    fetch(jsonFile)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Could not find or read file: ${jsonFile}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (!Array.isArray(data) || data.length === 0) {
+                alert("Error: JSON must be a non-empty array of terms!");
+                return;
+            }
+
+            const optimizedList = data.map(item => ({
+                definition: item[0],
+                target: item[1]
+            }));
+
+            fullMasterList = optimizedList;
+            currentStartIndex = 0;
+            loadActiveChunk();
+            document.getElementById('paste-panel').style.display = 'none';
+        })
+        .catch(err => {
+            console.error(err);
+            alert(`Failed to load preset list. Make sure '${jsonFile}' is in the exact same folder layout as this HTML file.`);
+        });
+});
+
+
     </script>
 </body>
 </html>
