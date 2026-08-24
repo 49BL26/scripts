@@ -159,6 +159,22 @@ input[type="text"]:disabled {
 <p>Type the target word and press <strong>Enter</strong> to grade.</p>
 
 <div class="utility-bar">
+
+<div class="pagination-bar" style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+    <label for="chunk-size-select" style="font-weight: bold; font-size: 14px;">Items per set:</label>
+    <select id="chunk-size-select" style="padding: 6px; font-size: 14px; border-radius: 4px;">
+        <option value="30" selected>30</option>
+        <option value="40">40</option>
+        <option value="50">50</option>
+        <option value="60">60</option>
+        <option value="70">70</option>
+    </select>
+
+    <button id="prev-set-btn" style="padding: 6px 12px; font-size: 14px; cursor: pointer; border-radius: 4px; font-weight: bold;">◀ Prev Set</button>
+    <span id="page-indicator" style="font-size: 14px; font-weight: bold; color: #555;">Showing 0 - 0 of 0</span>
+    <button id="next-set-btn" style="padding: 6px 12px; font-size: 14px; cursor: pointer; border-radius: 4px; font-weight: bold;">Next Set ▶</button>
+</div>
+    
     <button id="toggle-panel-btn" class="toggle-panel-btn">⚙️ Toggle Input Panel</button>
 </div>
 
@@ -204,6 +220,9 @@ const vocabList = [
 
 let quizState = {}; 
 let historyQueue = []; 
+// Pagination state tracking variables
+let fullMasterList = [...vocabList]; // Holds the complete active dataset
+let currentStartIndex = 0;           // Tracks the current window slice starting position
 
 const tbody = document.getElementById('vocab-table-body');
 
@@ -471,9 +490,6 @@ document.getElementById('load-vocab-btn').addEventListener('click', function() {
     document.getElementById('paste-panel').style.display = 'none';
 });
 
-// Initial load
-renderTable(vocabList);
-
 // Compact Preset Array Loader Engine
 document.getElementById('load-preset-btn').addEventListener('click', function() {
     const jsonFile = document.getElementById('language-select').value;
@@ -507,7 +523,90 @@ document.getElementById('load-preset-btn').addEventListener('click', function() 
             alert(`Failed to load preset list. Make sure '${jsonFile}' is in the exact same folder layout as this HTML file.`);
         });
 });
+function getChunkSize() {
+    const selector = document.getElementById('chunk-size-select');
+    return selector ? parseInt(selector.value, 10) : 30;
+}
 
+function loadActiveChunk() {
+    const chunkSize = getChunkSize();
+    
+    // Safety check bounds if the list layout changes underneath
+    if (currentStartIndex >= fullMasterList.length) {
+        currentStartIndex = Math.max(0, fullMasterList.length - chunkSize);
+    }
+    
+    // Slice out the current subset from our master data array
+    const endIndex = Math.min(currentStartIndex + chunkSize, fullMasterList.length);
+    const visibleChunk = fullMasterList.slice(currentStartIndex, endIndex);
+    
+    // Update visual text counters
+    const indicator = document.getElementById('page-indicator');
+    if (indicator) {
+        if (fullMasterList.length === 0) {
+            indicator.textContent = "Showing 0 - 0 of 0";
+        } else {
+            indicator.textContent = `Showing ${currentStartIndex + 1} - ${endIndex} of ${fullMasterList.length}`;
+        }
+    }
+    
+    // Core engine table renderer wrapper
+    renderTable(visibleChunk);
+}
+
+function navigateNextSet() {
+    const chunkSize = getChunkSize();
+    if (currentStartIndex + chunkSize < fullMasterList.length) {
+        currentStartIndex += chunkSize;
+        loadActiveChunk();
+    } else {
+        alert("You are already viewing the final set of vocabulary terms!");
+    }
+}
+
+function navigatePrevSet() {
+    const chunkSize = getChunkSize();
+    if (currentStartIndex - chunkSize >= 0) {
+        currentStartIndex -= chunkSize;
+        loadActiveChunk();
+    } else {
+        alert("You are already viewing the first set of vocabulary terms!");
+    }
+}
+
+// Dropdown change updates chunk sizing immediately
+document.getElementById('chunk-size-select').addEventListener('change', function() {
+    currentStartIndex = 0; // Reset position to start when altering grid rules
+    loadActiveChunk();
+});
+
+// Button pagination wiring
+document.getElementById('next-set-btn').addEventListener('click', navigateNextSet);
+document.getElementById('prev-set-btn').addEventListener('click', navigatePrevSet);
+
+// MODIFIED: Update custom tab loader to update master state instead of passing direct
+document.getElementById('load-vocab-btn').addEventListener('click', function() {
+    // ... your parsing logic loops ...
+    // where you successfully create 'customList':
+    
+    if (customList.length === 0) { return; } // error caught
+    
+    fullMasterList = customList; 
+    currentStartIndex = 0; 
+    loadActiveChunk();
+    document.getElementById('paste-panel').style.display = 'none';
+});
+
+// MODIFIED: Update json preset loader to update master state instead of passing direct
+// Inside the final .then(data => { ... }) loop block:
+    const optimizedList = data.map(item => { return { definition: item[0], target: item[1] }; });
+    
+    fullMasterList = optimizedList;
+    currentStartIndex = 0;
+    loadActiveChunk();
+    document.getElementById('paste-panel').style.display = 'none';
+
+        
     </script>
 </body>
 </html>
