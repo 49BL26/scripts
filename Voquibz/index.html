@@ -158,6 +158,19 @@ input[type="text"]:disabled {
 <h1>Vocabulary Tester</h1>
 <p>Type the target word and press <strong>Enter</strong> to grade.</p>
 
+<table>
+    <thead>
+        <tr>
+            <th>English Definition / Meaning</th>
+            <th>Target Language Input</th>
+            <th>Score / Correctness Record</th>
+        </tr>
+    </thead>
+    <tbody id="vocab-table-body">
+        <!-- Rows injected by JavaScript -->
+    </tbody>
+</table>
+
 <div class="utility-bar">
 
 <div class="pagination-bar" style="margin-bottom: 15px; display: flex; align-items: left; gap: 10px; flex-wrap: wrap;">
@@ -195,20 +208,7 @@ input[type="text"]:disabled {
     <textarea id="raw-vocab" rows="5" style="width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace;" placeholder="Definition [TAB] Word&#10;Definition [TAB] Word"></textarea>
     <button id="load-vocab-btn" style="margin-top: 10px; background-color: #4A90E2; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold;">Load Custom List</button>
 </div>
-
-<table>
-    <thead>
-        <tr>
-            <th>English Definition / Meaning</th>
-            <th>Target Language Input</th>
-            <th>Score / Correctness Record</th>
-        </tr>
-    </thead>
-    <tbody id="vocab-table-body">
-        <!-- Rows injected by JavaScript -->
-    </tbody>
-</table>
-
+    
     <script>
 const vocabList = [
     { definition: "A piece of furniture with a flat top and one or more legs, used as a surface for working at, eating from or on which to place things.", target: "table" },
