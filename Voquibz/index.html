@@ -342,36 +342,35 @@ function renderTable(list) {
         const hintContainer = document.createElement('div');
         hintContainer.id = `hint-container-${index}`;
         
-        const input = document.createElement('input');
+const input = document.createElement('input');
         input.type = 'text';
         input.id = `input-field-${index}`;
         input.placeholder = 'Type answer...';
+        input.enterKeyHint = 'done';
+        input.autocomplete = 'off';
+        input.autocapitalize = 'off';
+        input.spellcheck = false;
+        input.size = 20;
 
-input.size = 20; // HTML size ≈ character count
-input.addEventListener('input', function () {
-    // Grow with typed text; never smaller than 20
-    const len = Math.max(20, this.value.length + 2);
-    this.size = len;
-    this.style.width = len + 'ch';
-});
-        
-const input = document.createElement('input');
-input.type = 'text';
-input.id = `input-field-${index}`;
-input.placeholder = 'Type answer...';
-input.enterKeyHint = 'done'; // mobile keyboard shows "Done" / action key
-input.autocomplete = 'off';
-input.autocapitalize = 'off';
-input.spellcheck = false;
+        input.addEventListener('input', function () {
+            const len = Math.max(20, this.value.length + 2);
+            this.size = len;
+            this.style.width = len + 'ch';
+        });
 
-input.addEventListener('keydown', function(e) {
-    // Mobile + desktop: Enter / Go / Done
-    const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.which === 13;
-    if (!isEnter) return;
-    e.preventDefault(); // stops odd mobile form / focus behavior
-    }
+        input.addEventListener('keydown', function(e) {
+            const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.which === 13;
+            if (!isEnter) return;
+            e.preventDefault();
 
-    // CASE A: User is working through a visible typo correction block
+            const userValue = this.value.trim();
+            const currentHint = document.getElementById(`hint-container-${index}`);
+
+            if (!historyQueue.includes(index)) {
+                historyQueue.push(index);
+            }
+
+            // CASE A: User is working through a visible typo correction block
     if (quizState[index].hasHintActive) {
         if (userValue.toLowerCase() === item.target.trim().toLowerCase()) {
             quizState[index].hasHintActive = false;
