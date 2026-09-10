@@ -28,9 +28,12 @@ p {
     width: 100%;
     max-width: 950px;
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 10px;
     padding: 4px;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 .toggle-panel-btn {
     background-color: #7f8c8d;
@@ -177,6 +180,9 @@ input[type="text"]:disabled {
 <div class="pagination-bar" style="margin-bottom: 15px; display: flex; align-items: left; gap: 10px; flex-wrap: wrap;">
     <label for="chunk-size-select" style="font-weight: bold; font-size: 14px;">Items per set:</label>
     <select id="chunk-size-select" style="padding: 6px; font-size: 14px; border-radius: 4px;">
+        <option value="10">10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
         <option value="30" selected>30</option>
         <option value="40">40</option>
         <option value="50">50</option>
