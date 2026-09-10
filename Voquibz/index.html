@@ -358,6 +358,25 @@ const input = document.createElement('input');
             this.style.width = len + 'ch';
         });
 
+input.addEventListener('paste', function (e) {
+            e.preventDefault(); // block the pasted text from appearing
+
+            if (quizState[index].finished || quizState[index].hasHintActive) return;
+
+            const currentHint = document.getElementById(`hint-container-${index}`);
+            const score = -3.01; // 301% wrong
+
+            quizState[index].attempts.push(score);
+            appendScoreBadge(`score-container-${index}`, score);
+
+            quizState[index].finished = false;
+            quizState[index].hasHintActive = true;
+            currentHint.innerHTML =
+                `<span class="hint-text">Paste detected — 301% wrong. Type the answer: <strong>${item.target}</strong></span>`;
+            this.value = '';
+            // stay on this field until they type the correction (same as a normal miss)
+        });
+        
         input.addEventListener('keydown', function(e) {
             const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.which === 13;
             if (!isEnter) return;
