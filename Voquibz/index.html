@@ -92,13 +92,17 @@ td:nth-child(1) {
     color: #333;
     font-size: 0.95rem;
 }
+
 input[type="text"] {
-    width: 100%;
-    padding: 6px 5px; /* Larger tap target for fingers */
+    width: 20ch;          /* ~20 characters wide */
+    min-width: 20ch;
+    max-width: 100%;      /* never overflow the row on small screens */
+    padding: 6px 5px;
     box-sizing: border-box;
     border: 1px solid #ccc;
     border-radius: 4px;
-    font-size: 16px; /* Prevents iOS browser auto-zooming on input focus */
+    font-size: 16px;
+    transition: width 0.1s ease;
 }
 input[type="text"]:focus {
     border-color: #4A90E2;
@@ -342,14 +346,29 @@ function renderTable(list) {
         input.type = 'text';
         input.id = `input-field-${index}`;
         input.placeholder = 'Type answer...';
+
+input.size = 20; // HTML size ≈ character count
+input.addEventListener('input', function () {
+    // Grow with typed text; never smaller than 20
+    const len = Math.max(20, this.value.length + 2);
+    this.size = len;
+    this.style.width = len + 'ch';
+});
         
-input.addEventListener('keyup', function(e) {
-    if (e.key !== 'Enter') return;
-    const userValue = this.value.trim();
-    const currentHint = document.getElementById(`hint-container-${index}`);
-    
-    if (!historyQueue.includes(index)) {
-        historyQueue.push(index);
+const input = document.createElement('input');
+input.type = 'text';
+input.id = `input-field-${index}`;
+input.placeholder = 'Type answer...';
+input.enterKeyHint = 'done'; // mobile keyboard shows "Done" / action key
+input.autocomplete = 'off';
+input.autocapitalize = 'off';
+input.spellcheck = false;
+
+input.addEventListener('keydown', function(e) {
+    // Mobile + desktop: Enter / Go / Done
+    const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.which === 13;
+    if (!isEnter) return;
+    e.preventDefault(); // stops odd mobile form / focus behavior
     }
 
     // CASE A: User is working through a visible typo correction block
