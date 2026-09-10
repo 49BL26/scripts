@@ -401,10 +401,6 @@ const input = document.createElement('input');
             } else if (score === 1.00 && collectiveScoreSum < 1.00) {
                 // Correct from memory, but still in debt
                 const stillNeeded = Math.ceil(1.00 - collectiveScoreSum);
-                alert(
-                    `Correct, but your running score is still penalized. ` +
-                    `Type it correctly from memory ${stillNeeded} more time(s) to clear the debt.`
-                );
                 this.value = '';
                 focusNextInput(index, list.length);
 
