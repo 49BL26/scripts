@@ -1866,15 +1866,18 @@ function keyUpdate() {
                     { label:'Keep editing', value:null },
                     { label:'Lock in', value:'lock', primary:true }
                 ]
-            }).then(v => {
-                if (v !== 'lock') return;
-                for (let i = 0; i < 25; i++) keyFixed.set(i, k.g[i]);
-				board.querySelectorAll('.cell').forEach(c => c.classList.remove('key-fixed'));
-                document.getElementById('mode-select').value = 'spymaster';
-                handleModeChange();
-                saveCurrentState();
-				keyReset(); 
-            });
+			}).then(v => {
+	    		if (v !== 'lock') return;
+	    		for (let i = 0; i < 25; i++) keyFixed.set(i, k.g[i]);
+	    		board.querySelectorAll('.cell').forEach(c => c.classList.remove('key-fixed'));
+	
+	    		// Stay in Setup, leave Key Assist cleanly
+	    		keyAssistActive = false;
+	    		document.getElementById('mode-select').value = 'text';
+	    		handleModeChange();
+	    		saveCurrentState();
+	    		keyReset();
+			});
         }
     } else {
         const settled = cons.filter(Boolean).length;
