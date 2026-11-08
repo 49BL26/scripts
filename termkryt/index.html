@@ -2993,15 +2993,12 @@ function uiSync() {
     const show = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('shown', on); };
 
     const l1   = val('op1');
-    const tool = val('op2-setup');
     const sec  = val('op2-adv');
 
     const setup = l1 === 'setup', adv = l1 === 'advanced';
 
     show('g-spy',      l1 === 'spymaster');
     show('g-setup',    setup);
-    show('g-words',    setup && tool === 'words');
-    show('g-key',      setup && tool === 'key');
     show('g-adv',      adv);
     show('g-colors',   adv && sec === 'colors');
     show('g-reorient', adv && sec === 'reorient');
@@ -3011,7 +3008,6 @@ function uiSync() {
     let mode = 'text';
     if (l1 === 'player')         mode = 'player';
     else if (l1 === 'spymaster') mode = 'spymaster';
-    else if (setup)              mode = (tool === 'key')   ? 'keyassist' : 'text';
     else if (adv)                mode = (sec === 'colors') ? 'color'
                                      : (sec === 'data')    ? 'dataIO' : 'text';
 
@@ -3021,6 +3017,22 @@ function uiSync() {
     if (typeof refreshDragMode === 'function') refreshDragMode();
 }
 
+/* ===== COLOR KEY CARD ASSISTANT ===== */
+function enterKeyAssist() {
+    // Force the top-level Mode selector to "Setup" so the UI stays consistent
+    const op1 = document.getElementById('op1');
+    if (op1) op1.value = 'setup';
+
+    // Set the hidden driver that the rest of the code still reads
+    const sel = document.getElementById('mode-select');
+    if (sel) sel.value = 'keyassist';
+
+    // Trigger the existing logic that opens the panel + initialises Key Assist
+    handleModeChange();
+
+    // Make sure the Setup group stays visible
+    uiSync();
+}
 
 /* ===== COLOR INVERT ===== */
 function invertColors() {
