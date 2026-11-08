@@ -384,24 +384,20 @@ body.grid-align-open {
             <option value="words">Word Input</option>
             <option value="key">Key Assist</option>
         </select>
-        <button onclick="randomizeBoard()">Randomize Board</button>
+
+		<button onclick="document.getElementById('scan-camera').click()">Scan Board</button>
 		<button onclick="switchPairs()">Flip Cards</button>
 		<button onclick="clearBoard(false)">New Board</button>
 		<button onclick="clearBoardColors()">Clear Colors</button>
 		<button onclick="rotateBoardOuterRing()">Rotate Board</button>
+		<button onclick="randomizeBoard()">Generate New Game</button>
+
+			<!-- New hidden input that forces the camera -->
+			<input type="file" id="scan-camera" accept="image/*" capture="environment" style="display:none;">
     </div>
 
     <div class="control-group" id="g-words">
-        <button onclick="importWordsPrompt()">Import Words</button>
-        <button onclick="addWordPrompt()">Add Words</button>
-		<button onclick="document.getElementById('scan-file').click()">Select Scan</button>
-		<button onclick="document.getElementById('scan-camera').click()">Scan Board</button>
-		
-<!-- Keep your existing hidden input for gallery -->
-<input type="file" id="scan-file" accept="image/*" style="display:none;">
-
-<!-- New hidden input that forces the camera -->
-<input type="file" id="scan-camera" accept="image/*" capture="environment" style="display:none;">
+<!-- Old word input section -->
     </div>
 
     <div class="control-group" id="g-key">
@@ -447,6 +443,12 @@ body.grid-align-open {
 		<button onclick="shiftDown()">Shift Down</button>
 		<button onclick="shiftLeft()">Shift Left</button>
 		<button onclick="shiftRight()">Shift Right</button>
+		<button onclick="importWordsPrompt()">Import Words</button>
+        <button onclick="addWordPrompt()">Add Words</button>
+		<button onclick="document.getElementById('scan-file').click()">Select Scan</button>
+		
+		<!-- Keep your existing hidden input for gallery -->
+		<input type="file" id="scan-file" accept="image/*" style="display:none;">
     </div>
 
     <div class="control-group" id="g-clear">
