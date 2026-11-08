@@ -397,6 +397,7 @@ body.grid-align-open {
 
 		<button onclick="shareBoardUrl()">Share with Spymaster ↪️🥸</button>
         <button onclick="shareBoardUrl(true)">Share with Players ↪️👤</button>
+		<button onclick="scanShareQR()">Scan QR 🀫</button>
 			<!-- New hidden input that forces the camera -->
 			<input type="file" id="scan-camera" accept="image/*" capture="environment" style="display:none;">
     </div>
@@ -532,6 +533,7 @@ body.grid-align-open {
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script src="keycards.js"></script>
 <script src="wordpairs.js"></script>
 <script src="wordscanner.js"></script>
