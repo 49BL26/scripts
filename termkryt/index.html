@@ -379,12 +379,13 @@ body.grid-align-open {
 
     <!-- ===== SETUP ===== -->
     <div class="control-group" id="g-setup">
-        <label for="op2-setup">Tool:</label>
+<!-- =====
+		<label for="op2-setup">Tool:</label>
         <select id="op2-setup" onchange="uiSync()">
             <option value="words">Word Input</option>
             <option value="key">Key Assist</option>
         </select>
-
+===== -->
 		<button onclick="document.getElementById('scan-camera').click()">Scan Board</button>
 		<button onclick="switchPairs()">Flip Cards</button>
 		<button onclick="clearBoard(false)">New Board</button>
@@ -392,6 +393,14 @@ body.grid-align-open {
 		<button onclick="rotateBoardOuterRing()">Rotate Board</button>
 		<button onclick="randomizeBoard()">Generate New Game</button>
 
+		<button onclick="...()">Key Assist</button>
+
+		<label for="key-majority">Majority:</label>
+        <select id="key-majority" onchange="keyUpdate()">
+            <option value="r">Red</option>
+            <option value="b">Blue</option>
+        </select>
+		
 			<!-- New hidden input that forces the camera -->
 			<input type="file" id="scan-camera" accept="image/*" capture="environment" style="display:none;">
     </div>
@@ -401,11 +410,7 @@ body.grid-align-open {
     </div>
 
     <div class="control-group" id="g-key">
-        <label for="key-majority">Majority:</label>
-        <select id="key-majority" onchange="keyUpdate()">
-            <option value="r">Red</option>
-            <option value="b">Blue</option>
-        </select>
+
     </div>
 
     <!-- ===== ADVANCED ===== -->
