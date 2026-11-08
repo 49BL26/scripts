@@ -549,6 +549,7 @@ body.grid-align-open {
   let imgNaturalW = 0;
   let imgNaturalH = 0;
   let scrollY = 0;
+  let keyAssistActive = false;   // true while the user is in Key Assist
 
   const overlay    = document.getElementById('gridOverlay');
   const imgEl      = document.getElementById('gridImage');
@@ -3005,33 +3006,48 @@ function uiSync() {
     show('g-clear',    adv && sec === 'clear');
     show('g-data',     adv && sec === 'data');
 
-    let mode = 'text';
-    if (l1 === 'player')         mode = 'player';
-    else if (l1 === 'spymaster') mode = 'spymaster';
-    else if (adv)                mode = (sec === 'colors') ? 'color'
-                                     : (sec === 'data')    ? 'dataIO' : 'text';
+let mode = 'text';
 
-    const sel = document.getElementById('mode-select');
-    if (sel) sel.value = mode;
-    handleModeChange();
+if (l1 === 'player') {
+    mode = 'player';
+    keyAssistActive = false;          // left Setup → leave Key Assist
+} else if (l1 === 'spymaster') {
+    mode = 'spymaster';
+    keyAssistActive = false;
+} else if (adv) {
+    mode = (sec === 'colors') ? 'color'
+         : (sec === 'data')   ? 'dataIO' : 'text';
+    keyAssistActive = false;
+} else if (setup) {
+    // We are in Setup
+    if (keyAssistActive) {
+        mode = 'keyassist';            // keep Key Assist alive
+    } else {
+        mode = 'text';                 // normal Setup = manual word editing
+    }
+}
+
+const sel = document.getElementById('mode-select');
+if (sel) sel.value = mode;
+handleModeChange();
+if (typeof refreshDragMode === 'function') refreshDragMode();
     if (typeof refreshDragMode === 'function') refreshDragMode();
 }
 
 /* ===== COLOR KEY CARD ASSISTANT ===== */
 function enterKeyAssist() {
-    // Force the top-level Mode selector to "Setup" so the UI stays consistent
+    // Stay in Setup
     const op1 = document.getElementById('op1');
     if (op1) op1.value = 'setup';
 
-    // Set the hidden driver that the rest of the code still reads
+    // Activate Key Assist
+    keyAssistActive = true;
+
     const sel = document.getElementById('mode-select');
     if (sel) sel.value = 'keyassist';
 
-    // Trigger the existing logic that opens the panel + initialises Key Assist
-    handleModeChange();
-
-    // Make sure the Setup group stays visible
-    uiSync();
+    handleModeChange();   // opens the panel + calls keyEnter()
+    uiSync();             // now safe – see next step
 }
 
 /* ===== COLOR INVERT ===== */
