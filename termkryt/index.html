@@ -2172,7 +2172,7 @@ const getText     = cell => cell.querySelector('.cell-text').textContent;
 const isPlaceholder = (txt, i) => txt.trim() === '' || txt.trim() === 'Card ' + (i + 1);
 
 /* ========== BOARD HISTORY (undo / redo) ========== */
-const HISTORY_MAX = 25;
+const HISTORY_MAX = 125;
 let boardHistory = [];          // array of snapshots
 let historyIndex = -1;          // points at the current state
 let historyLocked = false;      // set true while restoring so we don’t re-record
