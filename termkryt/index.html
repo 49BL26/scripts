@@ -352,6 +352,8 @@ body.grid-align-open {
 
     <!-- ===== LEVEL 1 ===== -->
     <div class="control-group">
+		<button id="btn-undo" onclick="undoBoard()" title="Undo (previous board state)">↶ Undo</button>
+		<button id="btn-redo" onclick="redoBoard()" title="Redo (next board state)">↷ Redo</button>
         <label for="op1">Mode:</label>
         <select id="op1" onchange="uiSync()">
             <option value="player">Player</option>
@@ -2162,6 +2164,104 @@ const getColor    = cell => COLORS.find(c => cell.classList.contains(c)) || 'whi
 const getText     = cell => cell.querySelector('.cell-text').textContent;
 const isPlaceholder = (txt, i) => txt.trim() === '' || txt.trim() === 'Card ' + (i + 1);
 
+/* ========== BOARD HISTORY (undo / redo) ========== */
+const HISTORY_MAX = 25;
+let boardHistory = [];          // array of snapshots
+let historyIndex = -1;          // points at the current state
+let historyLocked = false;      // set true while restoring so we don’t re-record
+
+function getBoardSnapshot() {
+    // Intentionally ignores “think” marks – they are temporary spymaster UI
+    const cellsData = Array.from(board.getElementsByClassName('cell')).map(cell => ({
+        text: getText(cell),
+        colorClass: getColor(cell),
+        isPlayFlipped: cell.classList.contains('play-active')
+    }));
+    return {
+        currentRotation,
+        isFlipped,
+        cellsData: JSON.parse(JSON.stringify(cellsData))   // deep copy
+    };
+}
+
+function snapshotsEqual(a, b) {
+    if (!a || !b) return false;
+    if (a.currentRotation !== b.currentRotation || a.isFlipped !== b.isFlipped) return false;
+    if (a.cellsData.length !== b.cellsData.length) return false;
+    for (let i = 0; i < a.cellsData.length; i++) {
+        const x = a.cellsData[i], y = b.cellsData[i];
+        if (x.text !== y.text || x.colorClass !== y.colorClass || x.isPlayFlipped !== y.isPlayFlipped)
+            return false;
+    }
+    return true;
+}
+
+function pushHistory() {
+    if (historyLocked) return;
+
+    const snap = getBoardSnapshot();
+
+    // Don’t record identical consecutive states
+    if (historyIndex >= 0 && snapshotsEqual(boardHistory[historyIndex], snap)) return;
+
+    // Throw away any “future” states (user went back and then made a new change)
+    boardHistory = boardHistory.slice(0, historyIndex + 1);
+
+    boardHistory.push(snap);
+    if (boardHistory.length > HISTORY_MAX) {
+        boardHistory.shift();
+    } else {
+        historyIndex++;
+    }
+
+    updateHistoryButtons();
+}
+
+function restoreFromHistory(idx) {
+    if (idx < 0 || idx >= boardHistory.length) return;
+
+    historyLocked = true;
+    const snap = boardHistory[idx];
+
+    currentRotation = snap.currentRotation;
+    isFlipped = snap.isFlipped;
+    board.classList.toggle('flipped', isFlipped);
+
+    // Rebuild the board without any think marks
+    const cellsData = snap.cellsData.map(c => ({
+        text: c.text,
+        colorClass: c.colorClass,
+        isPlayFlipped: c.isPlayFlipped,
+        isThink: false,
+        seq: 0
+    }));
+    thinkCounter = 1;               // reset think sequencing
+    initBoard(cellsData);
+
+    historyIndex = idx;
+    historyLocked = false;
+    updateHistoryButtons();
+    updateStats();
+    // also keep the normal localStorage state in sync
+    saveCurrentState();
+}
+
+function undoBoard() {
+    if (historyIndex > 0) restoreFromHistory(historyIndex - 1);
+}
+
+function redoBoard() {
+    if (historyIndex < boardHistory.length - 1) restoreFromHistory(historyIndex + 1);
+}
+
+function updateHistoryButtons() {
+    const undoBtn = document.getElementById('btn-undo');
+    const redoBtn = document.getElementById('btn-redo');
+    if (undoBtn) undoBtn.disabled = historyIndex <= 0;
+    if (redoBtn) redoBtn.disabled = historyIndex >= boardHistory.length - 1;
+}
+
+	
 /* ---------- persistence ---------- */
 function loadSavedState() {
     const savedData = localStorage.getItem('wordBoardState');
@@ -2188,6 +2288,9 @@ function saveCurrentState() {
         seq: +cell.dataset.seq || 0
     }));
     localStorage.setItem('wordBoardState', JSON.stringify({ currentRotation, isFlipped, cellsData }));
+
+    // Record a history entry for every ordinary change
+    pushHistory();
 }
 
 function initBoard(cellsData) {
@@ -2212,6 +2315,25 @@ function initBoard(cellsData) {
     handleModeChange();
     updateStats();
 }
+
+/* ========== KEYBOARD SHORTCUTS FOR HISTORY ========== */
+document.addEventListener('keydown', e => {
+    // Ignore when typing in an input/textarea/modal
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+        return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+            e.preventDefault();
+            undoBoard();
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+            e.preventDefault();
+            redoBoard();
+        }
+    }
+});
 
 /* ============================================================
    INTERACTION
