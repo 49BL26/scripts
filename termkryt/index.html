@@ -547,7 +547,7 @@ body.grid-align-open {
   let imgNaturalW = 0;
   let imgNaturalH = 0;
   let scrollY = 0;
-  let keyAssistActive = false;   // true while the user is in Key Assist
+  let keyAssistActive = false;
 
   const overlay    = document.getElementById('gridOverlay');
   const imgEl      = document.getElementById('gridImage');
@@ -712,6 +712,8 @@ body.grid-align-open {
 
   // ---------- drawing ----------
   function drawGrid() {
+if (!corners || corners.length < 4) return;
+	  
     const scaleX = imgEl.clientWidth  / imgNaturalW;
     const scaleY = imgEl.clientHeight / imgNaturalH;
 
@@ -1422,10 +1424,12 @@ cells.forEach(cell => {
 
   cancelBtn.addEventListener('click', closeOverlay);
 
-  window.addEventListener('resize', () => {
-    if (overlay.style.display !== 'none') drawGrid();
-  });
-})();
+window.addEventListener('resize', () => {
+  // Only redraw when the scan overlay is actually open and corners exist
+  if (overlay.classList.contains('open') || getComputedStyle(overlay).display !== 'none') {
+    if (corners && corners.length === 4) drawGrid();
+  }
+});
 </script>
 <script>
 /* ============================================================
@@ -1870,7 +1874,7 @@ function keyUpdate() {
 	    		board.querySelectorAll('.cell').forEach(c => c.classList.remove('key-fixed'));
 	
 	    		// Stay in Setup, leave Key Assist cleanly
-	    		keyAssistActive = false;
+	    		//keyAssistActive = false;
 	    		document.getElementById('mode-select').value = 'text';
 	    		handleModeChange();
 	    		saveCurrentState();
