@@ -841,50 +841,34 @@ async function pushLiveBoard() {
 }
 
 async function subscribeToRoom(code) {
+  // Close the previous room connection, if there is one.
   if (liveChannel) {
     await sb.removeChannel(liveChannel);
     liveChannel = null;
   }
-	
-liveChannel.on('broadcast', { event: 'room-state' }, ({ payload }) => {
-  if (payload?.state) applyLiveRoomState(payload.state);
-});
 
-liveChannel.on(
-  'postgres_changes',
-  { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
-  payload => {
-    if (payload.new) applyLiveRoomState(payload.new);
-  }
-);
+  // Create the connection first.
+  liveChannel = sb.channel('room:' + code, {
+    config: { broadcast: { self: false } }
+  });
 
+  // Listen for instant updates sent by the other players.
+  liveChannel.on('broadcast', { event: 'room-state' }, ({ payload }) => {
+    if (payload?.state) {
+      applyLiveRoomState(payload.state);
+    }
+  });
 
-	
-  // Fallback: DB changes (late join / refresh)
-liveChannel.on(
-  'postgres_changes',
-  { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
-  payload => {
-    const row = payload.new;
-    if (!row) return;
-
-    // Refresh the host roster and this device's role/team first.
-    if (row.players) {
-      if (liveIsHost) renderPlayersPanel(row.players);
-
-      const me = row.players[livePlayerId];
-      if (me) {
-        liveRole = me.role;
-        liveTeam = me.team;
+  // Listen for saved room changes, such as a changed name or role.
+  liveChannel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
+    payload => {
+      if (payload.new) {
+        applyLiveRoomState(payload.new);
       }
     }
-
-    // Then render the latest board using the updated role.
-    if (row.board) {
-      applyLiveBoard(row.board, liveRole === 'spymaster');
-    }
-  }
-);
+  );
 
   liveChannel.subscribe(status => {
     console.log('realtime status:', status);
