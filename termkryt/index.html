@@ -800,7 +800,7 @@ const { data: updatedRoom, error: updateError } = await sb
     updated_at: new Date().toISOString()
   })
   .eq('id', code)
-  .select('players')
+  .select('players, board')
   .maybeSingle();
 
 if (updateError || !updatedRoom) {
@@ -815,6 +815,19 @@ if (updateError || !updatedRoom) {
 
   applyLiveBoard(data.board, liveRole === 'spymaster');
   await subscribeToRoom(code);
+
+	if (liveChannel) {
+  await liveChannel.send({
+    type: 'broadcast',
+    event: 'room-state',
+    payload: {
+      state: {
+        players: updatedRoom.players,
+        board: updatedRoom.board
+      }
+    }
+  });
+}
   showRoomCode(code);
   showHostPlayersPanel(liveIsHost);
   if (liveIsHost) renderPlayersPanel(players);
@@ -907,9 +920,27 @@ async function subscribeToRoom(code) {
     }
   );
 
+return new Promise(resolve => {
+  let finished = false;
+
+  const finish = connected => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeout);
+    resolve(connected);
+  };
+
+  const timeout = setTimeout(() => finish(false), 5000);
+
   liveChannel.subscribe(status => {
     console.log('realtime status:', status);
+
+    if (status === 'SUBSCRIBED') finish(true);
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      finish(false);
+    }
   });
+});
 }
 
 let livePollTimer = null;
