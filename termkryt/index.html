@@ -647,6 +647,8 @@ async function hostGame() {
   renderPlayersPanel(players);
   enterLiveMode({ isHost: true });
 }	
+
+window.hostGame = hostGame;
 	
   function randomCode(len = 4) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
