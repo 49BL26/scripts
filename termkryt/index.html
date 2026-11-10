@@ -1255,6 +1255,7 @@ function updateLiveAccessUI() {
   // Hide the normal top-level controls for a locked guest
   const undo = document.getElementById('btn-undo');
   const redo = document.getElementById('btn-redo');
+  const modelbl = document.getElementById('op1lbl');
   const mode = document.getElementById('op1');
   const gSetup = document.getElementById('g-setup');
   const gAdv = document.getElementById('g-adv');
@@ -1267,6 +1268,7 @@ function updateLiveAccessUI() {
 
   if (undo) undo.style.display = hideMainControls ? 'none' : '';
   if (redo) redo.style.display = hideMainControls ? 'none' : '';
+  if (modelbl) modelbl.style.display = hideMainControls ? 'none' : '';
   if (mode) mode.style.display = hideMainControls ? 'none' : '';
 
   // Keep host setup controls available to host, but hide them for locked guest players
@@ -1285,7 +1287,7 @@ function updateLiveAccessUI() {
   const board = document.getElementById('board');
   if (board) {
     board.style.pointerEvents = (isGuest && !isSpymaster) ? 'none' : '';
-    board.style.filter = (isGuest && !isSpymaster) ? 'grayscale(0.5) brightness(0.92)' : '';
+    board.style.filter = (isGuest && !isSpymaster) ? 'grayscale(0.1) brightness(0.98)' : '';
   }
 
   // Also disable all cells explicitly
