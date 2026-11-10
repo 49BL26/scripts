@@ -319,7 +319,15 @@ body.grid-align-open {
   height: 100%;
 }
 
-	
+#board.locked-for-player {
+  opacity: 0.9;
+  user-select: none;
+}
+#board.locked-for-player .cell {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 </style>
 </head>
 <body>
@@ -397,6 +405,20 @@ body.grid-align-open {
     display:none; margin-top:10px; padding:10px; border:1px solid #444;
     border-radius:8px; max-width:420px;
   "></div>
+
+	<div id="live-exit-wrap" style="display:none; gap:8px; align-items:center;">
+  <input
+    id="live-exit-input"
+    type="text"
+    maxlength="6"
+    placeholder="Type EXIT to leave"
+    autocomplete="off"
+    spellcheck="false"
+    style="text-transform:uppercase;"
+  >
+  <button type="button" onclick="exitLiveGame()">Exit Game</button>
+  </div>
+	
 </div>
 
     <!-- ===== SPYMASTER ===== -->
@@ -604,7 +626,16 @@ body.grid-align-open {
   let liveRole = null;
   let liveTeam = null;
   let liveChannel = null;
+  let liveIsHost = false;
+  let liveHasExitedRoom = false;
 
+  const EXIT_CODE = 'EXIT';
+
+function enforcePlayerBoardLock() {
+  const locked = !!liveRoomId && !liveIsHost && liveRole !== 'spymaster' && !liveHasExitedRoom;
+  document.getElementById('board')?.classList.toggle('locked-for-player', locked);
+}
+	
 function syncLiveSpymasterControls() {
   const isLiveSpymaster = !!liveRoomId && liveRole === 'spymaster';
   const mode = document.getElementById('mode-select');
@@ -678,10 +709,75 @@ async function hostGame() {
   showHostPlayersPanel(true);
   renderPlayersPanel(players);
   enterLiveMode({ isHost: true });
+  updateLiveAccessUI();
 }	
 
 window.hostGame = hostGame;
 
+async function exitLiveGame() {
+  const input = document.getElementById('live-exit-input');
+  const typed = (input?.value || '').trim().toUpperCase();
+
+  if (typed !== EXIT_CODE) {
+    alert('Type EXIT to leave the game.');
+    return;
+  }
+
+  if (!liveRoomId || liveIsHost) return;
+
+  const { data, error } = await sb
+    .from('rooms')
+    .select('players')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (error || !data) return;
+
+  const players = { ...(data.players || {}) };
+  delete players[livePlayerId];
+
+  const { error: updateError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId);
+
+  if (updateError) {
+    console.error(updateError);
+    alert('Could not leave the game.');
+    return;
+  }
+
+  // Clear local session state
+  liveHasExitedRoom = true;
+  liveRole = null;
+  liveTeam = null;
+  liveIsHost = false;
+
+  if (liveChannel) {
+    await sb.removeChannel(liveChannel);
+    liveChannel = null;
+  }
+
+  stopLivePoll();
+
+  liveRoomId = null;
+  livePlayerId = getOrCreatePlayerId('local'); // or leave as-is if you want per-room persistence
+  document.getElementById('live-room-label').style.display = 'none';
+  document.getElementById('live-room-label').textContent = '';
+
+  if (input) input.value = '';
+
+  // restore standard local editing UI
+  const mode = document.getElementById('op1');
+  if (mode) mode.value = 'player';
+
+  updateLiveAccessUI();
+  showRoomCode(null); // if you have a function that can hide it
+}
+	
 function randomPlayerId() {
   return globalThis.crypto?.randomUUID?.()
     ?? `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -773,6 +869,7 @@ function applyLiveRoomState(state) {
   if (state.board) {
     applyLiveBoard(state.board, liveRole === 'spymaster');
   }
+updateLiveAccessUI();
 }
 
 
@@ -847,6 +944,7 @@ if (updateError || !updatedRoom) {
   showHostPlayersPanel(liveIsHost);
   if (liveIsHost) renderPlayersPanel(players);
   enterLiveMode({ isHost: liveIsHost });
+  updateLiveAccessUI();
 }
 
 window.joinGame = joinGame;
@@ -1149,6 +1247,64 @@ async function setPlayerRole(playerId, team, role) {
   if (typeof pushLiveBoard === 'function') pushLiveBoard();
 }
 
+function updateLiveAccessUI() {
+  const roomJoined = !!liveRoomId;
+  const isGuest = roomJoined && !liveIsHost && !liveHasExitedRoom;
+  const isSpymaster = !!liveRoomId && liveRole === 'spymaster';
+
+  // Hide the normal top-level controls for a locked guest
+  const undo = document.getElementById('btn-undo');
+  const redo = document.getElementById('btn-redo');
+  const mode = document.getElementById('op1');
+  const gSetup = document.getElementById('g-setup');
+  const gAdv = document.getElementById('g-adv');
+  const gHost = document.getElementById('g-host');
+  const gSpy = document.getElementById('g-spy');
+  const exitWrap = document.getElementById('live-exit-wrap');
+
+  // For players in a live room, hide the app controls unless they exit
+  const hideMainControls = isGuest && !isSpymaster;
+
+  if (undo) undo.style.display = hideMainControls ? 'none' : '';
+  if (redo) redo.style.display = hideMainControls ? 'none' : '';
+  if (mode) mode.style.display = hideMainControls ? 'none' : '';
+
+  // Keep host setup controls available to host, but hide them for locked guest players
+  if (gSetup) gSetup.style.display = (hideMainControls ? 'none' : '');
+  if (gAdv) gAdv.style.display = (hideMainControls ? 'none' : '');
+
+  // Only show spymaster controls to spymasters
+  if (gSpy) gSpy.style.display = isSpymaster ? '' : 'none';
+
+  // Show exit field only when a guest is still in a room
+  if (exitWrap) {
+    exitWrap.style.display = isGuest ? 'flex' : 'none';
+  }
+
+  // If the player is a guest and not a spymaster, disable board interactions
+  const board = document.getElementById('board');
+  if (board) {
+    board.style.pointerEvents = (isGuest && !isSpymaster) ? 'none' : '';
+    board.style.filter = (isGuest && !isSpymaster) ? 'grayscale(0.5) brightness(0.92)' : '';
+  }
+
+  // Also disable all cells explicitly
+  document.querySelectorAll('.cell').forEach(cell => {
+    if (isGuest && !isSpymaster) {
+      cell.style.pointerEvents = 'none';
+      cell.style.cursor = 'not-allowed';
+      cell.setAttribute('aria-disabled', 'true');
+    } else {
+      cell.style.pointerEvents = '';
+      cell.style.cursor = '';
+      cell.removeAttribute('aria-disabled');
+    }
+  });
+
+  // Force the hidden mode selector to remain in sync
+  syncLiveSpymasterControls();
+}
+	
 const BROWSER_ANIMALS = {
   chrome: 'Peacock',
   safari: 'Elephant',
