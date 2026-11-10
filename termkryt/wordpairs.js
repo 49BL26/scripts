@@ -199,4 +199,5 @@ const WORD_PAIRS = [
 ['scientist','spike'],
 ['stadium','dragon'],
 ['whip','octopus'],
+['dice','ship'],
 ];
