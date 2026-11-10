@@ -590,6 +590,21 @@ body.grid-align-open {
 <script src="shareboard.js"></script>
 <script>
 
+
+	
+(function () {
+  const SUPABASE_URL = 'https://jvwrfdzlydkthksitayo.supabase.co';
+  const SUPABASE_ANON = 'sb_publishable_E607zJubcmiDofo4XwKBjQ_6HhIBuQG';
+
+  // Use a dedicated name so we never clash with the library's window.supabase
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  let liveRoomId = null;
+  let livePlayerId = null;
+  let liveRole = null;
+  let liveTeam = null;
+  let liveChannel = null;
+
 async function hostGame() {
   const name = getLiveNameOrAlert();
   if (!name) return;
@@ -633,19 +648,6 @@ async function hostGame() {
   enterLiveMode({ isHost: true });
 }	
 	
-(function () {
-  const SUPABASE_URL = 'https://jvwrfdzlydkthksitayo.supabase.co';
-  const SUPABASE_ANON = 'sb_publishable_E607zJubcmiDofo4XwKBjQ_6HhIBuQG';
-
-  // Use a dedicated name so we never clash with the library's window.supabase
-  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-
-  let liveRoomId = null;
-  let livePlayerId = null;
-  let liveRole = null;
-  let liveTeam = null;
-  let liveChannel = null;
-
   function randomCode(len = 4) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let s = '';
