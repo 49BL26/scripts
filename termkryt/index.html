@@ -810,8 +810,20 @@ function showRoomCode(code) {
   el.style.display = 'inline-block';
 }
 	
+function canPublishLiveBoard() {
+  return !!liveRoomId && liveRole === 'spymaster';
+}
+
 async function publishLivePatch(patch) {
   if (!liveRoomId) return;
+
+  const isBoardPatch = !!patch && Object.prototype.hasOwnProperty.call(patch, 'board');
+
+  // Only spymasters may publish board updates.
+  if (isBoardPatch && !canPublishLiveBoard()) {
+    console.warn('Blocked: only spymasters may publish board updates.');
+    return;
+  }
 
   const { data, error } = await sb
     .from('rooms')
@@ -825,8 +837,9 @@ async function publishLivePatch(patch) {
     return;
   }
 
-  // Apply locally, then notify the other clients immediately.
+  // Apply locally so everyone sees the latest room state immediately.
   applyLiveRoomState(data);
+
   if (liveChannel) {
     liveChannel.send({
       type: 'broadcast',
@@ -837,6 +850,10 @@ async function publishLivePatch(patch) {
 }
 
 async function pushLiveBoard() {
+  if (!canPublishLiveBoard()) {
+    console.warn('Blocked: player cannot push board updates.');
+    return;
+  }
   return publishLivePatch({ board: getLiveBoardSnapshot() });
 }
 
