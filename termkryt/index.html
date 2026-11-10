@@ -975,9 +975,12 @@ function getLiveNameOrAlert() {
 }
 
 const nameInput = document.getElementById('live-name-input');
-const nameInput = document.getElementById('live-name-input');
 
 if (nameInput) {
+  if (!nameInput.value.trim()) {
+    nameInput.value = `Player${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+  }
+
   nameInput.addEventListener('input', () => {
     const cleaned = sanitizeLiveName(nameInput.value);
     if (nameInput.value !== cleaned) nameInput.value = cleaned;
