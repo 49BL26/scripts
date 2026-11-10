@@ -1005,7 +1005,129 @@ async function setPlayerRole(playerId, team, role) {
   if (typeof pushLiveBoard === 'function') pushLiveBoard();
 }
 
-	
+const BROWSER_ANIMALS = {
+  chrome: 'Peacock',
+  safari: 'Elephant',
+  edge: 'Hedgehog',
+  firefox: 'Fox',
+  samsung: 'Chiwawa',   // Changed from Chihuahua to Chiwawa (7 chars -> room for ##)
+  opera: 'Cat',
+  brave: 'Lion',
+  duckduckgo: 'Duck'
+};
+
+const OS_ANIMALS = {
+  windows: 'Pufrfish',  // Changed from Pufferfish to Pufrfish (9 chars -> room for ##)
+  mac: 'Dogcow',
+  linux: 'Penguin',
+  ios: 'Puppycalf',     // 9 chars → 1 digit
+  android: 'Droid'      // + binary digits
+};
+
+function detectBrowserFamily() {
+  const ua = navigator.userAgent || '';
+  if (/DuckDuckGo/i.test(ua) || /Ddg\//i.test(ua)) return 'duckduckgo';
+  if (/Firefox\//i.test(ua)) return 'firefox';
+  if (/Edg\//i.test(ua)) return 'edge';
+  if (/OPR\//i.test(ua) || /Opera/i.test(ua)) return 'opera';
+  if (/Brave/i.test(ua) || navigator.brave) return 'brave';
+  if (/SamsungBrowser/i.test(ua)) return 'samsung';
+  if (/Safari/i.test(ua) && !/Chrome\//i.test(ua) && !/CriOS/i.test(ua)) return 'safari';
+  if (/Chrome\//i.test(ua) || /CriOS/i.test(ua)) return 'chrome';
+  return 'other';
+}
+
+function detectOSFamily() {
+  const ua = navigator.userAgent || '';
+  if (/Android/i.test(ua)) return 'android';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+  if (/Mac OS X/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua)) return 'mac';
+  if (/Windows/i.test(ua)) return 'windows';
+  if (/Linux/i.test(ua)) return 'linux';
+  return 'other';
+}
+
+/** Random digits, length n (decimal 0-9). */
+function randomDigits(n) {
+  if (n <= 0) return '';
+  let s = '';
+  for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10);
+  return s;
+}
+
+/** Binary digits only (0/1), length n — for Android "Droid". */
+function randomBinaryDigits(n) {
+  if (n <= 0) return '';
+  let s = '';
+  for (let i = 0; i < n; i++) s += Math.random() < 0.5 ? '0' : '1';
+  return s;
+}
+
+/** Pull a random word from WORD_PAIRS (letters only, max len, Title Case). */
+function randomWordFromPairs(maxLen) {
+  const pairs = (typeof WORD_PAIRS !== 'undefined' && Array.isArray(WORD_PAIRS))
+    ? WORD_PAIRS
+    : [];
+  const flat = [];
+  pairs.forEach(p => {
+    (Array.isArray(p) ? p : [p]).forEach(w => {
+      if (typeof w !== 'string') return;
+      let clean = w.replace(/[^A-Za-z0-9]/g, '');
+      if (clean.length >= 2 && clean.length <= maxLen) {
+        // Force Capitalized format (e.g., "APPLE" or "apple" -> "Apple")
+        clean = clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+        flat.push(clean);
+      }
+    });
+  });
+  if (!flat.length) return 'Player';
+  return flat[Math.floor(Math.random() * flat.length)];
+}
+
+/**
+ * Fit base + suffix into 10 alphanumeric chars.
+ * preferBinary: use 0/1 digits (Android).
+ */
+function withSuffix(base, preferBinary) {
+  base = String(base || 'Player').replace(/[^A-Za-z0-9]/g, '');
+  if (!base) base = 'Player';
+  base = base.slice(0, 10);
+  const room = 10 - base.length;
+  if (room <= 0) return base;
+  const n = Math.min(2, room); // up to ##
+  const suffix = preferBinary ? randomBinaryDigits(n) : randomDigits(n);
+  return (base + suffix).slice(0, 10);
+}
+
+function defaultLiveName() {
+  const browser = detectBrowserFamily();
+  if (browser !== 'other' && BROWSER_ANIMALS[browser]) {
+    return withSuffix(BROWSER_ANIMALS[browser], false);
+  }
+
+  const os = detectOSFamily();
+  if (os !== 'other' && OS_ANIMALS[os]) {
+    return withSuffix(OS_ANIMALS[os], os === 'android');
+  }
+
+  // Last resort: word from wordpairs.js + digits
+  const word = randomWordFromPairs(8);
+  return withSuffix(word, false);
+}
+
+function prefillLiveName() {
+  const input = document.getElementById('live-name-input');
+  if (!input || input.value.trim()) return;
+  input.value = defaultLiveName();
+}
+
+// Run once when DOM is ready enough
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', prefillLiveName);
+} else {
+  prefillLiveName();
+}
+
 	
 function randomPlayerId() {
   return 'p_' + Math.random().toString(36).slice(2, 10);
