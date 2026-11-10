@@ -589,6 +589,50 @@ body.grid-align-open {
 <script src="wordscanner.js"></script>
 <script src="shareboard.js"></script>
 <script>
+
+async function hostGame() {
+  const name = getLiveNameOrAlert();
+  if (!name) return;
+
+  const code = randomCode();
+  livePlayerId = getOrCreatePlayerId(code);
+  liveRoomId = code;
+  liveIsHost = true;
+  liveRole = null;
+  liveTeam = null;
+
+  // optional: generate a fresh board here if you have randomizeBoard()
+  // if (typeof randomizeBoard === 'function') randomizeBoard();
+
+  const board = getLiveBoardSnapshot();
+  const players = {
+    [livePlayerId]: {
+      name,
+      team: null,
+      role: null,
+      isHost: true
+    }
+  };
+
+  const { error } = await sb.from('rooms').insert({
+    id: code,
+    host_id: livePlayerId,
+    board,
+    players,
+    settings: {}
+  });
+  if (error) {
+    alert('Could not create room: ' + error.message);
+    return;
+  }
+
+  await subscribeToRoom(code);
+  showRoomCode(code);
+  showHostPlayersPanel(true);
+  renderPlayersPanel(players);
+  enterLiveMode({ isHost: true });
+}	
+	
 (function () {
   const SUPABASE_URL = 'https://jvwrfdzlydkthksitayo.supabase.co';
   const SUPABASE_ANON = 'sb_publishable_E607zJubcmiDofo4XwKBjQ_6HhIBuQG';
@@ -677,49 +721,6 @@ if (row.players) {
     liveTeam = me.team;
   }
 }
-}
-
-async function hostGame() {
-  const name = getLiveNameOrAlert();
-  if (!name) return;
-
-  const code = randomCode();
-  livePlayerId = getOrCreatePlayerId(code);
-  liveRoomId = code;
-  liveIsHost = true;
-  liveRole = null;
-  liveTeam = null;
-
-  // optional: generate a fresh board here if you have randomizeBoard()
-  // if (typeof randomizeBoard === 'function') randomizeBoard();
-
-  const board = getLiveBoardSnapshot();
-  const players = {
-    [livePlayerId]: {
-      name,
-      team: null,
-      role: null,
-      isHost: true
-    }
-  };
-
-  const { error } = await sb.from('rooms').insert({
-    id: code,
-    host_id: livePlayerId,
-    board,
-    players,
-    settings: {}
-  });
-  if (error) {
-    alert('Could not create room: ' + error.message);
-    return;
-  }
-
-  await subscribeToRoom(code);
-  showRoomCode(code);
-  showHostPlayersPanel(true);
-  renderPlayersPanel(players);
-  enterLiveMode({ isHost: true });
 }
 
   const name = getLiveNameOrAlert();
