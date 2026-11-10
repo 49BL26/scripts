@@ -402,6 +402,16 @@ body.grid-align-open {
 			<input type="file" id="scan-camera" accept="image/*" capture="environment" style="display:none;">
 		<button onclick="hostGame()">Host Game</button>
 		<button onclick="joinGame(prompt('Room code?'))">Join Game</button>
+		<span id="live-room-label" style="
+		  display:none;
+		  margin-left:8px;
+		  padding:6px 12px;
+		  border-radius:8px;
+		  background:#222;
+		  color:#fff;
+		  font:14px system-ui;
+		  vertical-align:middle;
+		"></span>
     </div>
 
     <div class="control-group" id="g-words">
@@ -626,8 +636,8 @@ function applyLiveBoard(board, asSpymaster) {
       return;
     }
 
-    await subscribeToRoom(code);
-    alert('Room created: ' + code + '\nShare this code with others.');
+	await subscribeToRoom(code);
+	showRoomCode(code);   // host: generated code
   }
 
   async function joinGame(code) {
@@ -676,6 +686,7 @@ function applyLiveBoard(board, asSpymaster) {
     applyLiveBoard(data.board, liveRole === 'spymaster');
     await subscribeToRoom(code);
     alert('Joined ' + code + ' as ' + liveTeam + ' ' + liveRole);
+	showRoomCode(code);   // player: the code they entered
   }
 
 async function subscribeToRoom(code) {
@@ -702,6 +713,13 @@ async function subscribeToRoom(code) {
     });
 }
 
+function showRoomCode(code) {
+  const el = document.getElementById('live-room-label');
+  if (!el || !code) return;
+  el.textContent = 'Room: ' + code;
+  el.style.display = 'inline-block';
+}
+	
   async function pushLiveBoard() {
     if (!liveRoomId) return;
     const board = getLiveBoardSnapshot();
