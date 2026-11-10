@@ -728,7 +728,7 @@ if (row.players) {
   const name = getLiveNameOrAlert();
   if (!name) return;
 
-  // ... after loading data ...
+  /* ... after loading data ...
 
   if (!players[livePlayerId]) {
     players[livePlayerId] = {
@@ -744,7 +744,7 @@ if (row.players) {
   await sb.from('rooms').update({
     players,
     updated_at: new Date().toISOString()
-  }).eq('id', code);
+  }).eq('id', code); */
 
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
