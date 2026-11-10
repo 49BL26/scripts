@@ -994,77 +994,6 @@ function getLiveNameOrAlert() {
   return name;
 }
 
-const nameInput = document.getElementById('live-name-input');
-
-if (nameInput) {
-  nameInput.addEventListener('input', () => {
-    const cleaned = sanitizeLiveName(nameInput.value);
-    if (nameInput.value !== cleaned) nameInput.value = cleaned;
-  });
-
-  // Save a changed name when the player leaves the field.
-  nameInput.addEventListener('blur', saveLivePlayerName);
-
-  // Wait until the script has finished initializing BROWSER_ANIMALS and OS_ANIMALS.
-  setTimeout(() => {
-    if (!nameInput.value.trim()) {
-      nameInput.value = defaultLiveName();
-    }
-  }, 0);
-}
-
-async function saveLivePlayerName() {
-  if (!liveRoomId || !livePlayerId || !nameInput) return;
-
-  const { data: room, error: readError } = await sb
-    .from('rooms')
-    .select('players')
-    .eq('id', liveRoomId)
-    .maybeSingle();
-
-  if (readError || !room) {
-    console.error('Could not load room to save player name:', readError);
-    return;
-  }
-
-  const players = { ...(room.players || {}) };
-  const existingPlayer = players[livePlayerId];
-  if (!existingPlayer) return;
-
-  const name = makeUniqueLiveName(nameInput.value, players, livePlayerId);
-  if (!name) return;
-
-  nameInput.value = name;
-  if (existingPlayer.name === name) return;
-
-  players[livePlayerId] = { ...existingPlayer, name };
-
-  const { data: updatedRoom, error: writeError } = await sb
-    .from('rooms')
-    .update({
-      players,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', liveRoomId)
-    .select('board, players')
-    .maybeSingle();
-
-  if (writeError || !updatedRoom) {
-    console.error('Could not save player name:', writeError);
-    return;
-  }
-
-  applyLiveRoomState(updatedRoom);
-
-  if (liveChannel) {
-    liveChannel.send({
-      type: 'broadcast',
-      event: 'room-state',
-      payload: { state: updatedRoom }
-    });
-  }
-}
-
 function showHostPlayersPanel(isHost) {
   const el = document.getElementById('live-players-panel');
   if (!el) return;
@@ -1295,6 +1224,77 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', prefillLiveName);
 } else {
   prefillLiveName();
+}
+
+const nameInput = document.getElementById('live-name-input');
+
+if (nameInput) {
+  nameInput.addEventListener('input', () => {
+    const cleaned = sanitizeLiveName(nameInput.value);
+    if (nameInput.value !== cleaned) nameInput.value = cleaned;
+  });
+
+  // Save a changed name when the player leaves the field.
+  nameInput.addEventListener('blur', saveLivePlayerName);
+
+  // Wait until the script has finished initializing BROWSER_ANIMALS and OS_ANIMALS.
+  setTimeout(() => {
+    if (!nameInput.value.trim()) {
+      nameInput.value = defaultLiveName();
+    }
+  }, 0);
+}
+
+async function saveLivePlayerName() {
+  if (!liveRoomId || !livePlayerId || !nameInput) return;
+
+  const { data: room, error: readError } = await sb
+    .from('rooms')
+    .select('players')
+    .eq('id', liveRoomId)
+    .maybeSingle();
+
+  if (readError || !room) {
+    console.error('Could not load room to save player name:', readError);
+    return;
+  }
+
+  const players = { ...(room.players || {}) };
+  const existingPlayer = players[livePlayerId];
+  if (!existingPlayer) return;
+
+  const name = makeUniqueLiveName(nameInput.value, players, livePlayerId);
+  if (!name) return;
+
+  nameInput.value = name;
+  if (existingPlayer.name === name) return;
+
+  players[livePlayerId] = { ...existingPlayer, name };
+
+  const { data: updatedRoom, error: writeError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('board, players')
+    .maybeSingle();
+
+  if (writeError || !updatedRoom) {
+    console.error('Could not save player name:', writeError);
+    return;
+  }
+
+  applyLiveRoomState(updatedRoom);
+
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
 }
 
 	
