@@ -737,29 +737,34 @@ async function joinGame(code) {
 
   const players = { ...(data.players || {}) };
 
-if (!players[livePlayerId]) {
-  players[livePlayerId] = {
-    name: 'Player',
-    team: null,
-    role: null,
-    isHost: false
-  };
+const name = getLiveNameOrAlert();
+if (!name) return;
 
-  const { data: updatedRoom, error: updateError } = await sb
-    .from('rooms')
-    .update({
-      players,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', code)
-    .select('players')
-    .maybeSingle();
+const players = { ...(data.players || {}) };
+const previous = players[livePlayerId] || {};
 
-  if (updateError || !updatedRoom) {
-    console.error('Could not register joining player:', updateError);
-    alert('Could not register in room. Check the rooms table permissions.');
-    return;
-  }
+players[livePlayerId] = {
+  ...previous,
+  name,
+  team: previous.team ?? null,
+  role: previous.role ?? null,
+  isHost: previous.isHost ?? false
+};
+
+const { data: updatedRoom, error: updateError } = await sb
+  .from('rooms')
+  .update({
+    players,
+    updated_at: new Date().toISOString()
+  })
+  .eq('id', code)
+  .select('players')
+  .maybeSingle();
+
+if (updateError || !updatedRoom) {
+  console.error('Could not save player name:', updateError);
+  alert('Could not save your name. Check the room permissions.');
+  return;
 }
 
   const me = players[livePlayerId];
