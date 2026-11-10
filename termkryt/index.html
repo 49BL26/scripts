@@ -366,21 +366,39 @@ body.grid-align-open {
 	
     <!-- ===== HOST ===== -->
 	
-	<div class="control-group" id="g-host">
-		<button onclick="hostGame()">Host Game</button>
-		<button onclick="joinGame(prompt('Room code?'))">Join Game</button>
-		<span id="live-room-label" style="
-		  display:none;
-		  margin-left:8px;
-		  padding:6px 12px;
-		  border-radius:8px;
-		  background:#222;
-		  color:#fff;
-		  font:14px system-ui;
-		  vertical-align:middle;
-		"></span>
-	</div>
-	
+<div id="g-host" class="control-group">
+  <input id="live-name-input"
+         type="text"
+         maxlength="10"
+         placeholder="Name (1–10 letters/numbers)"
+         autocomplete="off"
+         spellcheck="false">
+
+  <button type="button" onclick="hostGame()">Host Game</button>
+
+  <input id="join-code-input"
+         type="text"
+         maxlength="6"
+         placeholder="Room code"
+         style="text-transform:uppercase">
+
+  <button type="button"
+          onclick="joinGame(document.getElementById('join-code-input').value)">
+    Join Game
+  </button>
+
+  <span id="live-room-label" style="
+    display:none; margin-left:8px; padding:6px 12px; border-radius:8px;
+    background:#222; color:#fff; font:14px system-ui; vertical-align:middle;
+  "></span>
+
+  <!-- Host only: player list + role controls -->
+  <div id="live-players-panel" style="
+    display:none; margin-top:10px; padding:10px; border:1px solid #444;
+    border-radius:8px; max-width:420px;
+  "></div>
+</div>
+
     <!-- ===== SPYMASTER ===== -->
 	
     <div class="control-group" id="g-spy">
@@ -651,80 +669,79 @@ function applyLiveBoard(board, asSpymaster) {
     window.currentRotation = board.currentRotation ?? board.rotation ?? 0;
     initBoard(cells);
   }
+if (row.players) {
+  if (liveIsHost) renderPlayersPanel(row.players);
+  const me = row.players[livePlayerId];
+  if (me) {
+    liveRole = me.role;
+    liveTeam = me.team;
+  }
+}
 }
 
-  async function hostGame() {
-    const code = randomCode();
-    livePlayerId = getOrCreatePlayerId(code);
-    liveRoomId = code;
-    liveRole = 'spymaster';
-    liveTeam = 'red';
+async function hostGame() {
+  const name = getLiveNameOrAlert();
+  if (!name) return;
 
-    const board = getLiveBoardSnapshot();
-    const players = {
-      [livePlayerId]: { name: 'Host', team: liveTeam, role: liveRole, isHost: true }
-    };
+  const code = randomCode();
+  livePlayerId = getOrCreatePlayerId(code);
+  liveRoomId = code;
+  liveIsHost = true;
+  liveRole = null;
+  liveTeam = null;
 
-    const { error } = await sb.from('rooms').insert({
-      id: code,
-      host_id: livePlayerId,
-      board,
-      players,
-      settings: { allowChooseRole: false }
-    });
+  // optional: generate a fresh board here if you have randomizeBoard()
+  // if (typeof randomizeBoard === 'function') randomizeBoard();
 
-    if (error) {
-      console.error(error);
-      alert('Could not create room: ' + error.message);
-      return;
+  const board = getLiveBoardSnapshot();
+  const players = {
+    [livePlayerId]: {
+      name,
+      team: null,
+      role: null,
+      isHost: true
     }
+  };
 
-  	await subscribeToRoom(code);
-  	showRoomCode(code);
-  	//startLivePoll();
-  }
-
-async function joinGame(code) {
-  code = (code || '').trim().toUpperCase();
-  if (!code) return;
-
-  const { data, error } = await sb.from('rooms').select('*').eq('id', code).single();
-  if (error || !data) {
-    alert('Room not found');
+  const { error } = await sb.from('rooms').insert({
+    id: code,
+    host_id: livePlayerId,
+    board,
+    players,
+    settings: {}
+  });
+  if (error) {
+    alert('Could not create room: ' + error.message);
     return;
   }
 
-  livePlayerId = getOrCreatePlayerId(code);  // same id if rejoining this room
-  liveRoomId = code;
-  liveIsHost = data.host_id === livePlayerId;
+  await subscribeToRoom(code);
+  showRoomCode(code);
+  showHostPlayersPanel(true);
+  renderPlayersPanel(players);
+  enterLiveMode({ isHost: true });
+}
 
-  const players = { ...(data.players || {}) };
+  const name = getLiveNameOrAlert();
+  if (!name) return;
+
+  // ... after loading data ...
 
   if (!players[livePlayerId]) {
-    // First time in this browser for this room
     players[livePlayerId] = {
-      name: 'Player',
+      name,
       team: null,
       role: null,
       isHost: false
     };
-    await sb.from('rooms').update({
-      players,
-      updated_at: new Date().toISOString()
-    }).eq('id', code);
+  } else {
+    players[livePlayerId] = { ...players[livePlayerId], name };
   }
 
-  const me = players[livePlayerId];
-  liveRole = me.role;
-  liveTeam = me.team;
-
-  applyLiveBoard(data.board, liveRole === 'spymaster');
-  await subscribeToRoom(code);
-  showRoomCode(code);
-  showHostPlayersPanel(liveIsHost);
-  if (liveIsHost) renderPlayersPanel(players);
-  enterLiveMode({ isHost: liveIsHost });
-}
+  await sb.from('rooms').update({
+    players,
+    updated_at: new Date().toISOString()
+  }).eq('id', code);
 
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
@@ -852,6 +869,144 @@ async function setPlayerRole(playerId, team, role) {
   pushLiveBoard(); // or rely on update + realtime/poll
 }
 
+function sanitizeLiveName(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[^A-Za-z0-9]/g, '')
+    .slice(0, 10);
+}
+
+function getLiveNameOrAlert() {
+  const input = document.getElementById('live-name-input');
+  const name = sanitizeLiveName(input && input.value);
+  if (name.length < 1) {
+    alert('Enter a name (1–10 letters or numbers only).');
+    if (input) input.focus();
+    return null;
+  }
+  if (input) input.value = name;
+  return name;
+}
+
+const nameInput = document.getElementById('live-name-input');
+if (nameInput) {
+  nameInput.addEventListener('input', () => {
+    const cleaned = sanitizeLiveName(nameInput.value);
+    if (nameInput.value !== cleaned) nameInput.value = cleaned;
+  });
+}
+
+function showHostPlayersPanel(isHost) {
+  const el = document.getElementById('live-players-panel');
+  if (!el) return;
+  el.style.display = isHost ? 'block' : 'none';
+}
+
+function enterLiveMode({ isHost }) {
+  // Optional: hide join/host entry for non-host after they’re in
+  const nameEl = document.getElementById('live-name-input');
+  const joinIn = document.getElementById('join-code-input');
+  // Keep room label visible for everyone
+  if (!isHost) {
+    // non-host: hide host button only (adjust selectors if needed)
+  }
+}
+
+function renderPlayersPanel(players) {
+  const el = document.getElementById('live-players-panel');
+  if (!el) return;
+  if (!liveIsHost) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = '<div style="font-weight:600;margin-bottom:8px">Players (assign roles)</div>';
+
+  Object.entries(players || {}).forEach(([id, p]) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0';
+
+    const label = document.createElement('span');
+    label.textContent = (p.name || 'Player') + (p.isHost ? ' (host)' : '');
+    label.style.minWidth = '90px';
+
+    const team = document.createElement('select');
+    ['', 'red', 'blue'].forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = v ? v : '— team —';
+      if ((p.team || '') === v) o.selected = true;
+      team.appendChild(o);
+    });
+
+    const role = document.createElement('select');
+    [
+      ['', '— role —'],
+      ['spymaster', 'Spymaster'],
+      ['player', 'Player'],
+      ['spectator', 'Spectator']
+    ].forEach(([v, t]) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = t;
+      if ((p.role || '') === v) o.selected = true;
+      role.appendChild(o);
+    });
+
+    const apply = () => setPlayerRole(id, team.value || null, role.value || null);
+    team.onchange = apply;
+    role.onchange = apply;
+
+    row.append(label, team, role);
+    el.appendChild(row);
+  });
+}
+
+async function setPlayerRole(playerId, team, role) {
+  if (!liveIsHost || !liveRoomId) return;
+
+  const { data, error } = await sb
+    .from('rooms')
+    .select('players, board')
+    .eq('id', liveRoomId)
+    .single();
+  if (error || !data) return;
+
+  const players = { ...data.players };
+  const prev = players[playerId] || {};
+  const wasSpymaster = prev.role === 'spymaster';
+  const nowSpymaster = role === 'spymaster';
+
+  players[playerId] = {
+    ...prev,
+    team: team || null,
+    role: role || null
+  };
+
+  let board = data.board;
+  if (wasSpymaster && !nowSpymaster) {
+    if (typeof randomizeBoard === 'function') randomizeBoard();
+    board = getLiveBoardSnapshot();
+  }
+
+  await sb.from('rooms').update({
+    players,
+    board,
+    updated_at: new Date().toISOString()
+  }).eq('id', liveRoomId);
+
+  if (playerId === livePlayerId) {
+    liveTeam = team || null;
+    liveRole = role || null;
+    applyLiveBoard(board, liveRole === 'spymaster');
+  }
+
+  renderPlayersPanel(players);
+  if (typeof pushLiveBoard === 'function') pushLiveBoard();
+}
+
+	
+	
 function randomPlayerId() {
   return 'p_' + Math.random().toString(36).slice(2, 10);
 }
