@@ -737,19 +737,30 @@ async function joinGame(code) {
 
   const players = { ...(data.players || {}) };
 
-  if (!players[livePlayerId]) {
-    // First time in this browser for this room
-    players[livePlayerId] = {
-      name: 'Player',
-      team: null,
-      role: null,
-      isHost: false
-    };
-    await sb.from('rooms').update({
+if (!players[livePlayerId]) {
+  players[livePlayerId] = {
+    name: 'Player',
+    team: null,
+    role: null,
+    isHost: false
+  };
+
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({
       players,
       updated_at: new Date().toISOString()
-    }).eq('id', code);
+    })
+    .eq('id', code)
+    .select('players')
+    .maybeSingle();
+
+  if (updateError || !updatedRoom) {
+    console.error('Could not register joining player:', updateError);
+    alert('Could not register in room. Check the rooms table permissions.');
+    return;
   }
+}
 
   const me = players[livePlayerId];
   liveRole = me.role;
