@@ -579,20 +579,26 @@ body.grid-align-open {
       cells
     };
   }
+function applyLiveBoard(board, asSpymaster) {
+  if (!board) return;
 
-  function applyLiveBoard(board, asSpymaster) {
-    if (!board || !board.cells) return;
-    const cells = board.cells.map(c => {
-      if (asSpymaster) return c;
-      if (!c.isPlayFlipped) return { ...c, colorClass: 'white' };
-      return c;
-    });
-    if (typeof initBoard === 'function') {
-      window.isFlipped = !!board.isFlipped;
-      window.currentRotation = board.rotation || 0;
-      initBoard(cells);
-    }
+  // Support both shapes: cellsData (your snapshot) or cells (older)
+  const raw = board.cellsData || board.cells;
+  if (!raw || !raw.length) return;
+
+  const cells = raw.map(c => {
+    if (asSpymaster) return c;
+    // Players: hide colours on unrevealed cards
+    if (!c.isPlayFlipped) return { ...c, colorClass: 'white' };
+    return c;
+  });
+
+  if (typeof initBoard === 'function') {
+    window.isFlipped = !!board.isFlipped;
+    window.currentRotation = board.currentRotation ?? board.rotation ?? 0;
+    initBoard(cells);
   }
+}
 
   async function hostGame() {
     const code = randomCode();
