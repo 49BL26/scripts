@@ -649,6 +649,11 @@ async function hostGame() {
 }	
 
 window.hostGame = hostGame;
+
+function randomPlayerId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 	
   function randomCode(len = 4) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
