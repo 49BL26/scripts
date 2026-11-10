@@ -735,8 +735,6 @@ async function joinGame(code) {
   liveRoomId = code;
   liveIsHost = data.host_id === livePlayerId;
 
-  const players = { ...(data.players || {}) };
-
 const name = getLiveNameOrAlert();
 if (!name) return;
 
