@@ -975,11 +975,68 @@ function getLiveNameOrAlert() {
 }
 
 const nameInput = document.getElementById('live-name-input');
+const nameInput = document.getElementById('live-name-input');
+
 if (nameInput) {
   nameInput.addEventListener('input', () => {
     const cleaned = sanitizeLiveName(nameInput.value);
     if (nameInput.value !== cleaned) nameInput.value = cleaned;
   });
+
+  nameInput.addEventListener('blur', saveLivePlayerName);
+}
+
+async function saveLivePlayerName() {
+  // Don't write to a room until this client has joined one.
+  if (!liveRoomId || !livePlayerId) return;
+
+  const name = sanitizeLiveName(nameInput?.value);
+  if (!name) return;
+
+  if (nameInput.value !== name) nameInput.value = name;
+
+  const { data: room, error: readError } = await sb
+    .from('rooms')
+    .select('players, board')
+    .eq('id', liveRoomId)
+    .maybeSingle();
+
+  if (readError || !room) {
+    console.error('Could not load room to save player name:', readError);
+    return;
+  }
+
+  const players = { ...(room.players || {}) };
+  const me = players[livePlayerId];
+
+  // Only update a player already registered in this room.
+  if (!me || me.name === name) return;
+
+  players[livePlayerId] = { ...me, name };
+
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('board, players')
+    .maybeSingle();
+
+  if (updateError || !updatedRoom) {
+    console.error('Could not save player name:', updateError);
+    return;
+  }
+
+  // Notify clients immediately; this only sends the returned room state.
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
 }
 
 function showHostPlayersPanel(isHost) {
