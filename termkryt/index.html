@@ -689,30 +689,6 @@ function applyLiveBoard(board, asSpymaster) {
 	showRoomCode(code);   // player: the code they entered
   }
 
-async function subscribeToRoom(code) {
-  if (liveChannel) {
-    await sb.removeChannel(liveChannel);
-    liveChannel = null;
-  }
-
-  liveChannel = sb
-    .channel('room:' + code)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
-      payload => {
-        console.log('room event', payload.eventType, payload.new && payload.new.id);
-        const row = payload.new;
-        if (!row) return;
-        applyLiveBoard(row.board, liveRole === 'spymaster');
-      }
-    )
-    .subscribe(status => {
-      console.log('realtime status:', status);
-      // should become "SUBSCRIBED"
-    });
-}
-
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
   if (!el || !code) return;
@@ -720,15 +696,61 @@ function showRoomCode(code) {
   el.style.display = 'inline-block';
 }
 	
-  async function pushLiveBoard() {
-    if (!liveRoomId) return;
-    const board = getLiveBoardSnapshot();
-    const { error } = await sb
-      .from('rooms')
-      .update({ board, updated_at: new Date().toISOString() })
-      .eq('id', liveRoomId);
-    if (error) console.error('pushLiveBoard', error);
+async function pushLiveBoard() {
+  if (!liveRoomId) return;
+
+  const board = getLiveBoardSnapshot();
+
+  // 1) Persist to DB (joiners who arrive later still get current state)
+  const { error } = await sb
+    .from('rooms')
+    .update({ board, updated_at: new Date().toISOString() })
+    .eq('id', liveRoomId);
+  if (error) console.error('pushLiveBoard db', error);
+
+  // 2) Instant push to everyone already in the room
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'board',
+      payload: { board }
+    });
   }
+}
+
+async function subscribeToRoom(code) {
+  if (liveChannel) {
+    await sb.removeChannel(liveChannel);
+    liveChannel = null;
+  }
+
+  liveChannel = sb.channel('room:' + code, {
+    config: { broadcast: { self: false } }  // don't echo back to sender
+  });
+
+  // Instant updates from other clients
+  liveChannel.on('broadcast', { event: 'board' }, ({ payload }) => {
+    if (!payload || !payload.board) return;
+    console.log('broadcast board');
+    applyLiveBoard(payload.board, liveRole === 'spymaster');
+  });
+
+  // Fallback: DB changes (late join / refresh)
+  liveChannel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
+    payload => {
+      const row = payload.new;
+      if (!row || !row.board) return;
+      console.log('postgres board', payload.eventType);
+      applyLiveBoard(row.board, liveRole === 'spymaster');
+    }
+  );
+
+  liveChannel.subscribe(status => {
+    console.log('realtime status:', status);
+  });
+}
 
   // Expose for onclick handlers
   window.hostGame = hostGame;
