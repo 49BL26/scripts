@@ -636,8 +636,9 @@ function applyLiveBoard(board, asSpymaster) {
       return;
     }
 
-	await subscribeToRoom(code);
-	showRoomCode(code);   // host: generated code
+  	await subscribeToRoom(code);
+  	showRoomCode(code);
+  	startLivePoll();
   }
 
   async function joinGame(code) {
@@ -687,6 +688,7 @@ function applyLiveBoard(board, asSpymaster) {
     await subscribeToRoom(code);
     alert('Joined ' + code + ' as ' + liveTeam + ' ' + liveRole);
 	showRoomCode(code);   // player: the code they entered
+	startLivePoll();
   }
 
 function showRoomCode(code) {
@@ -752,6 +754,29 @@ async function subscribeToRoom(code) {
   });
 }
 
+let livePollTimer = null;
+
+function startLivePoll() {
+  stopLivePoll();
+  livePollTimer = setInterval(async () => {
+    if (!liveRoomId) return;
+    const { data, error } = await sb
+      .from('rooms')
+      .select('board')
+      .eq('id', liveRoomId)
+      .single();
+    if (error || !data || !data.board) return;
+    applyLiveBoard(data.board, liveRole === 'spymaster');
+  }, 1000); // every 1 second
+}
+
+function stopLivePoll() {
+  if (livePollTimer) {
+    clearInterval(livePollTimer);
+    livePollTimer = null;
+  }
+}
+	
   // Expose for onclick handlers
   window.hostGame = hostGame;
   window.joinGame = joinGame;
