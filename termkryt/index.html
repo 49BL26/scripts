@@ -777,9 +777,6 @@ async function joinGame(code) {
   liveRoomId = code;
   liveIsHost = data.host_id === livePlayerId;
 
-const name = getLiveNameOrAlert();
-if (!name) return;
-
 const players = { ...(data.players || {}) };
 const name = makeUniqueLiveName(getLiveNameOrAlert(), players, livePlayerId);
 if (!name) return;
