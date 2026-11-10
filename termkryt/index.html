@@ -530,6 +530,7 @@ body.grid-align-open {
         <div class="modal-buttons" id="modal-buttons"></div>
     </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
@@ -539,6 +540,10 @@ body.grid-align-open {
 <script src="wordscanner.js"></script>
 <script src="shareboard.js"></script>
 <script>
+const SUPABASE_URL = 'https://jvwrfdzlydkthksitayo.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_E607zJubcmiDofo4XwKBjQ_6HhIBuQG';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+	
 (function () {
   'use strict';
 
