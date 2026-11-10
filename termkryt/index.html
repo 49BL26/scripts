@@ -599,7 +599,7 @@ function getOrCreatePlayerId(code) {
   const key = storageKey(code);
   let id = sessionStorage.getItem(key);
   if (!id) {
-    id = getOrCreatePlayerId(code);
+    id = randomPlayerId();
     sessionStorage.setItem(key, id);
   }
   return id;
@@ -838,6 +838,9 @@ async function setPlayerRole(playerId, team, role) {
   pushLiveBoard(); // or rely on update + realtime/poll
 }
 
+function randomPlayerId() {
+  return 'p_' + Math.random().toString(36).slice(2, 10);
+}
 	
   // Expose for onclick handlers
   window.hostGame = hostGame;
