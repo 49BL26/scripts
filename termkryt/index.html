@@ -997,30 +997,28 @@ function getLiveNameOrAlert() {
 const nameInput = document.getElementById('live-name-input');
 
 if (nameInput) {
-  if (!nameInput.value.trim()) {
-    nameInput.value = defaultLiveName();
-  }
-
   nameInput.addEventListener('input', () => {
     const cleaned = sanitizeLiveName(nameInput.value);
     if (nameInput.value !== cleaned) nameInput.value = cleaned;
   });
 
+  // Save a changed name when the player leaves the field.
   nameInput.addEventListener('blur', saveLivePlayerName);
+
+  // Wait until the script has finished initializing BROWSER_ANIMALS and OS_ANIMALS.
+  setTimeout(() => {
+    if (!nameInput.value.trim()) {
+      nameInput.value = defaultLiveName();
+    }
+  }, 0);
 }
 
 async function saveLivePlayerName() {
-  // Don't write to a room until this client has joined one.
-  if (!liveRoomId || !livePlayerId) return;
-
-  const name = sanitizeLiveName(nameInput?.value);
-  if (!name) return;
-
-  if (nameInput.value !== name) nameInput.value = name;
+  if (!liveRoomId || !livePlayerId || !nameInput) return;
 
   const { data: room, error: readError } = await sb
     .from('rooms')
-    .select('players, board')
+    .select('players')
     .eq('id', liveRoomId)
     .maybeSingle();
 
@@ -1030,14 +1028,18 @@ async function saveLivePlayerName() {
   }
 
   const players = { ...(room.players || {}) };
-  const me = players[livePlayerId];
+  const existingPlayer = players[livePlayerId];
+  if (!existingPlayer) return;
 
-  // Only update a player already registered in this room.
-  if (!me || me.name === name) return;
+  const name = makeUniqueLiveName(nameInput.value, players, livePlayerId);
+  if (!name) return;
 
-  players[livePlayerId] = { ...me, name };
+  nameInput.value = name;
+  if (existingPlayer.name === name) return;
 
-  const { data: updatedRoom, error: updateError } = await sb
+  players[livePlayerId] = { ...existingPlayer, name };
+
+  const { data: updatedRoom, error: writeError } = await sb
     .from('rooms')
     .update({
       players,
@@ -1047,12 +1049,13 @@ async function saveLivePlayerName() {
     .select('board, players')
     .maybeSingle();
 
-  if (updateError || !updatedRoom) {
-    console.error('Could not save player name:', updateError);
+  if (writeError || !updatedRoom) {
+    console.error('Could not save player name:', writeError);
     return;
   }
 
-  // Notify clients immediately; this only sends the returned room state.
+  applyLiveRoomState(updatedRoom);
+
   if (liveChannel) {
     liveChannel.send({
       type: 'broadcast',
