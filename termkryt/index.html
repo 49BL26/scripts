@@ -367,11 +367,18 @@ body.grid-align-open {
     <!-- ===== HOST ===== -->
 	
 	<div class="control-group" id="g-host">
-			<button type="button" onclick="hostGame()">Host Live Game</button>
-			<input id="join-code-input" placeholder="Room code" maxlength="6" style="text-transform:uppercase">
-			<button type="button" onclick="joinGame(document.getElementById('join-code-input').value)">Join Game</button>
-			<span id="live-room-label" style="display:none; margin-left:8px; padding:6px 12px; border-radius:8px; background:#222; color:#fff;"></span>
-			<div id="live-players-panel" style="display:none;"></div>
+		<button onclick="hostGame()">Host Game</button>
+		<button onclick="joinGame(prompt('Room code?'))">Join Game</button>
+		<span id="live-room-label" style="
+		  display:none;
+		  margin-left:8px;
+		  padding:6px 12px;
+		  border-radius:8px;
+		  background:#222;
+		  color:#fff;
+		  font:14px system-ui;
+		  vertical-align:middle;
+		"></span>
 	</div>
 	
     <!-- ===== SPYMASTER ===== -->
