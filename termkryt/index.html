@@ -320,7 +320,7 @@ body.grid-align-open {
 }
 
 #board.locked-for-player {
-  opacity: 0.9;
+  opacity: 0.95;
   user-select: none;
 }
 #board.locked-for-player .cell {
@@ -362,7 +362,7 @@ body.grid-align-open {
     <div class="control-group">
 		<button id="btn-undo" onclick="undoBoard()" title="Undo (previous board state)">↶ Undo</button>
 		<button id="btn-redo" onclick="redoBoard()" title="Redo (next board state)">↷ Redo</button>
-        <label for="op1">Mode:</label>
+        <label for="op1" id="op1lbl">Mode:</label>
         <select id="op1" onchange="uiSync()">
             <option value="player">Player</option>
             <option value="spymaster">Spymaster</option>
