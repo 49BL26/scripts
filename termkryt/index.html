@@ -605,6 +605,20 @@ body.grid-align-open {
   let liveTeam = null;
   let liveChannel = null;
 
+function syncLiveSpymasterControls() {
+  const isLiveSpymaster = !!liveRoomId && liveRole === 'spymaster';
+  const mode = document.getElementById('mode-select');
+
+  if (mode) {
+    mode.value = isLiveSpymaster ? 'spymaster' : 'player';
+  }
+
+  document.getElementById('g-spy')
+    ?.classList.toggle('shown', isLiveSpymaster);
+
+  updateStats();
+}
+	
 function makeUniqueLiveName(rawName, players = {}, exceptPlayerId = null) {
   const base = sanitizeLiveName(rawName) || defaultLiveName();
   const taken = new Set(
@@ -749,6 +763,7 @@ function applyLiveRoomState(state) {
   const me = state.players?.[livePlayerId];
   liveRole = me?.role ?? null;
   liveTeam = me?.team ?? null;
+  syncLiveSpymasterControls();
 
   if (liveIsHost && state.players) {
     renderPlayersPanel(state.players);
