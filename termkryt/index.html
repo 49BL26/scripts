@@ -978,7 +978,7 @@ const nameInput = document.getElementById('live-name-input');
 
 if (nameInput) {
   if (!nameInput.value.trim()) {
-    nameInput.value = `Player${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+    nameInput.value = defaultLiveName();
   }
 
   nameInput.addEventListener('input', () => {
