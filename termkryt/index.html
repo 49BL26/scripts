@@ -605,6 +605,24 @@ body.grid-align-open {
   let liveTeam = null;
   let liveChannel = null;
 
+function makeUniqueLiveName(rawName, players = {}, exceptPlayerId = null) {
+  const base = sanitizeLiveName(rawName) || defaultLiveName();
+  const taken = new Set(
+    Object.entries(players)
+      .filter(([id]) => id !== exceptPlayerId)
+      .map(([, player]) => sanitizeLiveName(player?.name).toLowerCase())
+      .filter(Boolean)
+  );
+
+  if (!taken.has(base.toLowerCase())) return base;
+
+  for (let number = 2; ; number++) {
+    const suffix = String(number);
+    const candidate = base.slice(0, 10 - suffix.length) + suffix;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+	
 async function hostGame() {
   const name = getLiveNameOrAlert();
   if (!name) return;
@@ -763,8 +781,13 @@ const name = getLiveNameOrAlert();
 if (!name) return;
 
 const players = { ...(data.players || {}) };
-const previous = players[livePlayerId] || {};
+const name = makeUniqueLiveName(getLiveNameOrAlert(), players, livePlayerId);
+if (!name) return;
 
+const input = document.getElementById('live-name-input');
+if (input) input.value = name;
+
+const previous = players[livePlayerId] || {};
 players[livePlayerId] = {
   ...previous,
   name,
