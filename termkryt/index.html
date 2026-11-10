@@ -896,7 +896,69 @@ if (!name) return;
 const input = document.getElementById('live-name-input');
 if (input) input.value = name;
 
+
 const previous = players[livePlayerId];
+const isNewGuest = !previous;
+
+// Rejoining should retain the existing assignment, not trigger another pairing.
+if (isNewGuest) {
+  const guestCount = Object.entries(players)
+    .filter(([id, player]) =>
+      id !== data.host_id && !player.isHost
+    ).length;
+
+  if (guestCount === 0) {
+    // First guest joins the host as a spymaster.
+    players[livePlayerId] = {
+      name,
+      team: 'blue',
+      role: 'spymaster',
+      isHost: false
+    };
+  } else {
+    const waitingEntry = Object.entries(players).find(
+      ([id, player]) =>
+        id !== data.host_id &&
+        id !== livePlayerId &&
+        !player.isHost &&
+        player.waitingForPair === true
+    );
+
+    if (waitingEntry) {
+      // Pair the waiting guest with this new guest.
+      const [waitingId, waitingPlayer] = waitingEntry;
+
+      players[waitingId] = {
+        ...waitingPlayer,
+        role: 'player',
+        team: 'red',
+        waitingForPair: false
+      };
+
+      players[livePlayerId] = {
+        name,
+        role: 'player',
+        team: 'blue',
+        isHost: false,
+        waitingForPair: false
+      };
+    } else {
+      // No waiting partner yet.
+      players[livePlayerId] = {
+        name,
+        role: 'spectator',
+        team: null,
+        isHost: false,
+        waitingForPair: true
+      };
+    }
+  }
+} else {
+  // Existing player reconnecting: preserve their assigned role and team.
+  players[livePlayerId] = { ...previous, name };
+}
+	
+	
 const isFirstNonHost = !previous &&
   !Object.values(players).some(player => !player.isHost);
 
