@@ -2487,8 +2487,9 @@ function saveCurrentState() {
     }));
     localStorage.setItem('wordBoardState', JSON.stringify({ currentRotation, isFlipped, cellsData }));
 
-    // Record a history entry for every ordinary change
     pushHistory();
+
+    if (typeof pushLiveBoard === 'function') pushLiveBoard();
 }
 
 function initBoard(cellsData) {
