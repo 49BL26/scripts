@@ -128,7 +128,7 @@ const WORD_PAIRS = [
 ['comic','mammoth'],
 ['jet','microscope'],
 ['chocolate','suit'],
-['death','stocks'],
+['death','stock'],
 ['hospital','saturn'],
 ['box','mount'],
 ['fall','scale'],
