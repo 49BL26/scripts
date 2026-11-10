@@ -618,16 +618,30 @@ function getOrCreatePlayerId(code) {
       cells
     };
   }
+	
+let lastBoardFingerprint = '';
+
+function boardFingerprint(board) {
+  if (!board) return '';
+  const raw = board.cellsData || board.cells || [];
+  // Compact string of what matters for display
+  return raw.map(c =>
+    (c.text || '') + ':' + (c.colorClass || '') + ':' + (c.isPlayFlipped ? '1' : '0')
+  ).join('|') + '#' + (board.isFlipped ? '1' : '0') + '#' + (board.currentRotation || board.rotation || 0);
+}
+
 function applyLiveBoard(board, asSpymaster) {
   if (!board) return;
 
-  // Support both shapes: cellsData (your snapshot) or cells (older)
   const raw = board.cellsData || board.cells;
   if (!raw || !raw.length) return;
 
+  const fp = boardFingerprint(board) + (asSpymaster ? ':S' : ':P');
+  if (fp === lastBoardFingerprint) return; // nothing new → no DOM rebuild
+  lastBoardFingerprint = fp;
+
   const cells = raw.map(c => {
     if (asSpymaster) return c;
-    // Players: hide colours on unrevealed cards
     if (!c.isPlayFlipped) return { ...c, colorClass: 'white' };
     return c;
   });
