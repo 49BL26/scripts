@@ -358,12 +358,24 @@ body.grid-align-open {
         <select id="op1" onchange="uiSync()">
             <option value="player">Player</option>
             <option value="spymaster">Spymaster</option>
+            <option value="host">Host</option>
             <option value="setup">Setup</option>
             <option value="advanced">Advanced Options</option>
         </select>
     </div>
-
+	
+    <!-- ===== HOST ===== -->
+	
+	<div class="control-group" id="g-host">
+			<button type="button" onclick="hostGame()">Host Live Game</button>
+			<input id="join-code-input" placeholder="Room code" maxlength="6" style="text-transform:uppercase">
+			<button type="button" onclick="joinGame(document.getElementById('join-code-input').value)">Join Game</button>
+			<span id="live-room-label" style="display:none; margin-left:8px; padding:6px 12px; border-radius:8px; background:#222; color:#fff;"></span>
+			<div id="live-players-panel" style="display:none;"></div>
+	</div>
+	
     <!-- ===== SPYMASTER ===== -->
+	
     <div class="control-group" id="g-spy">
         <label for="spy-action">Action:</label>
         <select id="spy-action" onchange="updateStats()">
@@ -572,9 +584,19 @@ body.grid-align-open {
     return s;
   }
 
-  function randomPlayerId() {
-    return 'p_' + Math.random().toString(36).slice(2, 10);
+function storageKey(code) {
+  return 'termkryt_live_' + code;
+}
+
+function getOrCreatePlayerId(code) {
+  const key = storageKey(code);
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = getOrCreatePlayerId(code);
+    sessionStorage.setItem(key, id);
   }
+  return id;
+}
 
   function getLiveBoardSnapshot() {
     if (typeof getBoardSnapshot === 'function') return getBoardSnapshot();
@@ -612,7 +634,7 @@ function applyLiveBoard(board, asSpymaster) {
 
   async function hostGame() {
     const code = randomCode();
-    livePlayerId = randomPlayerId();
+    livePlayerId = getOrCreatePlayerId(code);
     liveRoomId = code;
     liveRole = 'spymaster';
     liveTeam = 'red';
@@ -641,55 +663,47 @@ function applyLiveBoard(board, asSpymaster) {
   	startLivePoll();
   }
 
-  async function joinGame(code) {
-    code = (code || '').trim().toUpperCase();
-    if (!code) return;
+async function joinGame(code) {
+  code = (code || '').trim().toUpperCase();
+  if (!code) return;
 
-    const { data, error } = await sb.from('rooms').select('*').eq('id', code).single();
-    if (error || !data) {
-      alert('Room not found');
-      return;
-    }
-
-    livePlayerId = randomPlayerId();
-    liveRoomId = code;
-
-    const existing = Object.values(data.players || {});
-    const hasRedSpy = existing.some(p => p.team === 'red' && p.role === 'spymaster');
-    const hasBlueSpy = existing.some(p => p.team === 'blue' && p.role === 'spymaster');
-
-    if (!hasRedSpy) {
-      liveTeam = 'red'; liveRole = 'spymaster';
-    } else if (!hasBlueSpy) {
-      liveTeam = 'blue'; liveRole = 'spymaster';
-    } else {
-      liveTeam = existing.filter(p => p.team === 'red').length <=
-                 existing.filter(p => p.team === 'blue').length ? 'red' : 'blue';
-      liveRole = 'player';
-    }
-
-    const players = {
-      ...data.players,
-      [livePlayerId]: { name: 'Player', team: liveTeam, role: liveRole, isHost: false }
-    };
-
-    const { error: upErr } = await sb
-      .from('rooms')
-      .update({ players, updated_at: new Date().toISOString() })
-      .eq('id', code);
-
-    if (upErr) {
-      console.error(upErr);
-      alert('Could not join: ' + upErr.message);
-      return;
-    }
-
-    applyLiveBoard(data.board, liveRole === 'spymaster');
-    await subscribeToRoom(code);
-    alert('Joined ' + code + ' as ' + liveTeam + ' ' + liveRole);
-	showRoomCode(code);   // player: the code they entered
-	startLivePoll();
+  const { data, error } = await sb.from('rooms').select('*').eq('id', code).single();
+  if (error || !data) {
+    alert('Room not found');
+    return;
   }
+
+  livePlayerId = getOrCreatePlayerId(code);  // same id if rejoining this room
+  liveRoomId = code;
+  liveIsHost = data.host_id === livePlayerId;
+
+  const players = { ...(data.players || {}) };
+
+  if (!players[livePlayerId]) {
+    // First time in this browser for this room
+    players[livePlayerId] = {
+      name: 'Player',
+      team: null,
+      role: null,
+      isHost: false
+    };
+    await sb.from('rooms').update({
+      players,
+      updated_at: new Date().toISOString()
+    }).eq('id', code);
+  }
+
+  const me = players[livePlayerId];
+  liveRole = me.role;
+  liveTeam = me.team;
+
+  applyLiveBoard(data.board, liveRole === 'spymaster');
+  await subscribeToRoom(code);
+  showRoomCode(code);
+  showHostPlayersPanel(liveIsHost);
+  if (liveIsHost) renderPlayersPanel(players);
+  enterLiveMode({ isHost: liveIsHost });
+}
 
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
@@ -776,6 +790,47 @@ function stopLivePoll() {
     livePollTimer = null;
   }
 }
+
+async function setPlayerRole(playerId, team, role) {
+  if (!liveIsHost || !liveRoomId) return;
+
+  const { data } = await sb.from('rooms').select('players, board').eq('id', liveRoomId).single();
+  if (!data) return;
+
+  const players = { ...data.players };
+  const prev = players[playerId] || {};
+  const wasSpymaster = prev.role === 'spymaster';
+  const nowSpymaster = role === 'spymaster';
+
+  players[playerId] = {
+    ...prev,
+    team: team || null,
+    role: role || null
+  };
+
+  let board = data.board;
+  // Spymaster → player/spectator: new game so they don't keep the key
+  if (wasSpymaster && !nowSpymaster) {
+    if (typeof randomizeBoard === 'function') randomizeBoard();
+    board = getLiveBoardSnapshot();
+    applyLiveBoard(board, liveRole === 'spymaster');
+  }
+
+  await sb.from('rooms').update({
+    players,
+    board,
+    updated_at: new Date().toISOString()
+  }).eq('id', liveRoomId);
+
+  if (playerId === livePlayerId) {
+    liveTeam = team;
+    liveRole = role;
+  }
+
+  renderPlayersPanel(players);
+  pushLiveBoard(); // or rely on update + realtime/poll
+}
+
 	
   // Expose for onclick handlers
   window.hostGame = hostGame;
@@ -3255,6 +3310,7 @@ function uiSync() {
     const setup = l1 === 'setup', adv = l1 === 'advanced';
 
     show('g-spy',      l1 === 'spymaster');
+	show('g-host',    host);
     show('g-setup',    setup);
     show('g-adv',      adv);
     show('g-colors',   adv && sec === 'colors');
