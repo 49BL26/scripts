@@ -838,10 +838,7 @@ liveChannel.on(
     const row = payload.new;
     if (!row) return;
 
-    if (row.board) {
-      applyLiveBoard(row.board, liveRole === 'spymaster');
-    }
-
+    // Refresh the host roster and this device's role/team first.
     if (row.players) {
       if (liveIsHost) renderPlayersPanel(row.players);
 
@@ -850,6 +847,11 @@ liveChannel.on(
         liveRole = me.role;
         liveTeam = me.team;
       }
+    }
+
+    // Then render the latest board using the updated role.
+    if (row.board) {
+      applyLiveBoard(row.board, liveRole === 'spymaster');
     }
   }
 );
