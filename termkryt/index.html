@@ -774,6 +774,8 @@ async function joinGame(code) {
   enterLiveMode({ isHost: liveIsHost });
 }
 
+window.joinGame = joinGame;
+	
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
   if (!el || !code) return;
