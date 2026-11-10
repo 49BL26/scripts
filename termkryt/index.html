@@ -686,8 +686,8 @@ async function hostGame() {
   const players = {
     [livePlayerId]: {
       name,
-      team: null,
-      role: null,
+      team: 'red',
+      role: 'spymaster',
       isHost: true
     }
   };
@@ -896,15 +896,18 @@ if (!name) return;
 const input = document.getElementById('live-name-input');
 if (input) input.value = name;
 
-const previous = players[livePlayerId] || {};
+const previous = players[livePlayerId];
+const isFirstNonHost = !previous &&
+  !Object.values(players).some(player => !player.isHost);
+
 players[livePlayerId] = {
   ...previous,
   name,
-  team: previous.team ?? null,
-  role: previous.role ?? null,
-  isHost: previous.isHost ?? false
+  team: previous?.team ?? (isFirstNonHost ? 'blue' : null),
+  role: previous?.role ?? (isFirstNonHost ? 'spymaster' : 'spectator'),
+  isHost: previous?.isHost ?? false
 };
-
+	
 const { data: updatedRoom, error: updateError } = await sb
   .from('rooms')
   .update({
