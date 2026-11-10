@@ -705,21 +705,40 @@ function applyLiveBoard(board, asSpymaster) {
   if (!board) return;
 
   const raw = board.cellsData || board.cells;
-  if (!raw || !raw.length) return;
+  if (!raw?.length) return;
 
   const fp = boardFingerprint(board) + (asSpymaster ? ':S' : ':P');
   if (fp === lastBoardFingerprint) return;
   lastBoardFingerprint = fp;
 
-  const cells = raw.map(c => {
-    if (asSpymaster || c.isPlayFlipped) return c;
-    return { ...c, colorClass: 'white' };
-  });
+  const cells = raw.map(cell =>
+    asSpymaster || cell.isPlayFlipped
+      ? cell
+      : { ...cell, colorClass: 'white' }
+  );
 
   if (typeof initBoard === 'function') {
     window.isFlipped = !!board.isFlipped;
     window.currentRotation = board.currentRotation ?? board.rotation ?? 0;
     initBoard(cells);
+  }
+}
+
+function applyLiveRoomState(state) {
+  if (!state) return;
+
+  // Update permissions/role before rendering the board.
+  const me = state.players?.[livePlayerId];
+  liveRole = me?.role ?? null;
+  liveTeam = me?.team ?? null;
+
+  if (liveIsHost && state.players) {
+    renderPlayersPanel(state.players);
+  }
+
+  // Missing or unassigned role defaults to the non-spymaster view.
+  if (state.board) {
+    applyLiveBoard(state.board, liveRole === 'spymaster');
   }
 }
 
@@ -791,26 +810,34 @@ function showRoomCode(code) {
   el.style.display = 'inline-block';
 }
 	
-async function pushLiveBoard() {
+async function publishLivePatch(patch) {
   if (!liveRoomId) return;
 
-  const board = getLiveBoardSnapshot();
-
-  // 1) Persist to DB (joiners who arrive later still get current state)
-  const { error } = await sb
+  const { data, error } = await sb
     .from('rooms')
-    .update({ board, updated_at: new Date().toISOString() })
-    .eq('id', liveRoomId);
-  if (error) console.error('pushLiveBoard db', error);
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', liveRoomId)
+    .select('board, players')
+    .single();
 
-  // 2) Instant push to everyone already in the room
+  if (error || !data) {
+    console.error('Could not publish room update:', error);
+    return;
+  }
+
+  // Apply locally, then notify the other clients immediately.
+  applyLiveRoomState(data);
   if (liveChannel) {
     liveChannel.send({
       type: 'broadcast',
-      event: 'board',
-      payload: { board }
+      event: 'room-state',
+      payload: { state: data }
     });
   }
+}
+
+async function pushLiveBoard() {
+  return publishLivePatch({ board: getLiveBoardSnapshot() });
 }
 
 async function subscribeToRoom(code) {
@@ -818,18 +845,21 @@ async function subscribeToRoom(code) {
     await sb.removeChannel(liveChannel);
     liveChannel = null;
   }
+	
+liveChannel.on('broadcast', { event: 'room-state' }, ({ payload }) => {
+  if (payload?.state) applyLiveRoomState(payload.state);
+});
 
-  liveChannel = sb.channel('room:' + code, {
-    config: { broadcast: { self: false } }  // don't echo back to sender
-  });
+liveChannel.on(
+  'postgres_changes',
+  { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
+  payload => {
+    if (payload.new) applyLiveRoomState(payload.new);
+  }
+);
 
-  // Instant updates from other clients
-  liveChannel.on('broadcast', { event: 'board' }, ({ payload }) => {
-    if (!payload || !payload.board) return;
-    console.log('broadcast board');
-    applyLiveBoard(payload.board, liveRole === 'spymaster');
-  });
 
+	
   // Fallback: DB changes (late join / refresh)
 liveChannel.on(
   'postgres_changes',
