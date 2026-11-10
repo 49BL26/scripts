@@ -730,23 +730,49 @@ if (row.players) {
   const name = getLiveNameOrAlert();
   if (!name) return;
 
-  /* ... after loading data ...
+  // ... after loading data ...
+
+async function joinGame(code) {
+  code = (code || '').trim().toUpperCase();
+  if (!code) return;
+
+  const { data, error } = await sb.from('rooms').select('*').eq('id', code).single();
+  if (error || !data) {
+    alert('Room not found');
+    return;
+  }
+
+  livePlayerId = getOrCreatePlayerId(code);  // same id if rejoining this room
+  liveRoomId = code;
+  liveIsHost = data.host_id === livePlayerId;
+
+  const players = { ...(data.players || {}) };
 
   if (!players[livePlayerId]) {
+    // First time in this browser for this room
     players[livePlayerId] = {
-      name,
+      name: 'Player',
       team: null,
       role: null,
       isHost: false
     };
-  } else {
-    players[livePlayerId] = { ...players[livePlayerId], name };
+    await sb.from('rooms').update({
+      players,
+      updated_at: new Date().toISOString()
+    }).eq('id', code);
   }
 
-  await sb.from('rooms').update({
-    players,
-    updated_at: new Date().toISOString()
-  }).eq('id', code); */
+  const me = players[livePlayerId];
+  liveRole = me.role;
+  liveTeam = me.team;
+
+  applyLiveBoard(data.board, liveRole === 'spymaster');
+  await subscribeToRoom(code);
+  showRoomCode(code);
+  showHostPlayersPanel(liveIsHost);
+  if (liveIsHost) renderPlayersPanel(players);
+  enterLiveMode({ isHost: liveIsHost });
+}
 
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
