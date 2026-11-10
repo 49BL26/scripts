@@ -678,24 +678,29 @@ function applyLiveBoard(board, asSpymaster) {
     alert('Joined ' + code + ' as ' + liveTeam + ' ' + liveRole);
   }
 
-  async function subscribeToRoom(code) {
-    if (liveChannel) {
-      await sb.removeChannel(liveChannel);
-      liveChannel = null;
-    }
-    liveChannel = sb
-      .channel('room:' + code)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
-        payload => {
-          const row = payload.new;
-          if (!row) return;
-          applyLiveBoard(row.board, liveRole === 'spymaster');
-        }
-      )
-      .subscribe();
+async function subscribeToRoom(code) {
+  if (liveChannel) {
+    await sb.removeChannel(liveChannel);
+    liveChannel = null;
   }
+
+  liveChannel = sb
+    .channel('room:' + code)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
+      payload => {
+        console.log('room event', payload.eventType, payload.new && payload.new.id);
+        const row = payload.new;
+        if (!row) return;
+        applyLiveBoard(row.board, liveRole === 'spymaster');
+      }
+    )
+    .subscribe(status => {
+      console.log('realtime status:', status);
+      // should become "SUBSCRIBED"
+    });
+}
 
   async function pushLiveBoard() {
     if (!liveRoomId) return;
