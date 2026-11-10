@@ -542,195 +542,174 @@ body.grid-align-open {
 <script src="wordscanner.js"></script>
 <script src="shareboard.js"></script>
 <script>
-const SUPABASE_URL = 'https://jvwrfdzlydkthksitayo.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_E607zJubcmiDofo4XwKBjQ_6HhIBuQG';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+(function () {
+  const SUPABASE_URL = 'https://jvwrfdzlydkthksitayo.supabase.co';
+  const SUPABASE_ANON = 'sb_publishable_E607zJubcmiDofo4XwKBjQ_6HhIBuQG';
 
-//Hosting scripts
+  // Use a dedicated name so we never clash with the library's window.supabase
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
-/* ---------- LIVE ROOM (Supabase) ---------- */
-let liveRoomId = null;
-let livePlayerId = null;
-let liveRole = null;          // 'spymaster' | 'player'
-let liveTeam = null;          // 'red' | 'blue' | null
-let liveChannel = null;
+  let liveRoomId = null;
+  let livePlayerId = null;
+  let liveRole = null;
+  let liveTeam = null;
+  let liveChannel = null;
 
-function randomCode(len = 4) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-
-function randomPlayerId() {
-  return 'p_' + Math.random().toString(36).slice(2, 10);
-}
-
-/** Snapshot of the current board for the server */
-function getLiveBoardSnapshot() {
-  // Reuse your existing history snapshot if you have one
-  if (typeof getBoardSnapshot === 'function') return getBoardSnapshot();
-
-  // Fallback: basic cell dump
-  const cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
-    text: (c.querySelector('.cell-text') || c).textContent.trim(),
-    colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
-    isPlayFlipped: c.classList.contains('play-active')
-  }));
-  return {
-    isFlipped: !!window.isFlipped,
-    rotation: window.currentRotation || 0,
-    cells
-  };
-}
-
-/** Apply a board snapshot (full colours for spymaster, stripped for player) */
-function applyLiveBoard(board, asSpymaster) {
-  if (!board || !board.cells) return;
-
-  const cells = board.cells.map(c => {
-    if (asSpymaster) return c;
-    // Player view: hide unrevealed colours
-    if (!c.isPlayFlipped) return { ...c, colorClass: 'white' };
-    return c;
-  });
-
-  if (typeof initBoard === 'function') {
-    window.isFlipped = !!board.isFlipped;
-    window.currentRotation = board.rotation || 0;
-    initBoard(cells);
+  function randomCode(len = 4) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
   }
-}
 
-async function hostGame() {
-  const code = randomCode();
-  livePlayerId = randomPlayerId();
-  liveRoomId = code;
-  liveRole = 'spymaster';          // host starts as spymaster by default; change later in UI
-  liveTeam = 'red';
+  function randomPlayerId() {
+    return 'p_' + Math.random().toString(36).slice(2, 10);
+  }
 
-  const board = getLiveBoardSnapshot();
-  const players = {
-    [livePlayerId]: {
-      name: 'Host',
-      team: liveTeam,
-      role: liveRole,
-      isHost: true
+  function getLiveBoardSnapshot() {
+    if (typeof getBoardSnapshot === 'function') return getBoardSnapshot();
+    const cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
+      text: (c.querySelector('.cell-text') || c).textContent.trim(),
+      colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
+      isPlayFlipped: c.classList.contains('play-active')
+    }));
+    return {
+      isFlipped: !!window.isFlipped,
+      rotation: window.currentRotation || 0,
+      cells
+    };
+  }
+
+  function applyLiveBoard(board, asSpymaster) {
+    if (!board || !board.cells) return;
+    const cells = board.cells.map(c => {
+      if (asSpymaster) return c;
+      if (!c.isPlayFlipped) return { ...c, colorClass: 'white' };
+      return c;
+    });
+    if (typeof initBoard === 'function') {
+      window.isFlipped = !!board.isFlipped;
+      window.currentRotation = board.rotation || 0;
+      initBoard(cells);
     }
-  };
-
-  const { error } = await supabase.from('rooms').insert({
-    id: code,
-    host_id: livePlayerId,
-    board,
-    players,
-    settings: { allowChooseRole: false }
-  });
-
-  if (error) {
-    console.error(error);
-    alert('Could not create room: ' + error.message);
-    return;
   }
 
-  await subscribeToRoom(code);
-  alert('Room created: ' + code + '\nShare this code with others.');
-  // TODO: show code in the UI instead of alert
-}
+  async function hostGame() {
+    const code = randomCode();
+    livePlayerId = randomPlayerId();
+    liveRoomId = code;
+    liveRole = 'spymaster';
+    liveTeam = 'red';
 
-async function joinGame(code) {
-  code = (code || '').trim().toUpperCase();
-  if (!code) return;
+    const board = getLiveBoardSnapshot();
+    const players = {
+      [livePlayerId]: { name: 'Host', team: liveTeam, role: liveRole, isHost: true }
+    };
 
-  const { data, error } = await supabase
-    .from('rooms')
-    .select('*')
-    .eq('id', code)
-    .single();
+    const { error } = await sb.from('rooms').insert({
+      id: code,
+      host_id: livePlayerId,
+      board,
+      players,
+      settings: { allowChooseRole: false }
+    });
 
-  if (error || !data) {
-    alert('Room not found');
-    return;
-  }
-
-  livePlayerId = randomPlayerId();
-  liveRoomId = code;
-
-  // Simple random assignment for now
-  const existing = Object.values(data.players || {});
-  const hasRedSpy = existing.some(p => p.team === 'red' && p.role === 'spymaster');
-  const hasBlueSpy = existing.some(p => p.team === 'blue' && p.role === 'spymaster');
-
-  if (!hasRedSpy) {
-    liveTeam = 'red'; liveRole = 'spymaster';
-  } else if (!hasBlueSpy) {
-    liveTeam = 'blue'; liveRole = 'spymaster';
-  } else {
-    liveTeam = existing.filter(p => p.team === 'red').length <=
-               existing.filter(p => p.team === 'blue').length ? 'red' : 'blue';
-    liveRole = 'player';
-  }
-
-  const players = {
-    ...data.players,
-    [livePlayerId]: {
-      name: 'Player',
-      team: liveTeam,
-      role: liveRole,
-      isHost: false
+    if (error) {
+      console.error(error);
+      alert('Could not create room: ' + error.message);
+      return;
     }
-  };
 
-  const { error: upErr } = await supabase
-    .from('rooms')
-    .update({ players, updated_at: new Date().toISOString() })
-    .eq('id', code);
-
-  if (upErr) {
-    console.error(upErr);
-    alert('Could not join: ' + upErr.message);
-    return;
+    await subscribeToRoom(code);
+    alert('Room created: ' + code + '\nShare this code with others.');
   }
 
-  applyLiveBoard(data.board, liveRole === 'spymaster');
-  await subscribeToRoom(code);
-  alert('Joined ' + code + ' as ' + liveTeam + ' ' + liveRole);
-}
+  async function joinGame(code) {
+    code = (code || '').trim().toUpperCase();
+    if (!code) return;
 
-async function subscribeToRoom(code) {
-  if (liveChannel) {
-    await supabase.removeChannel(liveChannel);
-    liveChannel = null;
+    const { data, error } = await sb.from('rooms').select('*').eq('id', code).single();
+    if (error || !data) {
+      alert('Room not found');
+      return;
+    }
+
+    livePlayerId = randomPlayerId();
+    liveRoomId = code;
+
+    const existing = Object.values(data.players || {});
+    const hasRedSpy = existing.some(p => p.team === 'red' && p.role === 'spymaster');
+    const hasBlueSpy = existing.some(p => p.team === 'blue' && p.role === 'spymaster');
+
+    if (!hasRedSpy) {
+      liveTeam = 'red'; liveRole = 'spymaster';
+    } else if (!hasBlueSpy) {
+      liveTeam = 'blue'; liveRole = 'spymaster';
+    } else {
+      liveTeam = existing.filter(p => p.team === 'red').length <=
+                 existing.filter(p => p.team === 'blue').length ? 'red' : 'blue';
+      liveRole = 'player';
+    }
+
+    const players = {
+      ...data.players,
+      [livePlayerId]: { name: 'Player', team: liveTeam, role: liveRole, isHost: false }
+    };
+
+    const { error: upErr } = await sb
+      .from('rooms')
+      .update({ players, updated_at: new Date().toISOString() })
+      .eq('id', code);
+
+    if (upErr) {
+      console.error(upErr);
+      alert('Could not join: ' + upErr.message);
+      return;
+    }
+
+    applyLiveBoard(data.board, liveRole === 'spymaster');
+    await subscribeToRoom(code);
+    alert('Joined ' + code + ' as ' + liveTeam + ' ' + liveRole);
   }
 
-  liveChannel = supabase
-    .channel('room:' + code)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
-      payload => {
-        const row = payload.new;
-        if (!row) return;
-        applyLiveBoard(row.board, liveRole === 'spymaster');
-        // TODO: update player list UI from row.players
-      }
-    )
-    .subscribe();
-}
+  async function subscribeToRoom(code) {
+    if (liveChannel) {
+      await sb.removeChannel(liveChannel);
+      liveChannel = null;
+    }
+    liveChannel = sb
+      .channel('room:' + code)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.' + code },
+        payload => {
+          const row = payload.new;
+          if (!row) return;
+          applyLiveBoard(row.board, liveRole === 'spymaster');
+        }
+      )
+      .subscribe();
+  }
 
-/** Call this whenever the local board changes and you want to push to the room */
-async function pushLiveBoard() {
-  if (!liveRoomId) return;
-  const board = getLiveBoardSnapshot();
-  const { error } = await supabase
-    .from('rooms')
-    .update({ board, updated_at: new Date().toISOString() })
-    .eq('id', liveRoomId);
-  if (error) console.error('pushLiveBoard', error);
-}
+  async function pushLiveBoard() {
+    if (!liveRoomId) return;
+    const board = getLiveBoardSnapshot();
+    const { error } = await sb
+      .from('rooms')
+      .update({ board, updated_at: new Date().toISOString() })
+      .eq('id', liveRoomId);
+    if (error) console.error('pushLiveBoard', error);
+  }
+
+  // Expose for onclick handlers
+  window.hostGame = hostGame;
+  window.joinGame = joinGame;
+  window.pushLiveBoard = pushLiveBoard;
+})();
+</script>
 	
-//End of hosting scripts
-	
+<script>
+
 (function () {
   'use strict';
 
