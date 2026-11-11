@@ -2962,6 +2962,37 @@ function uiPrompt(message, defaultValue = '', opts = {}) {
         ]
     });
 }
+//Username
+
+window.updateLiveNameButton = function () {
+  const input = document.getElementById('live-name-input');
+  const button = document.getElementById('live-name-button');
+  if (input && button) button.textContent = `Name: ${input.value}`;
+};
+
+window.editLiveName = async function () {
+  const input = document.getElementById('live-name-input');
+  if (!input) return;
+
+  const answer = await uiPrompt(
+    'What would you like your username to be?',
+    input.value
+  );
+  if (answer === null) return;
+
+  const name = String(answer).trim().replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+  if (!name) {
+    await uiAlert('Enter a name (1–10 letters or numbers only).');
+    return;
+  }
+
+  input.value = name;
+  updateLiveNameButton();
+
+  // Keep the existing live-room name-saving and uniqueness checks.
+  input.dispatchEvent(new Event('blur'));
+};	
+	
 function uiShowText(message, text, title = 'Data string') {
     return showModal({
         title, message, input:'area', value:text, readonly:true, dismiss:null,
