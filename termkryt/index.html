@@ -958,18 +958,6 @@ if (isNewGuest) {
   players[livePlayerId] = { ...previous, name };
 }
 	
-	
-const isFirstNonHost = !previous &&
-  !Object.values(players).some(player => !player.isHost);
-
-players[livePlayerId] = {
-  ...previous,
-  name,
-  team: previous?.team ?? (isFirstNonHost ? 'blue' : null),
-  role: previous?.role ?? (isFirstNonHost ? 'spymaster' : 'spectator'),
-  isHost: previous?.isHost ?? false
-};
-	
 const { data: updatedRoom, error: updateError } = await sb
   .from('rooms')
   .update({
