@@ -1169,36 +1169,51 @@ if (updateError || !updatedRoom) {
 window.joinGame = joinGame;
 
 function joinRoomFromUrl() {
-  defaultLiveName();
   const params = new URLSearchParams(window.location.search);
   const code = (params.get('room') || '').trim().toUpperCase();
-
   if (!code) return;
 
-  const codeInput = document.getElementById('join-code-input');
-  if (codeInput) codeInput.value = code;
-	
-  const modeSelect = document.getElementById('op1');
-  if (modeSelect) {
-  modeSelect.value = 'host'; // Shows the Host/Join UI; does not grant host privileges.
-  uiSync();
+  // Wait until the default-name code and its data have initialized.
+  window.addEventListener('load', async () => {
+    const modeSelect = document.getElementById('op1');
+    if (modeSelect) {
+      modeSelect.value = 'host';
+      uiSync();
+    }
+
+    const nameInput = document.getElementById('live-name-input');
+
+    // Keep an existing name; generate one only if the field is empty.
+    if (nameInput && !nameInput.value.trim()) {
+      if (typeof prefillLiveName === 'function') {
+        prefillLiveName();
+      }
+
+      // Fallback in case prefillLiveName didn't populate it.
+      if (!nameInput.value.trim() && typeof defaultLiveName === 'function') {
+        nameInput.value = defaultLiveName();
+      }
+    }
+
+    const codeInput = document.getElementById('join-code-input');
+    if (codeInput) codeInput.value = code;
+
+    if (!nameInput?.value.trim()) {
+      console.error('Room link join stopped: no player name was generated.');
+      return;
+    }
+
+    await joinGame(code);
+
+    // Remove the room parameter after attempting to join, so reload won't
+    // automatically attempt to rejoin after the player exits.
+    params.delete('room');
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('room');
+    window.history.replaceState({}, '', cleanUrl);
+  }, { once: true });
 }
 
-  // Remove the room parameter in this browser's address bar.
-  // This prevents a guest who exits and later reloads from automatically rejoining.
-  params.delete('room');
-  const query = params.toString();
-  const cleanUrl =
-    window.location.pathname +
-    (query ? `?${query}` : '') +
-    window.location.hash;
-
-  window.history.replaceState({}, '', cleanUrl);
-
-  joinGame(code);
-}
-
-// The script is at the end of the page, so the controls are already in the DOM.
 joinRoomFromUrl();
 	
 function copyRoomLink() {
