@@ -1096,11 +1096,6 @@ if (!isNewGuest) {
       id !== data.host_id && !player.isHost
     );
 
-  // Keep the existing automatic-assignment code here, unchanged.
-    .filter(([id, player]) =>
-      id !== data.host_id && !player.isHost
-    );
-
   // The first guest may receive the initial spymaster role and blue team.
   if (guests.length === 0) {
     players[livePlayerId] = {
