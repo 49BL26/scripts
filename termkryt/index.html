@@ -1075,13 +1075,28 @@ const isNewGuest = !previous;
 
 if (!isNewGuest) {
   // Rejoining guests keep their existing team and role.
-players[livePlayerId] = {
-  ...previous,
-  name,
-  ...(chosenTeamRole || {})
-};
+  players[livePlayerId] = {
+    ...previous,
+    name,
+    ...(chosenTeamRole || {})
+  };
+} else if (chosenTeamRole) {
+  // Save the team and role chosen in the join prompts.
+  players[livePlayerId] = {
+    name,
+    team: chosenTeamRole.team,
+    role: chosenTeamRole.role,
+    isHost: false,
+    waitingForPair: false,
+    roleChoiceLocked: false
+  };
 } else {
   const guests = Object.entries(players)
+    .filter(([id, player]) =>
+      id !== data.host_id && !player.isHost
+    );
+
+  // Keep the existing automatic-assignment code here, unchanged.
     .filter(([id, player]) =>
       id !== data.host_id && !player.isHost
     );
@@ -1641,7 +1656,26 @@ autoOptions.append(
     team.onchange = apply;
     role.onchange = apply;
 
-    row.append(label, team, role);
+if (liveRoomSettings.allowPlayerChoice) {
+  const lockLabel = document.createElement('label');
+  lockLabel.style.cssText =
+    'display:flex;align-items:center;gap:4px;font-size:12px';
+
+  const lock = document.createElement('input');
+  lock.type = 'checkbox';
+  lock.checked = p.roleChoiceLocked === true;
+  lock.addEventListener('change', () => {
+    setPlayerRoleChoiceLock(id, lock.checked);
+  });
+
+  const lockText = document.createElement('span');
+  lockText.textContent = 'Lock choices';
+
+  lockLabel.append(lock, lockText);
+  row.append(label, team, role, lockLabel);
+} else {
+  row.append(label, team, role);
+}
     el.appendChild(row);
   });
 }
@@ -1695,14 +1729,15 @@ function askChoice(title, message, choices) {
 }
 
 async function askForTeamAndRole(players, playerId) {
-  let team;
-
-  while (!team) {
-    team = await askChoice('Choose your team', 'Which team would you like to join?', [
-      { label: 'Red', value: 'red' },
-      { label: 'Blue', value: 'blue' }
-    ]);
-  }
+const team = await askChoice(
+  'Choose your team',
+  'Which team would you like to join?',
+  [
+    { label: 'Red', value: 'red' },
+    { label: 'Blue', value: 'blue' }
+  ]
+);
+if (!team) return null;
 
   while (true) {
     const role = await askChoice('Choose your role', 'What role would you like?', [
@@ -1737,6 +1772,15 @@ async function setPlayerRole(playerId, team, role) {
 
   const players = { ...data.players };
   const prev = players[playerId] || {};
+if (
+  role === 'spymaster' &&
+  team &&
+  hasTeamSpymaster(players, team, playerId)
+) {
+  await uiAlert(`The ${team} team already has a spymaster.`);
+  renderPlayersPanel(players);
+  return;
+}
   const wasSpymaster = prev.role === 'spymaster';
   const nowSpymaster = role === 'spymaster';
 
