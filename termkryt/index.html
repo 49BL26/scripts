@@ -441,59 +441,20 @@ body.grid-align-open {
     <!-- ===== HOST ===== -->
 	
 <div id="g-host" class="control-group">
-  <input id="live-name-input"
-         type="text"
-         maxlength="10"
-         placeholder="Name (1–10 letters/numbers)"
-         autocomplete="off"
-         spellcheck="false">
-
+  <input id="live-name-input" type="text" maxlength="10" placeholder="Name (1–10 letters/numbers)" autocomplete="off" spellcheck="false">
   <button type="button" onclick="hostGame()">Host Game</button>
-
-  <input id="join-code-input"
-         type="text"
-         maxlength="6"
-         placeholder="Room code"
-         style="text-transform:uppercase">
-
-<button type="button" onclick="shareRoomUrl()">
-  Share Room Link
-</button>
-
-<button type="button" onclick="scanShareQR()">
-  Scan QR to Join
-</button>
-	
-  <button type="button"
-          onclick="joinGame(document.getElementById('join-code-input').value)">
-    Join Game
-  </button>
-
-  <span id="live-room-label" style="
-    display:none; margin-left:8px; padding:6px 12px; border-radius:8px;
-    background:#222; color:#fff; font:14px system-ui; vertical-align:middle;
-  "></span>
-
+  <input id="join-code-input" type="text" maxlength="6" placeholder="Room code" style="text-transform:uppercase">
+  <button type="button" onclick="joinGame(document.getElementById('join-code-input').value)">Join Game</button>
+  <button type="button" onclick="shareRoomUrl()">Share Room Link</button>
+  <button type="button" onclick="scanShareQR()">Scan QR to Join</button>
+  <span id="live-room-label" style=" display:none; margin-left:8px; padding:6px 12px; border-radius:8px;background:#222; color:#fff; font:14px system-ui; vertical-align:middle;"></span>
   <!-- Host only: player list + role controls -->
-  <div id="live-players-panel" style="
-    display:none; margin-top:10px; padding:10px; border:1px solid #444;
-    border-radius:8px; max-width:420px;
-  "></div>
-
-	<div id="live-exit-wrap" style="display:none; gap:8px; align-items:center;">
-  <input
-    id="live-exit-input"
-    type="text"
-    maxlength="6"
-    placeholder="Type EXIT to leave"
-    autocomplete="off"
-    spellcheck="false"
-    style="text-transform:uppercase;"
-  >
+  <div id="live-players-panel" style="display:none; margin-top:10px; padding:10px; border:1px solid #444;border-radius:8px; max-width:420px;"></div>
+  <div id="live-exit-wrap" style="display:none; gap:8px; align-items:center;">
+  <input id="live-exit-input" type="text" maxlength="6" placeholder="Type EXIT to leave" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
   <button type="button" onclick="exitLiveGame()">Exit Game</button>
   </div>
-  <button id="btn-copy-room-link" type="button" onclick="copyRoomLink()" style="display:none;">Copy Room Link</button>
-	
+  <button id="btn-copy-room-link" type="button" onclick="copyRoomLink()" style="display:none;">Copy Room Link</button>	
 </div>
 
     <!-- ===== SPYMASTER ===== -->
@@ -723,6 +684,18 @@ body.grid-align-open {
   let liveIsHost = false;
   let liveHasExitedRoom = false;
 
+let liveRoomSettings = {
+  autoTeams: true,
+  autoRoles: true
+};
+
+function getAutoAssignmentSettings(settings = {}) {
+  return {
+    autoTeams: settings.autoTeams !== false,
+    autoRoles: settings.autoRoles !== false
+  };
+}
+
   const EXIT_CODE = 'EXIT';
 
 function renderLiveRoster(players = {}) {
@@ -855,13 +828,16 @@ async function hostGame() {
     }
   };
 
-  const { error } = await sb.from('rooms').insert({
-    id: code,
-    host_id: livePlayerId,
-    board,
-    players,
-    settings: {}
-  });
+const settings = getAutoAssignmentSettings();
+liveRoomSettings = settings;
+
+const { error } = await sb.from('rooms').insert({
+  id: code,
+  host_id: livePlayerId,
+  board,
+  players,
+  settings
+});
   if (error) {
     alert('Could not create room: ' + error.message);
     return;
@@ -1053,6 +1029,7 @@ async function joinGame(code) {
   livePlayerId = getOrCreatePlayerId(code);  // same id if rejoining this room
   liveRoomId = code;
   liveIsHost = data.host_id === livePlayerId;
+  liveRoomSettings = getAutoAssignmentSettings(data.settings);
 
 const players = { ...(data.players || {}) };
 const name = makeUniqueLiveName(getLiveNameOrAlert(), players, livePlayerId);
@@ -1065,62 +1042,65 @@ if (input) input.value = name;
 const previous = players[livePlayerId];
 const isNewGuest = !previous;
 
-// Rejoining should retain the existing assignment, not trigger another pairing.
-if (isNewGuest) {
-  const guestCount = Object.entries(players)
+if (!isNewGuest) {
+  // Rejoining guests keep their existing team and role.
+  players[livePlayerId] = { ...previous, name };
+} else {
+  const guests = Object.entries(players)
     .filter(([id, player]) =>
       id !== data.host_id && !player.isHost
-    ).length;
+    );
 
-  if (guestCount === 0) {
-    // First guest joins the host as a spymaster.
+  // The first guest may receive the initial spymaster role and blue team.
+  if (guests.length === 0) {
     players[livePlayerId] = {
       name,
-      team: 'blue',
-      role: 'spymaster',
-      isHost: false
+      role: liveRoomSettings.autoRoles ? 'spymaster' : 'spectator',
+      team: liveRoomSettings.autoTeams ? 'blue' : null,
+      isHost: false,
+      waitingForPair: false
     };
   } else {
-    const waitingEntry = Object.entries(players).find(
-      ([id, player]) =>
-        id !== data.host_id &&
-        id !== livePlayerId &&
-        !player.isHost &&
-        player.waitingForPair === true
+    const waitingEntry = guests.find(
+      ([, player]) => player.waitingForPair === true
     );
 
     if (waitingEntry) {
-      // Pair the waiting guest with this new guest.
       const [waitingId, waitingPlayer] = waitingEntry;
 
+      // Team assignment and role assignment are independent.
       players[waitingId] = {
         ...waitingPlayer,
-        role: 'player',
-        team: 'red',
+        ...(liveRoomSettings.autoTeams
+          ? { team: 'red' }
+          : {}),
+        ...(liveRoomSettings.autoRoles
+          ? { role: 'player' }
+          : {}),
         waitingForPair: false
       };
 
       players[livePlayerId] = {
         name,
-        role: 'player',
-        team: 'blue',
+        ...(liveRoomSettings.autoTeams
+          ? { team: 'blue' }
+          : { team: null }),
+        role: liveRoomSettings.autoRoles ? 'player' : 'spectator',
         isHost: false,
         waitingForPair: false
       };
     } else {
-      // No waiting partner yet.
+      // Hold this guest for the next pair, if automation is enabled.
       players[livePlayerId] = {
         name,
-        role: 'spectator',
         team: null,
+        role: 'spectator',
         isHost: false,
-        waitingForPair: true
+        waitingForPair:
+          liveRoomSettings.autoTeams || liveRoomSettings.autoRoles
       };
     }
   }
-} else {
-  // Existing player reconnecting: preserve their assigned role and team.
-  players[livePlayerId] = { ...previous, name };
 }
 	
 const { data: updatedRoom, error: updateError } = await sb
@@ -1581,6 +1561,36 @@ function renderPlayersPanel(players) {
     team.onchange = apply;
     role.onchange = apply;
 
+const autoOptions = document.createElement('div');
+autoOptions.style.cssText =
+  'display:grid;gap:6px;margin:8px 0 12px;padding:8px;border:1px solid #ddd;border-radius:8px';
+
+const makeAutoCheckbox = (id, labelText, settingKey) => {
+  const label = document.createElement('label');
+  label.style.cssText = 'display:flex;gap:8px;align-items:center;font-weight:500';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = id;
+  checkbox.checked = liveRoomSettings[settingKey] !== false;
+  checkbox.addEventListener('change', () => {
+    setAutoAssignmentSetting(settingKey, checkbox.checked);
+  });
+
+  const text = document.createElement('span');
+  text.textContent = labelText;
+
+  label.append(checkbox, text);
+  return label;
+};
+
+autoOptions.append(
+  makeAutoCheckbox('auto-assign-teams', 'Automatically assign red/blue teams', 'autoTeams'),
+  makeAutoCheckbox('auto-assign-roles', 'Automatically assign spymaster/player roles', 'autoRoles')
+);
+
+el.appendChild(autoOptions);
+	  
     row.append(label, team, role);
     el.appendChild(row);
   });
@@ -1629,6 +1639,53 @@ async function setPlayerRole(playerId, team, role) {
   if (typeof pushLiveBoard === 'function') pushLiveBoard();
 }
 
+async function setAutoAssignmentSetting(settingKey, enabled) {
+  if (!liveIsHost || !liveRoomId) return;
+  if (!['autoTeams', 'autoRoles'].includes(settingKey)) return;
+
+  const { data: room, error: readError } = await sb
+    .from('rooms')
+    .select('settings, players, board')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (readError || !room) {
+    console.error('Could not load room settings:', readError);
+    return;
+  }
+
+  const settings = getAutoAssignmentSettings(room.settings);
+  settings[settingKey] = enabled;
+
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({
+      settings,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('settings, players, board')
+    .single();
+
+  if (updateError || !updatedRoom) {
+    console.error('Could not save auto-assignment setting:', updateError);
+    alert('Could not save that setting.');
+    renderPlayersPanel(room.players || {});
+    return;
+  }
+
+  liveRoomSettings = getAutoAssignmentSettings(updatedRoom.settings);
+  renderPlayersPanel(updatedRoom.players || {});
+
+  if (liveChannel) {
+    await liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
+}
+	
 function updateLiveAccessUI() {
   const roomJoined = !!liveRoomId;
   const isGuest = roomJoined && !liveIsHost && !liveHasExitedRoom;
@@ -1874,6 +1931,14 @@ async function saveLivePlayerName() {
 
   applyLiveRoomState(updatedRoom);
 
+if (state.settings) {
+  liveRoomSettings = getAutoAssignmentSettings(state.settings);
+}
+
+if (liveIsHost && state.players) {
+  renderPlayersPanel(state.players);
+}
+	
   if (liveChannel) {
     liveChannel.send({
       type: 'broadcast',
