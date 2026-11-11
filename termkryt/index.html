@@ -737,8 +737,6 @@ function renderLiveRoster(players = {}) {
 
   // Exclude the host, then group guests by team.
   const guests = Object.entries(players)
-    .filter(([id, player]) =>
-    )
     .map(([, player]) => player);
 
   const red = guests
