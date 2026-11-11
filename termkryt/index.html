@@ -738,7 +738,6 @@ function renderLiveRoster(players = {}) {
   // Exclude the host, then group guests by team.
   const guests = Object.entries(players)
     .filter(([id, player]) =>
-      id !== livePlayerId &&
       !player.isHost &&
       player.role !== 'host'
     )
@@ -1331,6 +1330,28 @@ async function setPlayerRole(playerId, team, role) {
 
   renderPlayersPanel(players);
   pushLiveBoard(); // or rely on update + realtime/poll
+
+const { error: updateError } = await sb
+  .from('rooms')
+  .update({
+    players,
+    board,
+    updated_at: new Date().toISOString()
+  })
+  .eq('id', liveRoomId);
+
+if (updateError) {
+  console.error('Could not update player role:', updateError);
+  return;
+}
+
+if (liveChannel) {
+  await liveChannel.send({
+    type: 'broadcast',
+    event: 'room-state',
+    payload: { state: { players, board } }
+  });
+}
 }
 
 function sanitizeLiveName(raw) {
