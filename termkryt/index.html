@@ -456,6 +456,14 @@ body.grid-align-open {
          placeholder="Room code"
          style="text-transform:uppercase">
 
+<button type="button" onclick="shareRoomUrl()">
+  Share Room Link
+</button>
+
+<button type="button" onclick="scanShareQR()">
+  Scan QR to Join
+</button>
+	
   <button type="button"
           onclick="joinGame(document.getElementById('join-code-input').value)">
     Join Game
@@ -1168,6 +1176,12 @@ function joinRoomFromUrl() {
 
   const codeInput = document.getElementById('join-code-input');
   if (codeInput) codeInput.value = code;
+	
+  const modeSelect = document.getElementById('op1');
+  if (modeSelect) {
+  modeSelect.value = 'host'; // Shows the Host/Join UI; does not grant host privileges.
+  uiSync();
+}
 
   // Remove the room parameter in this browser's address bar.
   // This prevents a guest who exits and later reloads from automatically rejoining.
@@ -1204,6 +1218,74 @@ function copyRoomLink() {
 }
 
 window.copyRoomLink = copyRoomLink;
+
+function shareRoomUrl() {
+  if (!liveRoomId) {
+    alert('Host a room first.');
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', liveRoomId);
+  url.hash = ''; // Don't include a board-share token in the room invite.
+
+  const overlay = document.getElementById('modal-overlay');
+  const qrEl = document.getElementById('modal-qr');
+
+  if (!overlay || !qrEl || typeof QRCode === 'undefined') {
+    // Fallback if the modal or QR library isn't available.
+    prompt('Copy this room link:', url.toString());
+    return;
+  }
+
+  qrEl.innerHTML = '';
+  qrEl.style.display = 'flex';
+
+  new QRCode(qrEl, {
+    text: url.toString(),
+    width: 256,
+    height: 256,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+
+  overlay.classList.add('fullscreen');
+
+  showModal({
+    title: 'Share Room Link',
+    message: 'Scan the QR code or copy the link to join this room.',
+    dismiss: null,
+    buttons: [
+      {
+        label: 'Copy Link',
+        keepOpen: true,
+        action: btn => {
+          const flashCopied = () => {
+            const oldText = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = oldText; }, 1200);
+          };
+
+          if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(url.toString())
+              .then(flashCopied)
+              .catch(() => prompt('Copy this room link:', url.toString()));
+          } else {
+            prompt('Copy this room link:', url.toString());
+          }
+        }
+      },
+      { label: 'Close', value: null, primary: true }
+    ]
+  }).then(() => {
+    overlay.classList.remove('fullscreen');
+    qrEl.style.display = 'none';
+    qrEl.innerHTML = '';
+  });
+}
+
+window.shareRoomUrl = shareRoomUrl;
 	
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
