@@ -301,13 +301,37 @@ function scanShareQR() {
         // Accept full URLs or raw tokens
         let raw = code.data.trim();
 
-        // If it's a full URL, pull the hash part
-        try {
-            const u = new URL(raw);
-            if (u.hash) raw = decodeURIComponent(u.hash.slice(1));
-        } catch (_) {
-            // not a URL – treat as raw token
+// Room invite URLs use ?room=CODE.
+// Board-share URLs continue to use the URL hash.
+try {
+    const u = new URL(raw);
+    const roomCode = (u.searchParams.get('room') || '').trim().toUpperCase();
+
+    if (roomCode) {
+        stop();
+
+        if (typeof window.joinGame === 'function') {
+            const modeSelect = document.getElementById('op1');
+            if (modeSelect) {
+                modeSelect.value = 'host';
+                uiSync();
+            }
+
+            const codeInput = document.getElementById('join-code-input');
+            if (codeInput) codeInput.value = roomCode;
+
+            window.joinGame(roomCode);
+        } else {
+            alert('Room joining is not available on this page.');
         }
+
+        return;
+    }
+
+    if (u.hash) raw = decodeURIComponent(u.hash.slice(1));
+} catch (_) {
+    // Not a URL; keep treating it as a board token as before.
+}
 
         // Try to parse with the existing helpers
         const parsed = (typeof parseAnyFormat === 'function')
