@@ -432,7 +432,7 @@ body.grid-align-open {
         <select id="op1" onchange="uiSync()">
             <option value="player">Player</option>
             <option value="spymaster">Spymaster</option>
-            <option value="host">Host</option>
+            <option value="host">Online Play</option>
             <option value="setup">Setup</option>
             <option value="advanced">Advanced Options</option>
         </select>
@@ -443,8 +443,7 @@ body.grid-align-open {
 <div id="g-host" class="control-group">
   <input id="live-name-input" type="text" maxlength="10" placeholder="Name (1–10 letters/numbers)" autocomplete="off" spellcheck="false">
   <button type="button" onclick="hostGame()">Host Game</button>
-  <input id="join-code-input" type="text" maxlength="6" placeholder="Room code" style="text-transform:uppercase">
-  <button type="button" onclick="joinGame(document.getElementById('join-code-input').value)">Join Game</button>
+  <button onclick="joinGame(prompt('Room code?'))">Join Game</button>
   <button type="button" onclick="shareRoomUrl()">Share Room Link</button>
   <button type="button" onclick="scanShareQR()">Scan QR to Join</button>
   <span id="live-room-label" style=" display:none; margin-left:8px; padding:6px 12px; border-radius:8px;background:#222; color:#fff; font:14px system-ui; vertical-align:middle;"></span>
@@ -454,7 +453,6 @@ body.grid-align-open {
   <input id="live-exit-input" type="text" maxlength="6" placeholder="Type EXIT to leave" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
   <button type="button" onclick="exitLiveGame()">Exit Game</button>
   </div>
-  <button id="btn-copy-room-link" type="button" onclick="copyRoomLink()" style="display:none;">Copy Room Link</button>	
 </div>
 
     <!-- ===== SPYMASTER ===== -->
