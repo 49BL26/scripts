@@ -864,9 +864,14 @@ const { error } = await sb.from('rooms').insert({
   await subscribeToRoom(code);
   showRoomCode(code);
   showHostPlayersPanel(true);
-  renderPlayersPanel(players);
+
+  // Local state must match what you stored in the room
+  liveRole = players[livePlayerId].role;   // 'spymaster'
+  liveTeam = players[livePlayerId].team;   // 'red'
+
+  applyLiveRoomState({ board, players, settings });
   enterLiveMode({ isHost: true });
-  updateLiveAccessUI();
+  //startLivePoll();   // keep as safety net
 }	
 
 window.hostGame = hostGame;
@@ -1449,12 +1454,12 @@ function startLivePoll() {
     if (!liveRoomId) return;
     const { data, error } = await sb
       .from('rooms')
-      .select('board')
+      .select('board, players, settings')
       .eq('id', liveRoomId)
       .single();
-    if (error || !data || !data.board) return;
-    applyLiveBoard(data.board, liveRole === 'spymaster');
-  }, 1000); // every 1 second
+    if (error || !data) return;
+    applyLiveRoomState(data);
+  }, 1500);
 }
 
 function stopLivePoll() {
@@ -1467,7 +1472,11 @@ function stopLivePoll() {
 async function setPlayerRole(playerId, team, role) {
   if (!liveIsHost || !liveRoomId) return;
 
-  const { data } = await sb.from('rooms').select('players, board').eq('id', liveRoomId).single();
+  const { data } = await sb
+    .from('rooms')
+    .select('players, board')
+    .eq('id', liveRoomId)
+    .single();
   if (!data) return;
 
   const players = { ...data.players };
@@ -1482,48 +1491,36 @@ async function setPlayerRole(playerId, team, role) {
   };
 
   let board = data.board;
-  // Spymaster → player/spectator: new game so they don't keep the key
   if (wasSpymaster && !nowSpymaster) {
     if (typeof randomizeBoard === 'function') randomizeBoard();
     board = getLiveBoardSnapshot();
-    applyLiveBoard(board, liveRole === 'spymaster');
   }
 
-  await sb.from('rooms').update({
-    players,
-    board,
-    updated_at: new Date().toISOString()
-  }).eq('id', liveRoomId);
+  const { data: updated, error } = await sb
+    .from('rooms')
+    .update({
+      players,
+      board,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('board, players, settings')
+    .single();
 
-  if (playerId === livePlayerId) {
-    liveTeam = team;
-    liveRole = role;
+  if (error || !updated) {
+    console.error(error);
+    return;
   }
 
-  renderPlayersPanel(players);
-  pushLiveBoard(); // or rely on update + realtime/poll
+  applyLiveRoomState(updated);
 
-const { error: updateError } = await sb
-  .from('rooms')
-  .update({
-    players,
-    board,
-    updated_at: new Date().toISOString()
-  })
-  .eq('id', liveRoomId);
-
-if (updateError) {
-  console.error('Could not update player role:', updateError);
-  return;
-}
-
-if (liveChannel) {
-  await liveChannel.send({
-    type: 'broadcast',
-    event: 'room-state',
-    payload: { state: { players, board } }
-  });
-}
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updated }
+    });
+  }
 }
 
 function sanitizeLiveName(raw) {
@@ -2215,6 +2212,18 @@ async function saveOwnRoleChoice() {
     });
   }
 }
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !liveRoomId) return;
+
+  const { data, error } = await sb
+    .from('rooms')
+    .select('board, players, settings')
+    .eq('id', liveRoomId)
+    .single();
+  if (error || !data) return;
+  applyLiveRoomState(data);
+});
 	
 function randomPlayerId() {
   return 'p_' + Math.random().toString(36).slice(2, 10);
