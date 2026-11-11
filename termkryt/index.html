@@ -215,6 +215,72 @@
     flex-wrap: wrap;
 }
 
+/* ---------- ROSTER ---------- */
+	
+#live-roster {
+  margin: 12px auto 24px;
+  padding: 12px;
+}
+#live-roster h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.roster-teams {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.roster-team,
+.roster-spectators {
+  border: 2px solid;
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 0;
+}
+.roster-team h4,
+.roster-spectators h4 {
+  margin: 0 0 5px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.roster-team ul,
+.roster-spectators ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.roster-team li,
+.roster-spectators li {
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+.roster-red {
+  background: #fff5f5;
+  border-color: #ef5350;
+  color: #b71c1c;
+}
+.roster-blue {
+  background: #f3f9ff;
+  border-color: #42a5f5;
+  color: #0d47a1;
+}
+.roster-spectators {
+  margin-top: 8px;
+  background: #DFD1A5;
+  border-color: #c9b98d;
+  color: #5e5130;
+}
+.roster-empty {
+  list-style: none;
+  margin-left: -18px !important;
+  color: #777;
+  font-style: italic;
+}
+@media (max-width: 420px) {
+  .roster-teams {
+    grid-template-columns: 1fr;
+  }
+}
+	
 /* Full-screen modal (used by share/QR dialogs) */
 .modal-overlay.fullscreen .modal {
 	position: absolute;
@@ -590,6 +656,25 @@ body.grid-align-open {
     </div>
 </div>
 
+<!-- ================= ROSTER ================= -->
+<div class="panel" id="live-roster" style="display:none;" aria-live="polite">
+  <h3>Players</h3>
+  <div class="roster-teams">
+    <section class="roster-team roster-red">
+      <h4>Red Team</h4>
+      <ul id="roster-red"></ul>
+    </section>
+    <section class="roster-team roster-blue">
+      <h4>Blue Team</h4>
+      <ul id="roster-blue"></ul>
+    </section>
+  </div>
+  <section class="roster-spectators">
+    <h4>Spectators</h4>
+    <ul id="roster-spectators"></ul>
+  </section>
+</div>
+	
 <!-- ================= MODAL ================= -->
 <div class="modal-overlay" id="modal-overlay">
     <div class="modal" role="dialog" aria-modal="true">
@@ -631,6 +716,80 @@ body.grid-align-open {
 
   const EXIT_CODE = 'EXIT';
 
+function renderLiveRoster(players = {}) {
+  const roster = document.getElementById('live-roster');
+  const redList = document.getElementById('roster-red');
+  const blueList = document.getElementById('roster-blue');
+  const spectatorList = document.getElementById('roster-spectators');
+
+  if (!roster || !redList || !blueList || !spectatorList) return;
+
+  // Do not show the roster outside a live room or to the host.
+  if (!liveRoomId || liveIsHost) {
+    roster.style.display = 'none';
+    return;
+  }
+
+  roster.style.display = 'block';
+  redList.replaceChildren();
+  blueList.replaceChildren();
+  spectatorList.replaceChildren();
+
+  // Exclude the host, then group guests by team.
+  const guests = Object.entries(players)
+    .filter(([id, player]) =>
+      id !== livePlayerId &&
+      !player.isHost &&
+      player.role !== 'host'
+    )
+    .map(([, player]) => player);
+
+  const red = guests
+    .filter(player => player.team === 'red')
+    .sort((a, b) =>
+      Number(b.role === 'spymaster') - Number(a.role === 'spymaster') ||
+      (a.name || '').localeCompare(b.name || '')
+    );
+
+  const blue = guests
+    .filter(player => player.team === 'blue')
+    .sort((a, b) =>
+      Number(b.role === 'spymaster') - Number(a.role === 'spymaster') ||
+      (a.name || '').localeCompare(b.name || '')
+    );
+
+  const spectators = guests
+    .filter(player => player.role === 'spectator' || !['red', 'blue'].includes(player.team))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const addNames = (list, people) => {
+    if (!people.length) {
+      const empty = document.createElement('li');
+      empty.className = 'roster-empty';
+      empty.textContent = 'No one yet';
+      list.appendChild(empty);
+      return;
+    }
+
+    for (const person of people) {
+      const item = document.createElement('li');
+      item.textContent = person.name || 'Player';
+
+      if (person.role === 'spymaster') {
+        const boldName = document.createElement('strong');
+        boldName.textContent = item.textContent;
+        item.replaceChildren(boldName);
+      }
+
+      list.appendChild(item);
+    }
+  };
+
+  addNames(redList, red);
+  addNames(blueList, blue);
+  addNames(spectatorList, spectators);
+}
+	
 function enforcePlayerBoardLock() {
   const locked = !!liveRoomId && !liveIsHost && liveRole !== 'spymaster' && !liveHasExitedRoom;
   document.getElementById('board')?.classList.toggle('locked-for-player', locked);
@@ -859,6 +1018,7 @@ function applyLiveRoomState(state) {
   const me = state.players?.[livePlayerId];
   liveRole = me?.role ?? null;
   liveTeam = me?.team ?? null;
+  renderLiveRoster(state.players || {});
   syncLiveSpymasterControls();
 
   if (liveIsHost && state.players) {
@@ -997,6 +1157,7 @@ if (updateError || !updatedRoom) {
   showHostPlayersPanel(liveIsHost);
   if (liveIsHost) renderPlayersPanel(players);
   enterLiveMode({ isHost: liveIsHost });
+  renderLiveRoster(updatedRoom.players || players);
   updateLiveAccessUI();
 }
 
