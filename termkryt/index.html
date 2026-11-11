@@ -484,6 +484,7 @@ body.grid-align-open {
   >
   <button type="button" onclick="exitLiveGame()">Exit Game</button>
   </div>
+  <button id="btn-copy-room-link" type="button" onclick="copyRoomLink()" style="display:none;">Copy Room Link</button>
 	
 </div>
 
@@ -921,6 +922,7 @@ async function exitLiveGame() {
   livePlayerId = getOrCreatePlayerId('local'); // or leave as-is if you want per-room persistence
   document.getElementById('live-room-label').style.display = 'none';
   document.getElementById('live-room-label').textContent = '';
+  document.getElementById('btn-copy-room-link')?.style.setProperty('display', 'none');
 
   if (input) input.value = '';
 
@@ -1157,12 +1159,62 @@ if (updateError || !updatedRoom) {
 }
 
 window.joinGame = joinGame;
+
+function joinRoomFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const code = (params.get('room') || '').trim().toUpperCase();
+
+  if (!code) return;
+
+  const codeInput = document.getElementById('join-code-input');
+  if (codeInput) codeInput.value = code;
+
+  // Remove the room parameter in this browser's address bar.
+  // This prevents a guest who exits and later reloads from automatically rejoining.
+  params.delete('room');
+  const query = params.toString();
+  const cleanUrl =
+    window.location.pathname +
+    (query ? `?${query}` : '') +
+    window.location.hash;
+
+  window.history.replaceState({}, '', cleanUrl);
+
+  joinGame(code);
+}
+
+// The script is at the end of the page, so the controls are already in the DOM.
+joinRoomFromUrl();
+	
+function copyRoomLink() {
+  if (!liveRoomId) {
+    alert('Host or join a room first.');
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', liveRoomId);
+
+  navigator.clipboard.writeText(url.toString())
+    .then(() => alert('Room link copied.'))
+    .catch(error => {
+      console.error('Could not copy room link:', error);
+      prompt('Copy this room link:', url.toString());
+    });
+}
+
+window.copyRoomLink = copyRoomLink;
 	
 function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
+  const copyButton = document.getElementById('btn-copy-room-link');
+
   if (!el || !code) return;
+
   el.textContent = 'Room: ' + code;
   el.style.display = 'inline-block';
+
+  if (copyButton) copyButton.style.display = 'inline-block';
 }
 	
 function canPublishLiveBoard() {
