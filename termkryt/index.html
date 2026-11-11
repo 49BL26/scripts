@@ -441,7 +441,10 @@ body.grid-align-open {
     <!-- ===== HOST ===== -->
 	
 <div id="g-host" class="control-group">
-  <input id="live-name-input" type="text" maxlength="10" placeholder="Name (1–10 letters/numbers)" autocomplete="off" spellcheck="false">
+	
+  <input id="live-name-input" type="text" maxlength="10" autocomplete="off" spellcheck="false" style="display:none;">
+  <button id="live-name-button" type="button" onclick="editLiveName()">Name: …</button>
+	
   <button type="button" onclick="hostGame()">Host Game</button>
   <button onclick="joinGame(prompt('Room code?'))">Join Game</button>
   <button type="button" onclick="shareRoomUrl()">Share Room Link</button>
@@ -1858,8 +1861,9 @@ function defaultLiveName() {
 
 function prefillLiveName() {
   const input = document.getElementById('live-name-input');
-  if (!input || input.value.trim()) return;
-  input.value = defaultLiveName();
+  if (!input) return;
+  if (!input.value.trim()) input.value = defaultLiveName();
+  updateLiveNameButton();
 }
 
 // Run once when DOM is ready enough
