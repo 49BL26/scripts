@@ -1888,6 +1888,7 @@ if (nameInput) {
   setTimeout(() => {
     if (!nameInput.value.trim()) {
       nameInput.value = defaultLiveName();
+	  updateLiveNameButton()
     }
   }, 0);
 }
