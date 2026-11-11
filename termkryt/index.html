@@ -450,6 +450,22 @@ body.grid-align-open {
   <button type="button" onclick="shareRoomUrl()">Share Room Link</button>
   <button type="button" onclick="scanShareQR()">Scan QR to Join</button>
   <span id="live-room-label" style=" display:none; margin-left:8px; padding:6px 12px; border-radius:8px;background:#222; color:#fff; font:14px system-ui; vertical-align:middle;"></span>
+
+	<div id="live-self-role-controls" style="display:none; align-items:center; gap:6px;">
+  <label for="live-self-team">Team:</label>
+  <select id="live-self-team">
+    <option value="red">Red</option>
+    <option value="blue">Blue</option>
+  </select>
+
+  <label for="live-self-role">Role:</label>
+  <select id="live-self-role">
+    <option value="spymaster">Spymaster</option>
+    <option value="player">Player</option>
+    <option value="spectator">Spectator</option>
+  </select>
+</div>	
+	
   <!-- Host only: player list + role controls -->
   <div id="live-players-panel" style="display:none; margin-top:10px; padding:10px; border:1px solid #444;border-radius:8px; max-width:420px;"></div>
   <div id="live-exit-wrap" style="display:none; gap:8px; align-items:center;">
@@ -693,7 +709,8 @@ let liveRoomSettings = {
 function getAutoAssignmentSettings(settings = {}) {
   return {
     autoTeams: settings.autoTeams !== false,
-    autoRoles: settings.autoRoles !== false
+    autoRoles: settings.autoRoles !== false,
+    allowPlayerChoice: settings.allowPlayerChoice === true
   };
 }
 
@@ -1011,6 +1028,7 @@ function applyLiveRoomState(state) {
   if (state.board) {
     applyLiveBoard(state.board, liveRole === 'spymaster');
   }
+renderSelfRoleControls(state.players || {})
 updateLiveAccessUI();
 }
 
@@ -1041,11 +1059,27 @@ if (input) input.value = name;
 
 
 const previous = players[livePlayerId];
+
+let chosenTeamRole = null;
+
+if (
+  liveRoomSettings.allowPlayerChoice &&
+  !liveIsHost &&
+  !previous?.roleChoiceLocked
+) {
+  chosenTeamRole = await askForTeamAndRole(players, livePlayerId);
+  if (!chosenTeamRole) return;
+}
+	
 const isNewGuest = !previous;
 
 if (!isNewGuest) {
   // Rejoining guests keep their existing team and role.
-  players[livePlayerId] = { ...previous, name };
+players[livePlayerId] = {
+  ...previous,
+  name,
+  ...(chosenTeamRole || {})
+};
 } else {
   const guests = Object.entries(players)
     .filter(([id, player]) =>
@@ -1552,10 +1586,23 @@ function renderPlayersPanel(players) {
     return label;
   };
 
-  autoOptions.append(
-    makeAutoCheckbox('auto-assign-teams', 'Automatically assign red/blue teams', 'autoTeams'),
-    makeAutoCheckbox('auto-assign-roles', 'Automatically assign spymaster/player roles', 'autoRoles')
-  );
+autoOptions.append(
+  makeAutoCheckbox(
+    'player-choice-enabled',
+    'Let players choose their own team and role',
+    'allowPlayerChoice'
+  ),
+  makeAutoCheckbox(
+    'auto-assign-teams',
+    'Automatically assign red/blue teams',
+    'autoTeams'
+  ),
+  makeAutoCheckbox(
+    'auto-assign-roles',
+    'Automatically assign spymaster/player roles',
+    'autoRoles'
+  )
+);
 
   el.appendChild(autoOptions);
 
@@ -1599,6 +1646,85 @@ function renderPlayersPanel(players) {
   });
 }
 
+function renderSelfRoleControls(players) {
+  const panel = document.getElementById('live-self-role-controls');
+  const teamSelect = document.getElementById('live-self-team');
+  const roleSelect = document.getElementById('live-self-role');
+  const me = players?.[livePlayerId];
+
+  if (!panel || !teamSelect || !roleSelect) return;
+
+  const canChoose =
+    !!liveRoomId &&
+    !liveIsHost &&
+    liveRoomSettings.allowPlayerChoice &&
+    !!me;
+
+  panel.style.display = canChoose ? 'flex' : 'none';
+  if (!canChoose) return;
+
+  teamSelect.value = me.team || 'red';
+  roleSelect.value = me.role || 'player';
+
+  const locked = me.roleChoiceLocked === true;
+  teamSelect.disabled = locked;
+  roleSelect.disabled = locked;
+}
+
+
+	
+function hasTeamSpymaster(players, team, exceptPlayerId) {
+  return Object.entries(players || {}).some(([id, player]) =>
+    id !== exceptPlayerId &&
+    player.team === team &&
+    player.role === 'spymaster'
+  );
+}
+
+function askChoice(title, message, choices) {
+  return showModal({
+    title,
+    message,
+    dismiss: null,
+    buttons: choices.map(({ label, value, primary }) => ({
+      label,
+      value,
+      primary: !!primary
+    }))
+  });
+}
+
+async function askForTeamAndRole(players, playerId) {
+  let team;
+
+  while (!team) {
+    team = await askChoice('Choose your team', 'Which team would you like to join?', [
+      { label: 'Red', value: 'red' },
+      { label: 'Blue', value: 'blue' }
+    ]);
+  }
+
+  while (true) {
+    const role = await askChoice('Choose your role', 'What role would you like?', [
+      { label: 'Spymaster', value: 'spymaster' },
+      { label: 'Player', value: 'player', primary: true },
+      { label: 'Spectator', value: 'spectator' }
+    ]);
+
+    if (!role) return null;
+
+    if (role === 'spymaster' && hasTeamSpymaster(players, team, playerId)) {
+      await uiAlert(
+        `The ${team} team already has a spymaster. Choose Player or Spectator, or cancel and try another team.`,
+        'Spymaster unavailable'
+      );
+      continue;
+    }
+
+    return { team, role };
+  }
+}
+	
 async function setPlayerRole(playerId, team, role) {
   if (!liveIsHost || !liveRoomId) return;
 
@@ -1642,9 +1768,51 @@ async function setPlayerRole(playerId, team, role) {
   if (typeof pushLiveBoard === 'function') pushLiveBoard();
 }
 
+async function setPlayerRoleChoiceLock(playerId, locked) {
+  if (!liveIsHost || !liveRoomId) return;
+
+  const { data: room, error } = await sb
+    .from('rooms')
+    .select('players, board, settings')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (error || !room) return;
+
+  const players = { ...(room.players || {}) };
+  if (!players[playerId]) return;
+
+  players[playerId] = {
+    ...players[playerId],
+    roleChoiceLocked: locked
+  };
+
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({ players, updated_at: new Date().toISOString() })
+    .eq('id', liveRoomId)
+    .select('players, board, settings')
+    .single();
+
+  if (updateError || !updatedRoom) {
+    console.error('Could not save role-choice lock:', updateError);
+    return;
+  }
+
+  applyLiveRoomState(updatedRoom);
+
+  if (liveChannel) {
+    await liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
+}
+	
 async function setAutoAssignmentSetting(settingKey, enabled) {
   if (!liveIsHost || !liveRoomId) return;
-  if (!['autoTeams', 'autoRoles'].includes(settingKey)) return;
+  if (!['autoTeams', 'autoRoles', 'allowPlayerChoice'].includes(settingKey)) return;
 
   const { data: room, error: readError } = await sb
     .from('rooms')
@@ -1953,6 +2121,61 @@ if (liveIsHost && state.players) {
   }
 }
 
+document.getElementById('live-self-team')?.addEventListener('change', saveOwnRoleChoice);
+document.getElementById('live-self-role')?.addEventListener('change', saveOwnRoleChoice);
+
+async function saveOwnRoleChoice() {
+  if (!liveRoomId || liveIsHost || !liveRoomSettings.allowPlayerChoice) return;
+
+  const { data: room, error } = await sb
+    .from('rooms')
+    .select('players, board')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (error || !room) return;
+
+  const players = { ...(room.players || {}) };
+  const me = players[livePlayerId];
+  if (!me || me.roleChoiceLocked) {
+    applyLiveRoomState(room);
+    return;
+  }
+
+  const team = document.getElementById('live-self-team').value;
+  const role = document.getElementById('live-self-role').value;
+
+  if (role === 'spymaster' && hasTeamSpymaster(players, team, livePlayerId)) {
+    await uiAlert(`The ${team} team already has a spymaster.`);
+    renderSelfRoleControls(players);
+    return;
+  }
+
+  players[livePlayerId] = { ...me, team, role };
+
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({ players, updated_at: new Date().toISOString() })
+    .eq('id', liveRoomId)
+    .select('players, board, settings')
+    .single();
+
+  if (updateError || !updatedRoom) {
+    console.error('Could not save your team/role:', updateError);
+    await uiAlert('Could not save your team and role.');
+    return;
+  }
+
+  applyLiveRoomState(updatedRoom);
+
+  if (liveChannel) {
+    await liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
+}
 	
 function randomPlayerId() {
   return 'p_' + Math.random().toString(36).slice(2, 10);
