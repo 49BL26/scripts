@@ -1169,6 +1169,7 @@ if (updateError || !updatedRoom) {
 window.joinGame = joinGame;
 
 function joinRoomFromUrl() {
+  defaultLiveName();
   const params = new URLSearchParams(window.location.search);
   const code = (params.get('room') || '').trim().toUpperCase();
 
@@ -1208,6 +1209,7 @@ function copyRoomLink() {
 
   const url = new URL(window.location.href);
   url.searchParams.set('room', liveRoomId);
+  url.hash = '';
 
   navigator.clipboard.writeText(url.toString())
     .then(() => alert('Room link copied.'))
