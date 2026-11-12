@@ -1002,6 +1002,9 @@ function updateLocalRotationButton() {
   if (btn) btn.textContent = `Rotate View (${localBoardRotation * 90}°)`;
 }
 
+window.cycleLocalBoardRotation = cycleLocalBoardRotation;
+window.updateLocalRotationButton = updateLocalRotationButton;
+
 function normalizePlayerState(player = {}, changes = {}) {
   const next = { ...player, ...changes };
 
@@ -5253,8 +5256,12 @@ function updateStats() {
     if (tcBlueCol) tcBlueCol.classList.toggle('mine', team === 'blue');
 
     const summary = document.getElementById('think-summary');
-    if (summary) summary.textContent =
-        `${groups[team].length} yours · ${groups[other].length} theirs · ${groups.white.length} bystander · ${groups.black.length} assassin`;
+    if (summary) {
+      const mine = (team === 'red' || team === 'blue') ? groups[team].length : 0;
+      const theirs = (team === 'red' || team === 'blue') ? groups[other].length : 0;
+      summary.textContent =
+        `${mine} yours · ${theirs} theirs · ${groups.white.length} bystander · ${groups.black.length} assassin`;
+    }
 
     const showPanel = picked.length > 0 || (mode === 'spymaster' && spyActionEl && spyActionEl.value === 'think');
     if (thinkPanel) thinkPanel.classList.toggle('open', showPanel);
