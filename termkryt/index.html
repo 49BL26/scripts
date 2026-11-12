@@ -947,7 +947,7 @@ let liveRoomSettings = { autoAssign: true };
 
 function getAutoAssignmentSettings(settings = {}) {
   const autoAssign = settings.autoAssign ??
-    (settings.autoTeams !== false && settings.autoRoles !== false);
+    (settings.autoTeams == false && settings.autoRoles == false);
 
   return {
     autoAssign,
