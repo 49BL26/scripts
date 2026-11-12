@@ -2057,16 +2057,6 @@ function renderPlayersPanel(players = {}) {
 
   content.appendChild(autoOptions);
 
-  // SWAP TEAM BUTTON
-  const swapButton = document.createElement('button');
-  swapButton.type = 'button';
-  swapButton.className = 'host-swap-teams';
-  swapButton.textContent = '⇄ Swap Red / Blue Teams';
-
-  swapButton.addEventListener('click', swapLiveTeams);
-
-  content.appendChild(swapButton);
-
   // TEAM COLUMNS
   const myTeam =
     players[livePlayerId]?.team === 'blue'
