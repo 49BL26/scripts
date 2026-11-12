@@ -1393,30 +1393,36 @@ function getOrCreatePlayerId(code) {
 function getLiveBoardSnapshot() {
   if (typeof getBoardSnapshot === 'function') {
     const snap = getBoardSnapshot();
-    // Un-rotate personal view so host always receives root orientation
-    if (!liveIsHost && localBoardRotation && snap?.cells) {
-      return {
-        ...snap,
-        cells: rotateCellsArray(snap.cells, -localBoardRotation),
-        cellsData: snap.cellsData
-          ? rotateCellsArray(snap.cellsData, -localBoardRotation)
-          : undefined
-      };
+    // Un-rotate personal view so host/Supabase always get root orientation
+    if (!liveIsHost && localBoardRotation) {
+      const src = snap.cellsData || snap.cells;
+      if (src && src.length === 25) {
+        const unrotated = rotateCellsArray(src, -localBoardRotation);
+        return {
+          ...snap,
+          cellsData: unrotated,
+          cells: unrotated
+        };
+      }
     }
     return snap;
   }
+
   let cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
     text: (c.querySelector('.cell-text') || c).textContent.trim(),
-    colorClass: ['red','blue','white','black','beige'].find(k => c.classList.contains(k)) || 'white',
+    colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
     isPlayFlipped: c.classList.contains('play-active')
   }));
+
   if (!liveIsHost && localBoardRotation) {
     cells = rotateCellsArray(cells, -localBoardRotation);
   }
+
   return {
     isFlipped: !!window.isFlipped,
     rotation: window.currentRotation || 0,
-    cells
+    cells,
+    cellsData: cells
   };
 }
 	
