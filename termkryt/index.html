@@ -891,6 +891,7 @@ body.grid-align-open {
   let liveChannel = null;
   let liveIsHost = false;
   let liveHasExitedRoom = false;
+  let hostPanelMinimized = false;
 
 let liveRoomSettings = {
   autoTeams: true,
@@ -2901,6 +2902,24 @@ document.addEventListener('visibilitychange', async () => {
   if (error || !data) return;
   applyLiveRoomState(data);
 });
+
+function ensureLivePlayerName() {
+  const savedName = localStorage.getItem('termkryt-player-name');
+
+  if (savedName && savedName.trim()) {
+    return savedName.trim();
+  }
+
+  let name = '';
+  while (!name.trim()) {
+    name = prompt('Choose your username:') || '';
+    if (name === '') return null;
+  }
+
+  name = name.trim();
+  localStorage.setItem('termkryt-player-name', name);
+  return name;
+}
 	
 function randomPlayerId() {
   return 'p_' + Math.random().toString(36).slice(2, 10);
