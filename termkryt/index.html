@@ -1627,7 +1627,7 @@ if (updateError || !updatedRoom) {
   renderLiveRoster(updatedRoom.players || players);
   updateLiveAccessUI();
 }
-
+}
 window.joinGame = joinGame;
 
 function joinRoomFromUrl() {
@@ -2209,7 +2209,6 @@ if (!player.isHost) {
   row.appendChild(identity);
 
     return row;
-  }
   }
 
   function addPlayers(list, people) {
