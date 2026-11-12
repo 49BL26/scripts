@@ -1007,6 +1007,8 @@ function cycleLocalBoardRotation() {
 }
 
 window.cycleLocalBoardRotation = cycleLocalBoardRotation;
+window.getLocalBoardRotation = function () { return localBoardRotation; };
+window.rotateCellsArray = rotateCellsArray;
 
 function updateLocalRotationButton() {
   const btn = document.getElementById('btn-local-rotate');
@@ -4833,23 +4835,18 @@ function snapshotsEqual(a, b) {
 function pushHistory() {
     if (historyLocked) return;
 
-    const snap = getBoardSnapshot();
+    let snap = getBoardSnapshot();
 
-    // Don’t record identical consecutive states
-    if (historyIndex >= 0 && snapshotsEqual(boardHistory[historyIndex], snap)) return;
-
-    // Throw away any “future” states (user went back and then made a new change)
-    boardHistory = boardHistory.slice(0, historyIndex + 1);
-
-    boardHistory.push(snap);
-    if (boardHistory.length > HISTORY_MAX) {
-        boardHistory.shift();
-    } else {
-        historyIndex++;
+    // NHS with a personal rotation: store root orientation only
+    const rot = (typeof window.getLocalBoardRotation === 'function')
+      ? window.getLocalBoardRotation()
+      : 0;
+    if (rot && typeof window.rotateCellsArray === 'function' && snap.cellsData) {
+      snap = {
+        ...snap,
+        cellsData: window.rotateCellsArray(snap.cellsData, -rot)
+      };
     }
-
-    updateHistoryButtons();
-}
 
 function restoreFromHistory(idx) {
     if (idx < 0 || idx >= boardHistory.length) return;
@@ -4862,14 +4859,23 @@ function restoreFromHistory(idx) {
     board.classList.toggle('flipped', isFlipped);
 
     // Rebuild the board without any think marks
-    const cellsData = snap.cellsData.map(c => ({
+    let cellsData = snap.cellsData.map(c => ({
         text: c.text,
         colorClass: c.colorClass,
         isPlayFlipped: c.isPlayFlipped,
         isThink: false,
         seq: 0
     }));
-    thinkCounter = 1;               // reset think sequencing
+
+    // NHS: show history in their current personal rotation
+    const rot = (typeof window.getLocalBoardRotation === 'function')
+      ? window.getLocalBoardRotation()
+      : 0;
+    if (rot && typeof window.rotateCellsArray === 'function') {
+      cellsData = window.rotateCellsArray(cellsData, rot);
+    }
+
+    thinkCounter = 1;
     initBoard(cellsData);
 
     historyIndex = idx;
