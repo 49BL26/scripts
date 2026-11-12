@@ -695,11 +695,12 @@ body.grid-align-open {
   <button id="live-name-button" type="button" onclick="editLiveName()">Name: …</button>
   <button id="btn-local-rotate" type="button" onclick="cycleLocalBoardRotation()" style="display:none;">Rotate View (0°)</button>
 	
-  <button type="button" onclick="hostGame()">Host Game</button>
-  <button onclick="joinGame(prompt('Room code?'))">Join Game</button>
-  <button type="button" onclick="shareRoomUrl()">Share Room Link</button>
-  <button type="button" onclick="scanShareQR()">Scan QR to Join</button>
-  <span id="live-room-label" style=" display:none; margin-left:8px; padding:6px 12px; border-radius:8px;background:#222; color:#fff; font:14px system-ui; vertical-align:middle;"></span>
+  <button type="button" id="btn-host-game" onclick="hostGame()">Host Game</button>
+  <button type="button" id="btn-join-game" onclick="joinGame(prompt('What is the room code?'))">Join Game</button>
+  <button type="button" id="btn-share-room" onclick="shareRoomUrl()">Share Room Link</button>
+  <button type="button" id="btn-scan-qr-join" onclick="scanShareQR()">Scan QR to Join</button>
+
+	<span id="live-room-label" style="display:none; margin-left:8px; padding:6px 12px; border-radius:8px; background:#222; color:#fff; font:14px system-ui; vertical-align:middle; align-items:center; gap:8px;"></span>
 
 	<div id="live-self-role-controls" style="display:none; align-items:center; gap:6px;">
   <label for="live-self-team">Team:</label>
@@ -719,9 +720,7 @@ body.grid-align-open {
 	
   <!-- Host only: player list + role controls -->
   <div id="live-players-panel" style="display:none; margin-top:10px; padding:10px; border:1px solid #444;border-radius:8px; max-width:420px;"></div>
-  <div id="live-exit-wrap" style="display:none; gap:8px; align-items:center;">
-  <input id="live-exit-input" type="text" maxlength="6" placeholder="Type EXIT to leave" autocomplete="off" spellcheck="false" style="text-transform:uppercase;">
-  <button type="button" onclick="exitLiveGame()">Exit Game</button>
+
   </div>
 </div>
 
@@ -1302,70 +1301,96 @@ const { error } = await sb.from('rooms').insert({
 window.hostGame = hostGame;
 
 async function exitLiveGame() {
-  const input = document.getElementById('live-exit-input');
-  const typed = (input?.value || '').trim().toUpperCase();
-
-  if (typed !== EXIT_CODE) {
-    alert('Type EXIT to leave the game.');
-    return;
-  }
-
   if (!liveRoomId || liveIsHost) return;
 
-  const { data, error } = await sb
-    .from('rooms')
-    .select('players')
-    .eq('id', liveRoomId)
-    .single();
+  const ok = confirm('Leave this room?');
+  if (!ok) return;
 
-  if (error || !data) return;
+  try {
+    const { data, error } = await sb
+      .from('rooms')
+      .select('players')
+      .eq('id', liveRoomId)
+      .single();
 
-  const players = { ...(data.players || {}) };
-  delete players[livePlayerId];
-
-  const { error: updateError } = await sb
-    .from('rooms')
-    .update({
-      players,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', liveRoomId);
-
-  if (updateError) {
-    console.error(updateError);
-    alert('Could not leave the game.');
-    return;
+    if (!error && data) {
+      const players = { ...(data.players || {}) };
+      delete players[livePlayerId];
+      await sb
+        .from('rooms')
+        .update({ players, updated_at: new Date().toISOString() })
+        .eq('id', liveRoomId);
+    }
+  } catch (err) {
+    console.error(err);
   }
 
-  // Clear local session state
+  await leaveLiveRoomLocal();
+}
+
+window.exitLiveGame = exitLiveGame;
+
+async function endLiveGameAsHost() {
+  if (!liveRoomId || !liveIsHost) return;
+
+  const ok = confirm('End the game for everyone and delete this room?');
+  if (!ok) return;
+
+  const roomId = liveRoomId;
+
+  // Tell everyone the room is over (best-effort)
+  if (liveChannel) {
+    try {
+      await liveChannel.send({
+        type: 'broadcast',
+        event: 'room-ended',
+        payload: { by: livePlayerId }
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  // Delete room in Supabase
+  try {
+    const { error } = await sb.from('rooms').delete().eq('id', roomId);
+    if (error) {
+      console.error('Could not delete room:', error);
+      alert('Could not delete the room. You may still be disconnected locally.');
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  await leaveLiveRoomLocal();
+}
+
+window.endLiveGameAsHost = endLiveGameAsHost;
+
+async function leaveLiveRoomLocal() {
   liveHasExitedRoom = true;
   liveRole = null;
   liveTeam = null;
   liveIsHost = false;
 
   if (liveChannel) {
-    await sb.removeChannel(liveChannel);
+    try { await sb.removeChannel(liveChannel); } catch (e) { /* ignore */ }
     liveChannel = null;
   }
 
-  stopLivePoll();
+  if (typeof stopLivePoll === 'function') stopLivePoll();
 
   liveRoomId = null;
-  livePlayerId = getOrCreatePlayerId('local'); // or leave as-is if you want per-room persistence
-  document.getElementById('live-room-label').style.display = 'none';
-  document.getElementById('live-room-label').textContent = '';
+  livePlayerId = getOrCreatePlayerId('local');
+
+  showRoomCode(null);
   document.getElementById('btn-copy-room-link')?.style.setProperty('display', 'none');
 
-  if (input) input.value = '';
-
-  // restore standard local editing UI
   const mode = document.getElementById('op1');
   if (mode) mode.value = 'player';
 
   updateLiveAccessUI();
-  showRoomCode(null); // if you have a function that can hide it
+  if (typeof uiSync === 'function') uiSync();
 }
-	
+
 function randomPlayerId() {
   return globalThis.crypto?.randomUUID?.()
     ?? `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1860,10 +1885,38 @@ function showRoomCode(code) {
   const el = document.getElementById('live-room-label');
   const copyButton = document.getElementById('btn-copy-room-link');
 
-  if (!el || !code) return;
+  if (!el) return;
 
-  el.textContent = 'Room: ' + code;
-  el.style.display = 'inline-block';
+  if (!code) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    if (copyButton) copyButton.style.display = 'none';
+    return;
+  }
+
+  el.style.display = 'inline-flex';
+  el.innerHTML = '';
+
+  const text = document.createElement('span');
+  text.textContent = 'Room: ' + code;
+  el.appendChild(text);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '❌';
+  closeBtn.title = liveIsHost ? 'End game (kick everyone)' : 'Leave room';
+  closeBtn.setAttribute('aria-label', liveIsHost ? 'End game' : 'Leave room');
+  closeBtn.style.cssText = 'margin:0; padding:0 4px; border:none; background:transparent; color:#ff6b6b; font-size:16px; line-height:1; cursor:pointer;';
+  closeBtn.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (liveIsHost) {
+      endLiveGameAsHost();
+    } else {
+      exitLiveGame();
+    }
+  });
+  el.appendChild(closeBtn);
 
   if (copyButton) copyButton.style.display = 'inline-block';
 }
@@ -1952,13 +2005,16 @@ async function subscribeToRoom(code) {
       }
     }
   });
-
 liveChannel.on(
   'broadcast',
-  { event: 'room-state' },
-  ({ payload }) => {
-    if (!payload?.state?.players) return;
-
+  { event: 'room-ended' },
+  () => {
+    if (!liveIsHost) {
+      alert('The host ended the game.');
+      leaveLiveRoomLocal();
+    }
+  }
+);
     // Ignore our own broadcast.
     if (payload.sender === livePlayerId) return;
 
@@ -1980,9 +2036,14 @@ liveChannel.on(
       filter: 'id=eq.' + code
     },
     payload => {
-      if (payload.new) {
-        applyLiveRoomState(payload.new);
+      if (payload.eventType === 'DELETE' || !payload.new) {
+        if (!liveIsHost) {
+          alert('The host ended the game.');
+          leaveLiveRoomLocal();
+        }
+        return;
       }
+      applyLiveRoomState(payload.new);
     }
   );
 
@@ -2739,9 +2800,20 @@ function updateLiveAccessUI() {
   if (gSpy) gSpy.style.display = isSpymaster ? '' : 'none';
 
   // Show exit field only when a guest is still in a room
-  if (exitWrap) {
-    exitWrap.style.display = isGuest ? 'flex' : 'none';
-  }
+  // Hide Host / Join / Scan QR while in a room; show Share only for host
+  const inRoom = !!liveRoomId && !liveHasExitedRoom;
+  const btnHost = document.getElementById('btn-host-game');
+  const btnJoin = document.getElementById('btn-join-game');
+  const btnScan = document.getElementById('btn-scan-qr-join');
+  const btnShare = document.getElementById('btn-share-room');
+
+  if (btnHost) btnHost.style.display = inRoom ? 'none' : '';
+  if (btnJoin) btnJoin.style.display = inRoom ? 'none' : '';
+  if (btnScan) btnScan.style.display = inRoom ? 'none' : '';
+  if (btnShare) btnShare.style.display = (inRoom && liveIsHost) ? '' : (inRoom ? 'none' : '');
+
+  // Old EXIT UI removed — leave via ❌ on room label
+  if (exitWrap) exitWrap.style.display = 'none';
 
   // If the player is a guest and not a spymaster, disable board interactions
   const board = document.getElementById('board');
