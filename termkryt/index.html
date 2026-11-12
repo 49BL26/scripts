@@ -2005,27 +2005,33 @@ async function subscribeToRoom(code) {
       }
     }
   });
-liveChannel.on(
-  'broadcast',
-  { event: 'room-ended' },
-  () => {
-    if (!liveIsHost) {
-      alert('The host ended the game.');
-      leaveLiveRoomLocal();
+  liveChannel.on(
+    'broadcast',
+    { event: 'room-ended' },
+    () => {
+      if (!liveIsHost) {
+        alert('The host ended the game.');
+        leaveLiveRoomLocal();
+      }
     }
-  }
-);
-    // Ignore our own broadcast.
-    if (payload.sender === livePlayerId) return;
+  );
 
-    applyLiveRoomState(payload.state);
+  liveChannel.on(
+    'broadcast',
+    { event: 'room-state' },
+    ({ payload }) => {
+      if (!payload?.state) return;
 
-    // The host roster is refreshed by applyLiveRoomState().
-    if (liveIsHost) {
-      renderPlayersPanel(payload.state.players);
+      // Ignore our own broadcast.
+      if (payload.sender === livePlayerId) return;
+
+      applyLiveRoomState(payload.state);
+
+      if (liveIsHost) {
+        renderPlayersPanel(payload.state.players);
+      }
     }
-  }
-);
+  );
 
   liveChannel.on(
     'postgres_changes',
