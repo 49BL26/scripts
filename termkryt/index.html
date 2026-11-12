@@ -1523,9 +1523,11 @@ if (!isNewGuest) {
   } else if (waitingEntry) {
     // Complete a waiting pair → both become Players on alternating teams
     const [waitingId, waitingPlayer] = waitingEntry;
-    const waitingTeam = (waitingPlayer.team === 'red' || waitingPlayer.team === 'blue')
-      ? waitingPlayer.team
-      : firstGuestTeam;
+    const waitingTeam = (waitingPlayer.previousTeam === 'red' || waitingPlayer.previousTeam === 'blue')
+      ? waitingPlayer.previousTeam
+      : (waitingPlayer.team === 'red' || waitingPlayer.team === 'blue')
+        ? waitingPlayer.team
+        : firstGuestTeam;
     const nextTeam = oppositeTeam(waitingTeam);
 
     players[waitingId] = normalizePlayerState(waitingPlayer, {
