@@ -231,25 +231,25 @@
   gap: 8px;
 }
 .roster-team,
-.roster-spectators {
+.roster-bystanders {
   border: 2px solid;
   border-radius: 8px;
   padding: 8px;
   min-width: 0;
 }
 .roster-team h4,
-.roster-spectators h4 {
+.roster-bystanders h4 {
   margin: 0 0 5px;
   font-size: 12px;
   text-transform: uppercase;
 }
 .roster-team ul,
-.roster-spectators ul {
+.roster-bystanders ul {
   margin: 0;
   padding-left: 18px;
 }
 .roster-team li,
-.roster-spectators li {
+.roster-bystanders li {
   margin: 3px 0;
   overflow-wrap: anywhere;
 }
@@ -263,7 +263,7 @@
   border-color: #42a5f5;
   color: #0d47a1;
 }
-.roster-spectators {
+.roster-bystanders {
   margin-top: 8px;
   background: #DFD1A5;
   border-color: #c9b98d;
@@ -465,7 +465,7 @@ body.grid-align-open {
 }
 
 .host-roster-column,
-.host-roster-spectators {
+.host-roster-bystanders {
   min-width: 0;
   border: 2px solid;
   border-radius: 8px;
@@ -473,7 +473,7 @@ body.grid-align-open {
 }
 
 .host-roster-column h4,
-.host-roster-spectators h4 {
+.host-roster-bystanders h4 {
   margin: 0 0 8px;
   font-size: 12px;
   text-transform: uppercase;
@@ -491,7 +491,7 @@ body.grid-align-open {
   color: #0d47a1;
 }
 
-.host-roster-spectators {
+.host-roster-bystanders {
   margin-top: 8px;
   background: #fffdf5;
   border-color: #c9b98d;
@@ -539,7 +539,7 @@ body.grid-align-open {
   color: #444;
 }
 
-.host-roster-spectators .host-player-row {
+.host-roster-bystanders .host-player-row {
   border-bottom-color: rgba(94,81,48,.2);
 }
 
@@ -565,13 +565,13 @@ body.grid-align-open {
   padding-left: 0;
 }
 
-#roster-spectators li {
+#roster-bystanders li {
   list-style: none;
   margin: 4px 0;
   padding: 0;
 }
 
-#roster-spectators {
+#roster-bystanders {
   padding-left: 0;
 }
 
@@ -653,7 +653,7 @@ body.grid-align-open {
   <select id="live-self-role">
     <option value="spymaster">Spymaster</option>
     <option value="player">Player</option>
-    <option value="spectator">Bystander</option>
+    <option value="bystander">Bystander</option>
   </select>
 </div>	
 	
@@ -847,9 +847,9 @@ body.grid-align-open {
       <ul id="roster-blue"></ul>
     </section>
   </div>
-  <section class="roster-spectators">
+  <section class="roster-bystanders">
     <h4>Bystanders</h4>
-    <ul id="roster-spectators"></ul>
+    <ul id="roster-bystanders"></ul>
   </section>
 </div>
 	
@@ -909,8 +909,8 @@ function getAutoAssignmentSettings(settings = {}) {
 function normalizePlayerState(player = {}, changes = {}) {
   const next = { ...player, ...changes };
 
-  // Preserve the last active team before becoming a spectator.
-  if (next.role === 'spectator') {
+  // Preserve the last active team before becoming a bystander.
+  if (next.role === 'bystander') {
     if (next.team === 'red' || next.team === 'blue') {
       next.previousTeam = next.team;
     } else {
@@ -948,7 +948,7 @@ function canPlayerChoose(player) {
 }
 
 function getPlayerColor(player) {
-  if (!player || player.role === 'spectator') return 'beige';
+  if (!player || player.role === 'bystander') return 'beige';
   return player.team === 'blue' ? 'blue' : 'red';
 }
 
@@ -974,10 +974,10 @@ function renderLiveRoster(players = {}) {
   const roster = document.getElementById('live-roster');
   const redList = document.getElementById('roster-red');
   const blueList = document.getElementById('roster-blue');
-  const spectatorList =
-    document.getElementById('roster-spectators');
+  const bystanderList =
+    document.getElementById('roster-bystanders');
 
-  if (!roster || !redList || !blueList || !spectatorList) {
+  if (!roster || !redList || !blueList || !bystanderList) {
     return;
   }
 
@@ -1006,7 +1006,7 @@ function renderLiveRoster(players = {}) {
 
   redList.replaceChildren();
   blueList.replaceChildren();
-  spectatorList.replaceChildren();
+  bystanderList.replaceChildren();
 
   function addNames(list, people) {
     if (!people.length) {
@@ -1045,21 +1045,21 @@ function renderLiveRoster(players = {}) {
   addNames(
     myTeam === 'red' ? redList : blueList,
     Object.values(players).filter(p =>
-      p.role !== 'spectator' && p.team === myTeam
+      p.role !== 'bystander' && p.team === myTeam
     )
   );
 
   addNames(
     otherTeam === 'red' ? redList : blueList,
     Object.values(players).filter(p =>
-      p.role !== 'spectator' && p.team === otherTeam
+      p.role !== 'bystander' && p.team === otherTeam
     )
   );
 
   addNames(
-    spectatorList,
+    bystanderList,
     Object.values(players).filter(p =>
-      p.role === 'spectator'
+      p.role === 'bystander'
     )
   );
 }
@@ -1390,7 +1390,7 @@ if (!isNewGuest) {
     ...previous,
     name,
     ...(
-      previous.role === 'spectator'
+      previous.role === 'bystander'
         ? { team: 'beige' }
         : {}
     )
@@ -1716,19 +1716,27 @@ async function pushLiveBoard() {
   return publishLivePatch({ board: getLiveBoardSnapshot() });
 }
 
-
 async function broadcastLiveState(state) {
-  if (!liveChannel || !state) return;
+  if (!liveChannel || !state) {
+    console.warn('Cannot broadcast: no active room channel.');
+    return false;
+  }
 
   const result = await liveChannel.send({
     type: 'broadcast',
     event: 'room-state',
-    payload: { state }
+    payload: {
+      sender: livePlayerId,
+      state
+    }
   });
 
   if (result !== 'ok') {
-    console.warn('Room broadcast was not acknowledged:', result);
+    console.error('Room broadcast failed:', result);
+    return false;
   }
+
+  return true;
 }
 	
 async function subscribeToRoom(code) {
@@ -1746,15 +1754,23 @@ async function subscribeToRoom(code) {
     }
   });
 
-  liveChannel.on(
-    'broadcast',
-    { event: 'room-state' },
-    ({ payload }) => {
-      if (payload?.state) {
-        applyLiveRoomState(payload.state);
-      }
+liveChannel.on(
+  'broadcast',
+  { event: 'room-state' },
+  ({ payload }) => {
+    if (!payload?.state?.players) return;
+
+    // Ignore our own broadcast.
+    if (payload.sender === livePlayerId) return;
+
+    applyLiveRoomState(payload.state);
+
+    // The host roster is refreshed by applyLiveRoomState().
+    if (liveIsHost) {
+      renderPlayersPanel(payload.state.players);
     }
-  );
+  }
+);
 
   liveChannel.on(
     'postgres_changes',
@@ -1861,8 +1877,10 @@ function enterLiveMode({ isHost }) {
 }
 
 
+
 function renderPlayersPanel(players = {}) {
   const el = document.getElementById('live-players-panel');
+
   if (!el || !liveIsHost) {
     if (el) el.style.display = 'none';
     return;
@@ -1871,11 +1889,38 @@ function renderPlayersPanel(players = {}) {
   el.style.display = 'block';
   el.replaceChildren();
 
-  const heading = document.createElement('h3');
-  heading.textContent = 'Players';
-  el.appendChild(heading);
+  // PANEL HEADER
+  const header = document.createElement('div');
+  header.className = 'host-panel-header';
 
-  // Automatic assignment controls.
+  const title = document.createElement('strong');
+  title.textContent = 'Host Control Panel';
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'host-panel-toggle';
+  toggle.textContent = hostPanelMinimized ? '+' : '−';
+  toggle.title = hostPanelMinimized
+    ? 'Expand Host Control Panel'
+    : 'Minimize Host Control Panel';
+  toggle.setAttribute('aria-label', toggle.title);
+
+  toggle.addEventListener('click', () => {
+    hostPanelMinimized = !hostPanelMinimized;
+    renderPlayersPanel(players);
+  });
+
+  header.append(title, toggle);
+  el.appendChild(header);
+
+  // When minimized, leave only the header bar.
+  if (hostPanelMinimized) return;
+
+  const content = document.createElement('div');
+  content.className = 'host-panel-content';
+  el.appendChild(content);
+
+  // AUTOMATIC ASSIGNMENT OPTIONS
   const autoOptions = document.createElement('div');
   autoOptions.className = 'host-auto-options';
 
@@ -1901,10 +1946,24 @@ function renderPlayersPanel(players = {}) {
   addAutoOption('Automatically assign teams', 'autoTeams');
   addAutoOption('Automatically assign roles', 'autoRoles');
 
-  el.appendChild(autoOptions);
+  content.appendChild(autoOptions);
 
-  // Order the two team columns relative to the host.
-  const myTeam = players[livePlayerId]?.team || liveTeam || 'red';
+  // SWAP TEAM BUTTON
+  const swapButton = document.createElement('button');
+  swapButton.type = 'button';
+  swapButton.className = 'host-swap-teams';
+  swapButton.textContent = '⇄ Swap Red / Blue Teams';
+
+  swapButton.addEventListener('click', swapLiveTeams);
+
+  content.appendChild(swapButton);
+
+  // TEAM COLUMNS
+  const myTeam =
+    players[livePlayerId]?.team === 'blue'
+      ? 'blue'
+      : 'red';
+
   const otherTeam = oppositeTeam(myTeam);
 
   const roster = document.createElement('div');
@@ -1918,11 +1977,10 @@ function renderPlayersPanel(players = {}) {
     heading.textContent =
       team.charAt(0).toUpperCase() + team.slice(1);
 
-    section.appendChild(heading);
-
     const list = document.createElement('div');
     list.className = 'host-roster-list';
-    section.appendChild(list);
+
+    section.append(heading, list);
 
     return { section, list };
   }
@@ -1931,34 +1989,60 @@ function renderPlayersPanel(players = {}) {
   const right = createTeamColumn(otherTeam);
 
   roster.append(left.section, right.section);
-  el.appendChild(roster);
+  content.appendChild(roster);
 
-  const spectatorSection = document.createElement('section');
-  spectatorSection.className = 'host-roster-spectators';
+  // BYSTANDERS
+  const bystanderSection = document.createElement('section');
+  bystanderSection.className = 'host-roster-spectators';
 
-  const spectatorHeading = document.createElement('h4');
-  spectatorHeading.textContent = 'Bystanders';
+  const bystanderHeading = document.createElement('h4');
+  bystanderHeading.textContent = 'Bystanders';
 
-  const spectatorList = document.createElement('div');
-  spectatorList.className = 'host-roster-list';
+  const bystanderList = document.createElement('div');
+  bystanderList.className = 'host-roster-list';
 
-  spectatorSection.append(spectatorHeading, spectatorList);
-  el.appendChild(spectatorSection);
+  bystanderSection.append(bystanderHeading, bystanderList);
+  content.appendChild(bystanderSection);
 
+  // INDIVIDUAL PLAYER ROW
   function makePlayerRow(id, player) {
     const row = document.createElement('div');
     row.className = 'host-player-row';
 
+    // Name and permission share one line.
+    const identity = document.createElement('div');
+    identity.className = 'host-player-identity';
+
     const name = document.createElement('strong');
+    name.className =
+      `player-name name-${getPlayerColor(player)}`;
+
     name.textContent =
       (player.name || 'Player') +
       (player.isHost ? ' (host)' : '');
 
-    name.className = `player-name ${getPlayerColor(player)}`;
+    const permissionLabel = document.createElement('label');
+    permissionLabel.className = 'host-player-permission';
 
-    const controls = document.createElement('div');
-    controls.className = 'host-player-controls';
+    const permission = document.createElement('input');
+    permission.type = 'checkbox';
+    permission.checked = canPlayerChoose(player);
+    permission.setAttribute(
+      'aria-label',
+      `Allow ${player.name} to change their team and role`
+    );
 
+    permission.addEventListener('change', () => {
+      setPlayerRoleChoicePermission(id, permission.checked);
+    });
+
+    const permissionText = document.createElement('span');
+    permissionText.textContent = 'Allow changes';
+
+    permissionLabel.append(permission, permissionText);
+    identity.append(name, permissionLabel);
+
+    // Team selector
     const team = document.createElement('select');
     team.setAttribute('aria-label', `Team for ${player.name}`);
 
@@ -1969,13 +2053,16 @@ function renderPlayersPanel(players = {}) {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = label;
-	option.selected =
-	  (player.role === 'spectator'
-	    ? player.previousTeam
-	    : player.team) === value;
+
+      option.selected =
+        (player.role === 'spectator'
+          ? player.previousTeam
+          : player.team) === value;
+
       team.appendChild(option);
     });
 
+    // Role selector
     const role = document.createElement('select');
     role.setAttribute('aria-label', `Role for ${player.name}`);
 
@@ -1991,27 +2078,16 @@ function renderPlayersPanel(players = {}) {
       role.appendChild(option);
     });
 
-    const permissionLabel = document.createElement('label');
-    permissionLabel.className = 'host-player-permission';
+    const controls = document.createElement('div');
+    controls.className = 'host-player-controls';
 
-    const permission = document.createElement('input');
-    permission.type = 'checkbox';
-    permission.checked = canPlayerChoose(player);
-
-    const permissionText = document.createElement('span');
-    permissionText.textContent = 'Allow changes';
-
-    permissionLabel.append(permission, permissionText);
+    controls.append(team, role);
 
     const save = () => {
-      const selectedRole = role.value;
-      const selectedTeam = team.value;
-
-      setPlayerRole(id, selectedTeam, selectedRole);
+      setPlayerRole(id, team.value, role.value);
     };
 
     team.addEventListener('change', () => {
-      // Moving a spectator to an active team makes them a player.
       if (player.role === 'spectator') {
         role.value = 'player';
       }
@@ -2020,19 +2096,12 @@ function renderPlayersPanel(players = {}) {
 
     role.addEventListener('change', save);
 
-    permission.addEventListener('change', () => {
-      setPlayerRoleChoicePermission(id, permission.checked);
-    });
-
-    controls.append(team, role, permissionLabel);
-    row.append(name, controls);
+    row.append(identity, controls);
 
     return row;
   }
 
-  const entries = Object.entries(players);
-
-  function addToList(list, people) {
+  function addPlayers(list, people) {
     if (!people.length) {
       const empty = document.createElement('div');
       empty.className = 'roster-empty';
@@ -2045,6 +2114,8 @@ function renderPlayersPanel(players = {}) {
       list.appendChild(makePlayerRow(id, player));
     });
   }
+
+  const entries = Object.entries(players);
 
   const sortPlayers = people =>
     people.sort((a, b) =>
@@ -2065,15 +2136,83 @@ function renderPlayersPanel(players = {}) {
     )
   );
 
-  const spectators = sortPlayers(
+  const bystanders = sortPlayers(
     entries.filter(([, p]) => p.role === 'spectator')
   );
 
-  addToList(left.list, myPlayers);
-  addToList(right.list, opposingPlayers);
-  addToList(spectatorList, spectators);
+  addPlayers(left.list, myPlayers);
+  addPlayers(right.list, opposingPlayers);
+  addPlayers(bystanderList, bystanders);
 }
 
+
+async function swapLiveTeams() {
+  if (!liveIsHost || !liveRoomId) return;
+
+const confirmed = await askChoice(
+  'Swap Teams',
+  'Swap every Red and Blue player? This will also swap the saved teams of all Bystanders.',
+  [
+    { label: 'Cancel', value: false },
+    { label: 'Swap Teams', value: true, primary: true }
+  ]
+);
+
+if (confirmed !== true) return;
+
+  const { data: room, error } = await sb
+    .from('rooms')
+    .select('players, board, settings')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (error || !room) {
+    console.error('Could not load room for team swap:', error);
+    return;
+  }
+
+  const players = { ...(room.players || {}) };
+
+  for (const [id, player] of Object.entries(players)) {
+    const updatedPlayer = { ...player };
+
+    // Swap active team.
+    if (updatedPlayer.team === 'red') {
+      updatedPlayer.team = 'blue';
+    } else if (updatedPlayer.team === 'blue') {
+      updatedPlayer.team = 'red';
+    }
+
+    // Swap saved legacy team independently.
+    if (updatedPlayer.previousTeam === 'red') {
+      updatedPlayer.previousTeam = 'blue';
+    } else if (updatedPlayer.previousTeam === 'blue') {
+      updatedPlayer.previousTeam = 'red';
+    }
+
+    players[id] = updatedPlayer;
+  }
+
+  const { data: updated, error: updateError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('players, board, settings')
+    .single();
+
+  if (updateError || !updated) {
+    console.error('Could not swap teams:', updateError);
+    await uiAlert('Could not swap teams.');
+    return;
+  }
+
+  // Update host and everyone else.
+  applyLiveRoomState(updated);
+  await broadcastLiveState(updated);
+}
 
 function renderSelfRoleControls(players = {}) {
   const panel = document.getElementById('live-self-role-controls');
@@ -2094,7 +2233,7 @@ function renderSelfRoleControls(players = {}) {
   if (!canChoose) return;
 
   teamSelect.value =
-    me.role === 'spectator'
+    me.role === 'bystander'
       ? (me.previousTeam || 'red')
       : me.team;
 
@@ -2140,7 +2279,7 @@ if (!team) return null;
     const role = await askChoice('Choose your role', 'What role would you like?', [
       { label: 'Spymaster', value: 'spymaster' },
       { label: 'Player', value: 'player', primary: true },
-      { label: 'Bystander', value: 'spectator' }
+      { label: 'Bystander', value: 'bystander' }
     ]);
 
     if (!role) return null;
@@ -2178,9 +2317,9 @@ async function setPlayerRole(playerId, team, role) {
   if (!previous) return;
 
   // Bystanders are beige and cannot occupy a team slot.
-  if (role === 'spectator') {
+  if (role === 'bystander') {
     players[playerId] = normalizePlayerState(previous, {
-      role: 'spectator'
+      role: 'bystander'
     });
   } else {
     if (!['red', 'blue'].includes(team)) return;
@@ -2647,7 +2786,6 @@ if (liveIsHost && state.players) {
 document.getElementById('live-self-team')?.addEventListener('change', saveOwnRoleChoice);
 document.getElementById('live-self-role')?.addEventListener('change', saveOwnRoleChoice);
 
-
 async function saveOwnRoleChoice() {
   if (!liveRoomId || liveIsHost) return;
 
@@ -2657,41 +2795,59 @@ async function saveOwnRoleChoice() {
     .eq('id', liveRoomId)
     .single();
 
-  if (error || !room) return;
+  if (error || !room) {
+    console.error('Could not load room:', error);
+    return;
+  }
 
   const players = { ...(room.players || {}) };
   const me = players[livePlayerId];
 
-  if (!canPlayerChoose(me)) {
+  if (!me || !canPlayerChoose(me)) {
     applyLiveRoomState(room);
     return;
   }
 
-  const requestedTeam =
-    document.getElementById('live-self-team').value;
+  const teamSelect =
+    document.getElementById('live-self-team');
 
-  const requestedRole =
-    document.getElementById('live-self-role').value;
+  const roleSelect =
+    document.getElementById('live-self-role');
+
+  if (!teamSelect || !roleSelect) return;
+
+  const requestedTeam = teamSelect.value;
+  const requestedRole = roleSelect.value;
 
   let team = requestedTeam;
   let role = requestedRole;
 
-  // Changing a spectator to an active role restores their legacy team.
-  if (role !== 'spectator' && me.role === 'spectator') {
-    team = me.previousTeam || requestedTeam || 'red';
+  if (me.role === 'spectator') {
+    const previousTeam =
+      me.previousTeam === 'blue' ? 'blue' : 'red';
+
+    if (requestedTeam !== previousTeam) {
+      // A Bystander selecting another team becomes a player.
+      team = requestedTeam;
+      role = 'player';
+    } else if (requestedRole !== 'spectator') {
+      // Restore their previous team when returning to an active role.
+      team = previousTeam;
+      role = requestedRole;
+    } else {
+      team = 'beige';
+      role = 'spectator';
+    }
   }
 
-  // Changing the team of a spectator makes them a player.
-  if (
-    me.role === 'spectator' &&
-    requestedTeam !== me.previousTeam
-  ) {
-    role = 'player';
-  }
+  if (!['red', 'blue', 'beige'].includes(team)) return;
 
   if (role === 'spymaster' &&
       hasTeamSpymaster(players, team, livePlayerId)) {
-    await uiAlert(`The ${team} team already has a spymaster.`);
+    await uiAlert(
+      `The ${team} team already has a spymaster.`
+    );
+
     renderSelfRoleControls(players);
     return;
   }
@@ -2712,13 +2868,26 @@ async function saveOwnRoleChoice() {
     .single();
 
   if (updateError || !updated) {
-    console.error('Could not save team/role:', updateError);
+    console.error(
+      'Could not save team/role:',
+      updateError
+    );
+
     await uiAlert('Could not save your team and role.');
     return;
   }
 
+  // Update the guest immediately.
   applyLiveRoomState(updated);
-  broadcastLiveState(updated);
+
+  // Explicitly send the complete updated player roster to the host.
+  const sent = await broadcastLiveState(updated);
+
+  if (!sent) {
+    console.error(
+      'Role was saved, but the live update was not acknowledged.'
+    );
+  }
 }
 
 document.addEventListener('visibilitychange', async () => {
@@ -3758,7 +3927,7 @@ window.updateLiveNameButton = function () {
   );
 
   if (me) {
-    const color = me.role === 'spectator'
+    const color = me.role === 'bystander'
       ? 'beige'
       : me.team;
 
