@@ -1465,6 +1465,13 @@ function applyLiveBoard(board, asSpymaster) {
     window.isFlipped = !!board.isFlipped;
     initBoard(cells);
   }
+
+  // Record this board in local undo history (root orientation).
+  // pushHistory() already un-rotates NHS views before storing.
+  // Do NOT call saveCurrentState() here — that would re-broadcast.
+  if (typeof pushHistory === 'function' && typeof historyLocked !== 'undefined' && !historyLocked) {
+    pushHistory();
+  }
 }
 
 function applyLiveRoomState(state) {
