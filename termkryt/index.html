@@ -4848,6 +4848,22 @@ function pushHistory() {
       };
     }
 
+    // Don’t record identical consecutive states
+    if (historyIndex >= 0 && snapshotsEqual(boardHistory[historyIndex], snap)) return;
+
+    // Throw away any “future” states (user went back and then made a new change)
+    boardHistory = boardHistory.slice(0, historyIndex + 1);
+
+    boardHistory.push(snap);
+    if (boardHistory.length > HISTORY_MAX) {
+        boardHistory.shift();
+    } else {
+        historyIndex++;
+    }
+
+    updateHistoryButtons();
+}
+
 function restoreFromHistory(idx) {
     if (idx < 0 || idx >= boardHistory.length) return;
 
