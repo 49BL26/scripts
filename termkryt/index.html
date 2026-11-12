@@ -984,8 +984,9 @@ function normalizePlayerState(player = {}, changes = {}) {
     next.previousTeam = next.team;
   }
 
-  // Only clear the flag when it wasn't explicitly set
-  if (changes.waitingForPair === undefined) {
+
+  // Keep waitingForPair if it was set on either the original player or the changes
+  if (changes.waitingForPair === undefined && player.waitingForPair === undefined) {
     next.waitingForPair = false;
   }
   return next;
