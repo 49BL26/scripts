@@ -1452,10 +1452,10 @@ let joinChoice = null;
 const hostBlockedChoice =
   previous?.roleChoiceLocked === true;
 
+// Manual choice only when auto is OFF (or host blocked the player)
 if (
   !liveIsHost &&
-  liveRoomSettings.autoTeams &&
-  liveRoomSettings.autoRoles &&
+  !liveRoomSettings.autoAssign &&
   !hostBlockedChoice
 ) {
   const team = await askChoice(
@@ -1467,123 +1467,108 @@ if (
       { label: 'Cancel', value: null }
     ]
   );
-
   if (!team) return;
 
   const roleChoices = [
     { label: 'Player', value: 'player', primary: true },
     { label: 'Bystander', value: 'bystander' }
   ];
-
   if (!hasTeamSpymaster(players, team, livePlayerId)) {
-    roleChoices.unshift({
-      label: 'Spymaster',
-      value: 'spymaster'
-    });
+    roleChoices.unshift({ label: 'Spymaster', value: 'spymaster' });
   }
-
   roleChoices.push({ label: 'Cancel', value: null });
 
-  const role = await askChoice(
-    'Choose Your Role',
-    'Which role would you like?',
-    roleChoices
-  );
-
+  const role = await askChoice('Choose Your Role', 'Which role would you like?', roleChoices);
   if (!role) return;
 
   joinChoice = { team, role };
 }
 
 if (!isNewGuest) {
-  // Preserve an existing player's assignment and permissions.
+  // Returning player – keep their existing assignment
   players[livePlayerId] = {
     ...previous,
     name,
-    ...(
-      previous.role === 'bystander'
-        ? { team: 'beige' }
-        : {}
-    )
+    ...(previous.role === 'bystander' ? { team: 'beige' } : {})
   };
-} else {
+} else if (joinChoice) {
+  // Manual choice path
+  players[livePlayerId] = normalizePlayerState({
+    name,
+    team: joinChoice.team,
+    role: joinChoice.role,
+    previousTeam: joinChoice.team,
+    isHost: false,
+    allowRoleChoice: true
+  });
+} else if (liveRoomSettings.autoAssign) {
+  // ---------- AUTO ASSIGN ----------
   const guests = Object.entries(players).filter(
-    ([id, player]) =>
-      id !== data.host_id &&
-      !player.isHost
+    ([id, p]) => id !== data.host_id && !p.isHost
   );
 
-  const waitingEntry = guests.find(
-    ([, player]) => player.waitingForPair === true
-  );
+  const waitingEntry = guests.find(([, p]) => p.waitingForPair === true);
 
   if (guests.length === 0) {
-    // First guest always receives the opposite team to the host.
-    const role = liveRoomSettings.autoRoles
-      ? 'spymaster'
-      : 'player';
-
+    // 1st guest → opposite team Spymaster
     players[livePlayerId] = normalizePlayerState({
       name,
-      team: liveRoomSettings.autoTeams
-        ? firstGuestTeam
-        : firstGuestTeam,
-      role,
+      team: firstGuestTeam,
+      role: 'spymaster',
       previousTeam: firstGuestTeam,
       isHost: false,
       allowRoleChoice: false
     });
   } else if (waitingEntry) {
+    // Complete a waiting pair → both become Players on alternating teams
     const [waitingId, waitingPlayer] = waitingEntry;
-
-    // Complete the waiting pair.
-    const waitingTeam =
-      waitingPlayer.team === 'red' ||
-      waitingPlayer.team === 'blue'
-        ? waitingPlayer.team
-        : firstGuestTeam;
-
+    const waitingTeam = (waitingPlayer.team === 'red' || waitingPlayer.team === 'blue')
+      ? waitingPlayer.team
+      : firstGuestTeam;
     const nextTeam = oppositeTeam(waitingTeam);
 
-    players[waitingId] = normalizePlayerState(
-      waitingPlayer,
-      {
-        team: waitingTeam,
-        role: liveRoomSettings.autoRoles
-          ? 'player'
-          : (waitingPlayer.role || 'player'),
-        waitingForPair: false
-      }
-    );
+    players[waitingId] = normalizePlayerState(waitingPlayer, {
+      team: waitingTeam,
+      role: 'player',
+      waitingForPair: false
+    });
 
     players[livePlayerId] = normalizePlayerState({
       name,
       team: nextTeam,
-      role: liveRoomSettings.autoRoles ? 'player' : 'player',
+      role: 'player',
       previousTeam: nextTeam,
       isHost: false,
       allowRoleChoice: false
     });
   } else {
-    // Keep the first player of the next pair waiting.
+    // Start a new waiting pair → this guest becomes Bystander
     const assignedTeam = guests.length === 1
       ? firstGuestTeam
       : oppositeTeam(
-          guests[guests.length - 1][1].team === 'blue'
-            ? 'blue'
-            : 'red'
+          guests[guests.length - 1][1].team === 'blue' ? 'blue' : 'red'
         );
 
     players[livePlayerId] = normalizePlayerState({
       name,
       team: assignedTeam,
-      role: 'player',
+      role: 'bystander',
       previousTeam: assignedTeam,
       isHost: false,
       waitingForPair: true,
       allowRoleChoice: false
     });
   }
+} else {
+  // Fallback (should rarely hit)
+  players[livePlayerId] = normalizePlayerState({
+    name,
+    team: firstGuestTeam,
+    role: 'player',
+    previousTeam: firstGuestTeam,
+    isHost: false,
+    allowRoleChoice: true
+  });
 }
 
 const hostAllowsChoice =
