@@ -946,10 +946,14 @@ body.grid-align-open {
 let liveRoomSettings = { autoAssign: true };
 
 function getAutoAssignmentSettings(settings = {}) {
+  const autoAssign = settings.autoAssign ??
+    (settings.autoTeams !== false && settings.autoRoles !== false);
+
   return {
-    // Support old rooms that still have the two separate settings.
-    autoAssign: settings.autoAssign ??
-      (settings.autoTeams !== false && settings.autoRoles !== false)
+    autoAssign,
+    // Keep the individual flags (default to true when autoAssign is on)
+    autoTeams: settings.autoTeams ?? autoAssign,
+    autoRoles: settings.autoRoles ?? autoAssign
   };
 }
 
@@ -1376,17 +1380,23 @@ function applyLiveBoard(board, asSpymaster) {
 function applyLiveRoomState(state) {
   if (!state) return;
 
+  const prevRole = liveRole;
+
   // Update permissions/role before rendering the board.
   const me = state.players?.[livePlayerId];
   liveRole = me?.role ?? null;
   liveTeam = me?.team ?? null;
 
-if (state.settings) {
-  liveRoomSettings = getAutoAssignmentSettings(state.settings);
-}
+  // Force board re-render when role changes (player ↔ bystander ↔ spymaster)
+  if (prevRole !== liveRole) {
+    lastBoardFingerprint = '';
+  }
 
-updateLiveNameButton(state.players || {});
-	
+  if (state.settings) {
+    liveRoomSettings = getAutoAssignmentSettings(state.settings);
+  }
+
+  updateLiveNameButton(state.players || {});
   renderLiveRoster(state.players || {});
   syncLiveSpymasterControls();
 
@@ -1394,15 +1404,15 @@ updateLiveNameButton(state.players || {});
     renderPlayersPanel(state.players);
   }
 
-  // Missing or unassigned role defaults to the non-spymaster view.
-if (state.board) {
-  applyLiveBoard(state.board, liveRole === 'spymaster');
-}
+  if (state.board) {
+    // bystander / player → false (hide unrevealed)
+    // spymaster → true (show all)
+    applyLiveBoard(state.board, liveRole === 'spymaster');
+  }
 
-renderSelfRoleControls(state.players || {});
-updateLiveAccessUI();
+  renderSelfRoleControls(state.players || {});
+  updateLiveAccessUI();
 }
-
 
   // ... after loading data ...
 
@@ -1419,7 +1429,7 @@ async function joinGame(code) {
   livePlayerId = getOrCreatePlayerId(code);  // same id if rejoining this room
   liveRoomId = code;
   liveIsHost = data.host_id === livePlayerId;
-  liveRoomSettings = getAutoAssignmentSettings(data.settings);
+  liveRoomSettings = (data.settings);
 
 const players = { ...(data.players || {}) };
 const name = makeUniqueLiveName(getLiveNameOrAlert(), players, livePlayerId);
@@ -2577,7 +2587,7 @@ async function setAutoAssignmentSetting(enabled) {
   }
 
   const settings = {
-    ...getAutoAssignmentSettings(room.settings),
+    ...(room.settings),
     autoAssign: enabled
   };
 
@@ -2601,7 +2611,7 @@ async function setAutoAssignmentSetting(enabled) {
     return;
   }
 
-  liveRoomSettings = getAutoAssignmentSettings(updated.settings);
+  liveRoomSettings = (updated.settings);
   applyLiveRoomState(updated);
   broadcastLiveState(updated);
 }
@@ -2901,23 +2911,25 @@ async function saveOwnRoleChoice() {
   let team = requestedTeam;
   let role = requestedRole;
 
-  if (me.role === 'spectator') {
-    const previousTeam =
-      me.previousTeam === 'blue' ? 'blue' : 'red';
-
-    if (requestedTeam !== previousTeam) {
-      // A Bystander selecting another team becomes a player.
-      team = requestedTeam;
-      role = 'player';
-    } else if (requestedRole !== 'spectator') {
-      // Restore their previous team when returning to an active role.
-      team = previousTeam;
-      role = requestedRole;
-    } else {
-      team = 'beige';
-      role = 'spectator';
-    }
+  // Normalize bystander / spectator
+  if (role === 'bystander' || role === 'spectator') {
+    role = 'bystander';
+    // team will be forced to 'beige' by normalizePlayerState
   }
+
+  if (!['red', 'blue', 'beige'].includes(team) && role !== 'bystander') return;
+
+  if (role === 'spymaster' &&
+      hasTeamSpymaster(players, team, livePlayerId)) {
+    await uiAlert(`The ${team} team already has a spymaster.`);
+    renderSelfRoleControls(players);
+    return;
+  }
+
+  players[livePlayerId] = normalizePlayerState(me, {
+    team,
+    role
+  });
 
   if (!['red', 'blue', 'beige'].includes(team)) return;
 
