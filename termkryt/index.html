@@ -1434,26 +1434,6 @@ function boardFingerprint(board) {
 function applyLiveBoard(board, asSpymaster) {
   if (!board) return;
 
-  const raw = board.cellsData || board.cells;
-  if (!raw?.length) return;
-
-  const fp = boardFingerprint(board) + (asSpymaster ? ':S' : ':P');
-  if (fp === lastBoardFingerprint) return;
-  lastBoardFingerprint = fp;
-
-  const cells = raw.map(cell =>
-    asSpymaster || cell.isPlayFlipped
-      ? cell
-      : { ...cell, colorClass: 'white' }
-  );
-
-  if (typeof initBoard === 'function') {
-    window.isFlipped = !!board.isFlipped;
-    window.currentRotation = board.currentRotation ?? board.rotation ?? 0;
-
-function applyLiveBoard(board, asSpymaster) {
-  if (!board) return;
-
   let raw = board.cellsData || board.cells;
   if (!raw || !raw.length) return;
 
