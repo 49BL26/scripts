@@ -985,24 +985,34 @@ function rotateCellsArray(cells, turns) {
 }
 
 function cycleLocalBoardRotation() {
-  if (liveIsHost) return;               // host keeps root orientation
+  if (liveIsHost) return;
+
+  // Read current cells from the DOM (whatever is on screen now)
+  const current = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
+    text: (c.querySelector('.cell-text') || c).textContent.trim(),
+    colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
+    isPlayFlipped: c.classList.contains('play-active')
+  }));
+  if (current.length !== 25) return;
+
+  // Advance personal rotation
   localBoardRotation = (localBoardRotation + 1) % 4;
-  lastBoardFingerprint = '';            // force re-apply
-  // Re-apply last known board if we have one in the room state
-  if (liveRoomId && typeof applyLiveRoomState === 'function') {
-    // simplest: re-fetch or just re-render from current DOM snapshot un-rotated then re-rotated
-    const snap = getLiveBoardSnapshot(); // already un-rotates (see below)
-    applyLiveBoard(snap, liveRole === 'spymaster');
-  }
+
+  // Rotate what’s on screen by +1 quarter-turn
+  const rotated = rotateCellsArray(current, 1);
+  lastBoardFingerprint = '';
+  if (typeof initBoard === 'function') initBoard(rotated);
+
   updateLocalRotationButton();
 }
+
+window.cycleLocalBoardRotation = cycleLocalBoardRotation;
 
 function updateLocalRotationButton() {
   const btn = document.getElementById('btn-local-rotate');
   if (btn) btn.textContent = `Rotate View (${localBoardRotation * 90}°)`;
 }
 
-window.cycleLocalBoardRotation = cycleLocalBoardRotation;
 window.updateLocalRotationButton = updateLocalRotationButton;
 
 function normalizePlayerState(player = {}, changes = {}) {
@@ -1445,14 +1455,15 @@ function applyLiveBoard(board, asSpymaster) {
   if (!board) return;
 
   let raw = board.cellsData || board.cells;
-  if (!raw?.length) return;
+  if (!raw || !raw.length) return;
 
   // Personal view rotation (non-host only)
   if (!liveIsHost && localBoardRotation) {
     raw = rotateCellsArray(raw, localBoardRotation);
   }
 
-  const fp = boardFingerprint({ ...board, cells: raw }) + (asSpymaster ? ':S' : ':P') + ':R' + localBoardRotation;
+  const fp = boardFingerprint({ ...board, cells: raw }) +
+    (asSpymaster ? ':S' : ':P') + ':R' + localBoardRotation;
   if (fp === lastBoardFingerprint) return;
   lastBoardFingerprint = fp;
 
@@ -1463,12 +1474,7 @@ function applyLiveBoard(board, asSpymaster) {
   );
 
   if (typeof initBoard === 'function') {
-    // Do NOT overwrite root currentRotation / isFlipped from personal view
     window.isFlipped = !!board.isFlipped;
-    // keep window.currentRotation as the root text-rotation; personal grid rotation is separate
-    initBoard(cells);
-  }
-} 
     initBoard(cells);
   }
 }
@@ -2241,17 +2247,19 @@ if (!player.isHost) {
     team.setAttribute('aria-label', `Team for ${player.name}`);
 
     [
-      ['red', 'Red'],
-      ['blue', 'Blue']
+	  ['red', 'Red'],
+      ['blue', 'Blue'],
+      ['beige', 'Beige (watch)']
     ].forEach(([value, label]) => {
       const option = document.createElement('option');
+
       option.value = value;
       option.textContent = label;
 
       option.selected =
-        (isBystanderRole(player.role)
-          ? player.previousTeam
-          : player.team) === value;
+        (player.role === 'bystander' && player.team === 'beige' && value === 'beige') ||
+        (player.role === 'bystander' && player.team !== 'beige' && player.previousTeam === value) ||
+        (!isBystanderRole(player.role) && player.team === value);
 
       team.appendChild(option);
     });
