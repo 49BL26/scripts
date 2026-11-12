@@ -584,6 +584,56 @@ body.grid-align-open {
     flex: 1;
   }
 }
+
+.host-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 5px 9px;
+}
+
+.host-panel-header strong {
+  font-size: 12px;
+}
+
+.host-panel-toggle {
+  margin-left: auto;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  font-size: 19px;
+}
+
+.host-panel-content {
+  padding: 8px;
+}
+
+.host-player-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid rgba(0,0,0,.18);
+  border-radius: 7px;
+  background: rgba(255,255,255,.65);
+}
+
+.host-player-controls {
+  width: 100%;
+  display: flex;
+  gap: 5px;
+}
+
+.host-player-controls select {
+  flex: 1;
+  min-width: 0;
+}
+
+.host-player-row {
+  padding: 4px 0;
+}
 	
 </style>
 </head>
@@ -948,6 +998,10 @@ function canPlayerChoose(player) {
          player?.roleChoiceLocked !== true;
 }
 
+function isBystanderRole(role) {
+  return role === 'bystander' || role === 'spectator';
+}
+	
 function getPlayerColor(player) {
   if (!player || player.role === 'bystander') return 'beige';
   return player.team === 'blue' ? 'blue' : 'red';
@@ -986,8 +1040,9 @@ function renderLiveRoster(players = {}) {
     roster.style.display = 'none';
     return;
   }
-
-  roster.style.display = 'block';
+	
+  roster.style.display = liveIsHost ? 'none' : 'block';
+  if (liveIsHost) return;
 
   const myTeam =
     players[livePlayerId]?.team === 'blue'
@@ -1994,7 +2049,7 @@ function renderPlayersPanel(players = {}) {
 
   // BYSTANDERS
   const bystanderSection = document.createElement('section');
-  bystanderSection.className = 'host-roster-spectators';
+  bystanderSection.className = 'host-roster-bystanders';
 
   const bystanderHeading = document.createElement('h4');
   bystanderHeading.textContent = 'Bystanders';
@@ -2056,7 +2111,7 @@ function renderPlayersPanel(players = {}) {
       option.textContent = label;
 
       option.selected =
-        (player.role === 'spectator'
+        (isBystanderRole(player.role)
           ? player.previousTeam
           : player.team) === value;
 
@@ -2070,7 +2125,7 @@ function renderPlayersPanel(players = {}) {
     [
       ['player', 'Player'],
       ['spymaster', 'Spymaster'],
-      ['spectator', 'Bystander']
+      ['bystander', 'Bystander']
     ].forEach(([value, label]) => {
       const option = document.createElement('option');
       option.value = value;
@@ -2089,7 +2144,7 @@ function renderPlayersPanel(players = {}) {
     };
 
     team.addEventListener('change', () => {
-      if (player.role === 'spectator') {
+      if (isBystanderRole(player.role)) {
         role.value = 'player';
       }
       save();
@@ -2097,7 +2152,8 @@ function renderPlayersPanel(players = {}) {
 
     role.addEventListener('change', save);
 
-    row.append(identity, controls);
+  identity.appendChild(controls);
+  row.appendChild(identity);
 
     return row;
   }
@@ -2127,18 +2183,18 @@ function renderPlayersPanel(players = {}) {
 
   const myPlayers = sortPlayers(
     entries.filter(([, p]) =>
-      p.role !== 'spectator' && p.team === myTeam
+      !isBystanderRole(p.role) && p.team === myTeam
     )
   );
 
   const opposingPlayers = sortPlayers(
     entries.filter(([, p]) =>
-      p.role !== 'spectator' && p.team === otherTeam
+      !isBystanderRole(p.role) && p.team === otherTeam
     )
   );
 
   const bystanders = sortPlayers(
-    entries.filter(([, p]) => p.role === 'spectator')
+    entries.filter(([, p]) => isBystanderRole(p.role))
   );
 
   addPlayers(left.list, myPlayers);
