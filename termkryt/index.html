@@ -1600,7 +1600,10 @@ if (!isNewGuest) {
     ([id, p]) => id !== data.host_id && !p.isHost
   );
 
-  const waitingEntry = guests.find(([, p]) => p.waitingForPair === true);
+  const waitingEntry = guests.find(([, p]) =>
+    p.waitingForPair === true &&
+    (p.previousTeam === 'red' || p.previousTeam === 'blue')
+  );
 
   if (guests.length === 0) {
     // 1st guest → opposite team Spymaster
@@ -1614,10 +1617,8 @@ if (!isNewGuest) {
     });
   } else if (waitingEntry) {
     // Complete a waiting pair → both become Players on alternating teams
-const waitingEntry = guests.find(([, p]) =>
-  p.waitingForPair === true &&
-  (p.previousTeam === 'red' || p.previousTeam === 'blue')
-);
+    const [waitingId, waitingPlayer] = waitingEntry;
+    const waitingTeam = (waitingPlayer.previousTeam === 'red' || waitingPlayer.previousTeam === 'blue')
       ? waitingPlayer.previousTeam
       : (waitingPlayer.team === 'red' || waitingPlayer.team === 'blue')
         ? waitingPlayer.team
