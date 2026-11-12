@@ -943,16 +943,13 @@ body.grid-align-open {
   let liveHasExitedRoom = false;
   let hostPanelMinimized = false;
 
-let liveRoomSettings = {
-  autoTeams: true,
-  autoRoles: true
-};
+let liveRoomSettings = { autoAssign: true };
 
 function getAutoAssignmentSettings(settings = {}) {
   return {
-    autoTeams: settings.autoTeams !== false,
-    autoRoles: settings.autoRoles !== false,
-    allowPlayerChoice: settings.allowPlayerChoice === true
+    // Support old rooms that still have the two separate settings.
+    autoAssign: settings.autoAssign ??
+      (settings.autoTeams !== false && settings.autoRoles !== false)
   };
 }
 
@@ -1578,27 +1575,17 @@ if (!isNewGuest) {
     });
   }
 }
+const hostBlockedChoice =
+  previous?.roleChoiceLocked === true;
 
-if (!liveIsHost) {
-  const player = players[livePlayerId];
+const hostAllowsChoice =
+  canPlayerChoose(previous);
 
-  if (hostBlockedChoice) {
-    players[livePlayerId] = {
-      ...player,
-      allowRoleChoice: false,
-      roleChoiceLocked: true
-    };
-  } else {
-    players[livePlayerId] = normalizePlayerState(
-      {
-        ...player,
-        allowRoleChoice: true,
-        roleChoiceLocked: false
-      },
-      joinChoice || {}
-    );
-  }
-}
+if (
+  !liveIsHost &&
+  (!liveRoomSettings.autoAssign || hostAllowsChoice) &&
+  !hostBlockedChoice
+) {
 
 const { data: updatedRoom, error: updateError } = await sb
   .from('rooms')
@@ -2048,27 +2035,23 @@ function renderPlayersPanel(players = {}) {
   const autoOptions = document.createElement('div');
   autoOptions.className = 'host-auto-options';
 
-  function addAutoOption(labelText, key) {
-    const label = document.createElement('label');
-    label.className = 'host-auto-option';
+const label = document.createElement('label');
+label.className = 'host-auto-option';
 
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = liveRoomSettings[key] !== false;
+const checkbox = document.createElement('input');
+checkbox.type = 'checkbox';
+checkbox.checked = liveRoomSettings.autoAssign !== false;
 
-    checkbox.addEventListener('change', () => {
-      setAutoAssignmentSetting(key, checkbox.checked);
-    });
+checkbox.addEventListener('change', () => {
+  setAutoAssignmentSetting(checkbox.checked);
+});
 
-    const text = document.createElement('span');
-    text.textContent = labelText;
+const text = document.createElement('span');
+text.textContent = 'Automatically assign teams and roles';
 
-    label.append(checkbox, text);
-    autoOptions.appendChild(label);
-  }
-
-  addAutoOption('Automatically assign teams', 'autoTeams');
-  addAutoOption('Automatically assign roles', 'autoRoles');
+label.append(checkbox, text);
+autoOptions.appendChild(label);
+content.appendChild(autoOptions);
 
   content.appendChild(autoOptions);
 
@@ -2145,6 +2128,7 @@ function renderPlayersPanel(players = {}) {
       (player.name || 'Player') +
       (player.isHost ? ' (host)' : '');
 
+if (!player.isHost) {
     const permissionLabel = document.createElement('label');
     permissionLabel.className = 'host-player-permission';
 
@@ -2165,7 +2149,10 @@ function renderPlayersPanel(players = {}) {
 
     permissionLabel.append(permission, permissionText);
     identity.append(name, permissionLabel);
-
+} else {
+  identity.appendChild(name);
+}
+	
     // Team selector
     const team = document.createElement('select');
     team.setAttribute('aria-label', `Team for ${player.name}`);
@@ -2584,12 +2571,8 @@ async function setPlayerRoleChoicePermission(playerId, allowed) {
   broadcastLiveState(updated);
 }
 
-async function setAutoAssignmentSetting(settingKey, enabled) {
+async function setAutoAssignmentSetting(enabled) {
   if (!liveIsHost || !liveRoomId) return;
-
-  if (!['autoTeams', 'autoRoles'].includes(settingKey)) {
-    return;
-  }
 
   const { data: room, error } = await sb
     .from('rooms')
@@ -2598,28 +2581,17 @@ async function setAutoAssignmentSetting(settingKey, enabled) {
     .single();
 
   if (error || !room) {
-    console.error(error);
+    console.error('Could not load room settings:', error);
     return;
   }
 
-  const settings = getAutoAssignmentSettings(room.settings);
+  const settings = {
+    ...getAutoAssignmentSettings(room.settings),
+    autoAssign: enabled
+  };
+
+  // Preserve each player's individual host permission.
   const players = { ...(room.players || {}) };
-
-  settings[settingKey] = enabled;
-
-  // Manual assignment means players may choose for themselves.
-  // The host retains assignment authority regardless.
-  if (!enabled) {
-    Object.entries(players).forEach(([id, player]) => {
-      if (!player.isHost) {
-        players[id] = {
-          ...player,
-          allowRoleChoice: true,
-          roleChoiceLocked: false
-        };
-      }
-    });
-  }
 
   const { data: updated, error: updateError } = await sb
     .from('rooms')
@@ -2633,13 +2605,12 @@ async function setAutoAssignmentSetting(settingKey, enabled) {
     .single();
 
   if (updateError || !updated) {
-    console.error(updateError);
+    console.error('Could not save assignment setting:', updateError);
     renderPlayersPanel(room.players || {});
     return;
   }
 
   liveRoomSettings = getAutoAssignmentSettings(updated.settings);
-
   applyLiveRoomState(updated);
   broadcastLiveState(updated);
 }
