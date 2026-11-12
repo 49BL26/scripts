@@ -271,9 +271,11 @@
 }
 .roster-empty {
   list-style: none;
-  margin-left: -18px !important;
+  margin: 0;
+  padding: 4px 0;
   color: #777;
   font-style: italic;
+  text-align: center;
 }
 @media (max-width: 420px) {
   .roster-teams {
@@ -441,13 +443,19 @@ body.grid-align-open {
 }
 
 .host-auto-options {
-  display: grid;
-  gap: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 10px 0 14px;
   padding: 10px;
   border: 1px solid #ddd;
   border-radius: 8px;
   background: #fafafa;
+}
+.host-swap-teams {
+  order: -1;          /* forces it to the far left */
 }
 
 .host-auto-option {
@@ -2025,23 +2033,27 @@ function renderPlayersPanel(players = {}) {
   const autoOptions = document.createElement('div');
   autoOptions.className = 'host-auto-options';
 
-const label = document.createElement('label');
-label.className = 'host-auto-option';
+  // Swap button (left)
+  const swapButton = document.createElement('button');
+  swapButton.type = 'button';
+  swapButton.className = 'host-swap-teams';
+  swapButton.textContent = '⇄ Swap Red / Blue Teams';
+  swapButton.addEventListener('click', swapLiveTeams);
+  autoOptions.appendChild(swapButton);
 
-const checkbox = document.createElement('input');
-checkbox.type = 'checkbox';
-checkbox.checked = liveRoomSettings.autoAssign !== false;
-
-checkbox.addEventListener('change', () => {
-  setAutoAssignmentSetting(checkbox.checked);
-});
-
-const text = document.createElement('span');
-text.textContent = 'Automatically assign teams and roles';
-
-label.append(checkbox, text);
-autoOptions.appendChild(label);
-content.appendChild(autoOptions);
+  // Auto-assign checkbox (right)
+  const label = document.createElement('label');
+  label.className = 'host-auto-option';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = liveRoomSettings.autoAssign !== false;
+  checkbox.addEventListener('change', () => {
+    setAutoAssignmentSetting(checkbox.checked);
+  });
+  const text = document.createElement('span');
+  text.textContent = 'Automatically assign teams and roles';
+  label.append(checkbox, text);
+  autoOptions.appendChild(label);
 
   content.appendChild(autoOptions);
 
@@ -5530,9 +5542,26 @@ function uiSync() {
     const l1   = val('op1');
     const sec  = val('op2-adv');
 
-    const setup = l1 === 'setup', adv = l1 === 'advanced', host = l1 === 'host';
+const setup = l1 === 'setup', adv = l1 === 'advanced', host = l1 === 'host';
 
-    show('g-spy',      l1 === 'spymaster');
+// First time entering Online Play → ask for codename
+if (host && !localStorage.getItem('termkryt-player-name')) {
+  (async () => {
+    const answer = await uiPrompt('What is your codename?', '');
+    if (answer === null) return;
+    const name = String(answer).trim().replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+    if (!name) {
+      await uiAlert('Enter a name (1–10 letters or numbers only).');
+      return;
+    }
+    const input = document.getElementById('live-name-input');
+    if (input) input.value = name;
+    localStorage.setItem('termkryt-player-name', name);
+    updateLiveNameButton();
+  })();
+}
+
+	show('g-spy',      l1 === 'spymaster');
 	show('g-host',    host);
     show('g-setup',    setup);
     show('g-adv',      adv);
