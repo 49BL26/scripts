@@ -1440,6 +1440,54 @@ const host = players[data.host_id] || {};
 const hostTeam = host.team === 'blue' ? 'blue' : 'red';
 const firstGuestTeam = oppositeTeam(hostTeam);
 
+let joinChoice = null;
+
+const hostBlockedChoice =
+  previous?.roleChoiceLocked === true;
+
+if (
+  !liveIsHost &&
+  liveRoomSettings.autoTeams &&
+  liveRoomSettings.autoRoles &&
+  !hostBlockedChoice
+) {
+  const team = await askChoice(
+    'Choose Your Team',
+    'Which team would you like to join?',
+    [
+      { label: 'Red', value: 'red', primary: true },
+      { label: 'Blue', value: 'blue' },
+      { label: 'Cancel', value: null }
+    ]
+  );
+
+  if (!team) return;
+
+  const roleChoices = [
+    { label: 'Player', value: 'player', primary: true },
+    { label: 'Bystander', value: 'bystander' }
+  ];
+
+  if (!hasTeamSpymaster(players, team, livePlayerId)) {
+    roleChoices.unshift({
+      label: 'Spymaster',
+      value: 'spymaster'
+    });
+  }
+
+  roleChoices.push({ label: 'Cancel', value: null });
+
+  const role = await askChoice(
+    'Choose Your Role',
+    'Which role would you like?',
+    roleChoices
+  );
+
+  if (!role) return;
+
+  joinChoice = { team, role };
+}
+
 if (!isNewGuest) {
   // Preserve an existing player's assignment and permissions.
   players[livePlayerId] = {
@@ -1531,7 +1579,27 @@ if (!isNewGuest) {
   }
 }
 
-	
+if (!liveIsHost) {
+  const player = players[livePlayerId];
+
+  if (hostBlockedChoice) {
+    players[livePlayerId] = {
+      ...player,
+      allowRoleChoice: false,
+      roleChoiceLocked: true
+    };
+  } else {
+    players[livePlayerId] = normalizePlayerState(
+      {
+        ...player,
+        allowRoleChoice: true,
+        roleChoiceLocked: false
+      },
+      joinChoice || {}
+    );
+  }
+}
+
 const { data: updatedRoom, error: updateError } = await sb
   .from('rooms')
   .update({
@@ -2813,7 +2881,7 @@ async function saveLivePlayerName() {
       updated_at: new Date().toISOString()
     })
     .eq('id', liveRoomId)
-    .select('board, players')
+	.select('board, players, settings')
     .maybeSingle();
 
   if (writeError || !updatedRoom) {
@@ -2822,14 +2890,6 @@ async function saveLivePlayerName() {
   }
 
   applyLiveRoomState(updatedRoom);
-
-if (state.settings) {
-  liveRoomSettings = getAutoAssignmentSettings(state.settings);
-}
-
-if (liveIsHost && state.players) {
-  renderPlayersPanel(state.players);
-}
 	
   if (liveChannel) {
     liveChannel.send({
