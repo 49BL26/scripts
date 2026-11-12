@@ -1579,55 +1579,47 @@ if (!isNewGuest) {
 const hostAllowsChoice =
   canPlayerChoose(previous);
 
-if (
-  !liveIsHost &&
-  (!liveRoomSettings.autoAssign || hostAllowsChoice) &&
-  !hostBlockedChoice
-) {
+// Always write the player into the room (for non-hosts)
+if (!liveIsHost) {
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', code)
+    .select('players, board, settings')
+    .maybeSingle();
 
-const { data: updatedRoom, error: updateError } = await sb
-  .from('rooms')
-  .update({
-    players,
-    updated_at: new Date().toISOString()
-  })
-  .eq('id', code)
-  .select('players, board')
-  .maybeSingle();
+  if (updateError || !updatedRoom) {
+    console.error('Could not save player:', updateError);
+    alert('Could not join the room. Check permissions or try again.');
+    return;
+  }
 
-if (updateError || !updatedRoom) {
-  console.error('Could not save player name:', updateError);
-  alert('Could not save your name. Check the room permissions.');
-  return;
-}
+  const me = updatedRoom.players?.[livePlayerId] || players[livePlayerId];
+  liveRole = me?.role ?? null;
+  liveTeam = me?.team ?? null;
 
-  const me = players[livePlayerId];
-  liveRole = me.role;
-  liveTeam = me.team;
-
-  applyLiveBoard(data.board, liveRole === 'spymaster');
+  applyLiveBoard(updatedRoom.board || data.board, liveRole === 'spymaster');
   await subscribeToRoom(code);
 
-	if (liveChannel) {
-  await liveChannel.send({
-    type: 'broadcast',
-    event: 'room-state',
-    payload: {
-      state: {
-        players: updatedRoom.players,
-        board: updatedRoom.board
-      }
-    }
-  });
-}
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
+
+  applyLiveRoomState(updatedRoom);
   showRoomCode(code);
-  showHostPlayersPanel(liveIsHost);
-  if (liveIsHost) renderPlayersPanel(players);
-  enterLiveMode({ isHost: liveIsHost });
+  showHostPlayersPanel(false);
+  enterLiveMode({ isHost: false });
   renderLiveRoster(updatedRoom.players || players);
   updateLiveAccessUI();
 }
-}
+
 window.joinGame = joinGame;
 
 function joinRoomFromUrl() {
