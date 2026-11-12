@@ -703,10 +703,11 @@ body.grid-align-open {
 
 	<div id="live-self-role-controls" style="display:none; align-items:center; gap:6px;">
   <label for="live-self-team">Team:</label>
-  <select id="live-self-team">
-    <option value="red">Red</option>
-    <option value="blue">Blue</option>
-  </select>
+<select id="live-self-team">
+  <option value="red">Red</option>
+  <option value="blue">Blue</option>
+  <option value="beige">Beige (watch only)</option>
+</select>
 
   <label for="live-self-role">Role:</label>
   <select id="live-self-role">
@@ -1004,35 +1005,35 @@ function updateLocalRotationButton() {
 function normalizePlayerState(player = {}, changes = {}) {
   const next = { ...player, ...changes };
 
-  // Preserve the last active team before becoming a bystander.
   if (next.role === 'bystander') {
-    if (next.team === 'red' || next.team === 'blue') {
-      next.previousTeam = next.team;
+    // Explicit watch-only
+    if (next.team === 'beige' || changes.team === 'beige') {
+      next.team = 'beige';
+      next.waitingForPair = false;
     } else {
-      next.previousTeam =
-        next.previousTeam === 'blue' ? 'blue' : 'red';
+      // Waiting for a real team — keep intended team in previousTeam
+      if (next.team === 'red' || next.team === 'blue') {
+        next.previousTeam = next.team;
+      } else if (next.previousTeam !== 'red' && next.previousTeam !== 'blue') {
+        next.previousTeam = 'red';
+      }
+      next.team = 'beige';   // display as beige, but previousTeam remembers the side
     }
-
-    next.team = 'beige';
   } else {
-    // Restore the legacy team when returning to an active role.
     if (next.team === 'beige') {
-      next.team =
-        next.previousTeam === 'blue' ? 'blue' : 'red';
+      next.team = next.previousTeam === 'blue' ? 'blue' : 'red';
     }
-
     if (next.team !== 'red' && next.team !== 'blue') {
-      next.team =
-        next.previousTeam === 'blue' ? 'blue' : 'red';
+      next.team = next.previousTeam === 'blue' ? 'blue' : 'red';
     }
-
     next.previousTeam = next.team;
+    next.waitingForPair = false;
   }
 
-
-  // Keep waitingForPair if it was set on either the original player or the changes
   if (changes.waitingForPair === undefined && player.waitingForPair === undefined) {
-    next.waitingForPair = false;
+    if (next.role !== 'bystander' || next.team === 'beige') {
+      next.waitingForPair = false;
+    }
   }
   return next;
 }
@@ -1613,8 +1614,10 @@ if (!isNewGuest) {
     });
   } else if (waitingEntry) {
     // Complete a waiting pair → both become Players on alternating teams
-    const [waitingId, waitingPlayer] = waitingEntry;
-    const waitingTeam = (waitingPlayer.previousTeam === 'red' || waitingPlayer.previousTeam === 'blue')
+const waitingEntry = guests.find(([, p]) =>
+  p.waitingForPair === true &&
+  (p.previousTeam === 'red' || p.previousTeam === 'blue')
+);
       ? waitingPlayer.previousTeam
       : (waitingPlayer.team === 'red' || waitingPlayer.team === 'blue')
         ? waitingPlayer.team
@@ -2421,9 +2424,13 @@ function renderSelfRoleControls(players = {}) {
   if (!canChoose) return;
 
   teamSelect.value =
-    me.role === 'bystander'
-      ? (me.previousTeam || 'red')
-      : me.team;
+    me.role === 'bystander' && me.team === 'beige'
+      ? 'beige'
+      : (me.role === 'bystander'
+          ? (me.previousTeam || 'red')
+          : me.team);
+
+  roleSelect.value = me.role || 'player';
 
   roleSelect.value = me.role || 'player';
 
