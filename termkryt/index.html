@@ -693,6 +693,7 @@ body.grid-align-open {
 	
   <input id="live-name-input" type="text" maxlength="10" autocomplete="off" spellcheck="false" style="display:none;">
   <button id="live-name-button" type="button" onclick="editLiveName()">Name: …</button>
+  <button id="btn-local-rotate" type="button" onclick="cycleLocalBoardRotation()" style="display:none;">Rotate View (0°)</button>
 	
   <button type="button" onclick="hostGame()">Host Game</button>
   <button onclick="joinGame(prompt('Room code?'))">Join Game</button>
@@ -963,6 +964,42 @@ function getAutoAssignmentSettings(settings = {}) {
   };
 }
 
+let localBoardRotation = 0;   // 0–3 quarter-turns clockwise (personal view only)
+
+// Rotate a 25-cell array by `turns` quarter-turns clockwise (turns can be negative)
+function rotateCellsArray(cells, turns) {
+  if (!cells || cells.length !== 25) return cells || [];
+  const t = ((turns % 4) + 4) % 4;
+  if (t === 0) return cells.slice();
+  const next = new Array(25);
+  for (let i = 0; i < 25; i++) {
+    const r = Math.floor(i / 5), c = i % 5;
+    let nr, nc;
+    if (t === 1) { nr = c; nc = 4 - r; }       // 90° CW
+    else if (t === 2) { nr = 4 - r; nc = 4 - c; } // 180°
+    else { nr = 4 - c; nc = r; }                 // 270° CW
+    next[nr * 5 + nc] = cells[i];
+  }
+  return next;
+}
+
+function cycleLocalBoardRotation() {
+  if (liveIsHost) return;               // host keeps root orientation
+  localBoardRotation = (localBoardRotation + 1) % 4;
+  lastBoardFingerprint = '';            // force re-apply
+  // Re-apply last known board if we have one in the room state
+  if (liveRoomId && typeof applyLiveRoomState === 'function') {
+    // simplest: re-fetch or just re-render from current DOM snapshot un-rotated then re-rotated
+    const snap = getLiveBoardSnapshot(); // already un-rotates (see below)
+    applyLiveBoard(snap, liveRole === 'spymaster');
+  }
+  updateLocalRotationButton();
+}
+
+function updateLocalRotationButton() {
+  const btn = document.getElementById('btn-local-rotate');
+  if (btn) btn.textContent = `Rotate View (${localBoardRotation * 90}°)`;
+}
 
 function normalizePlayerState(player = {}, changes = {}) {
   const next = { ...player, ...changes };
@@ -1339,19 +1376,35 @@ function getOrCreatePlayerId(code) {
   return id;
 }
 
-  function getLiveBoardSnapshot() {
-    if (typeof getBoardSnapshot === 'function') return getBoardSnapshot();
-    const cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
-      text: (c.querySelector('.cell-text') || c).textContent.trim(),
-      colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
-      isPlayFlipped: c.classList.contains('play-active')
-    }));
-    return {
-      isFlipped: !!window.isFlipped,
-      rotation: window.currentRotation || 0,
-      cells
-    };
+function getLiveBoardSnapshot() {
+  if (typeof getBoardSnapshot === 'function') {
+    const snap = getBoardSnapshot();
+    // Un-rotate personal view so host always receives root orientation
+    if (!liveIsHost && localBoardRotation && snap?.cells) {
+      return {
+        ...snap,
+        cells: rotateCellsArray(snap.cells, -localBoardRotation),
+        cellsData: snap.cellsData
+          ? rotateCellsArray(snap.cellsData, -localBoardRotation)
+          : undefined
+      };
+    }
+    return snap;
   }
+  let cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
+    text: (c.querySelector('.cell-text') || c).textContent.trim(),
+    colorClass: ['red','blue','white','black','beige'].find(k => c.classList.contains(k)) || 'white',
+    isPlayFlipped: c.classList.contains('play-active')
+  }));
+  if (!liveIsHost && localBoardRotation) {
+    cells = rotateCellsArray(cells, -localBoardRotation);
+  }
+  return {
+    isFlipped: !!window.isFlipped,
+    rotation: window.currentRotation || 0,
+    cells
+  };
+}
 	
 let lastBoardFingerprint = '';
 
@@ -1383,6 +1436,35 @@ function applyLiveBoard(board, asSpymaster) {
   if (typeof initBoard === 'function') {
     window.isFlipped = !!board.isFlipped;
     window.currentRotation = board.currentRotation ?? board.rotation ?? 0;
+
+function applyLiveBoard(board, asSpymaster) {
+  if (!board) return;
+
+  let raw = board.cellsData || board.cells;
+  if (!raw?.length) return;
+
+  // Personal view rotation (non-host only)
+  if (!liveIsHost && localBoardRotation) {
+    raw = rotateCellsArray(raw, localBoardRotation);
+  }
+
+  const fp = boardFingerprint({ ...board, cells: raw }) + (asSpymaster ? ':S' : ':P') + ':R' + localBoardRotation;
+  if (fp === lastBoardFingerprint) return;
+  lastBoardFingerprint = fp;
+
+  const cells = raw.map(cell =>
+    asSpymaster || cell.isPlayFlipped
+      ? cell
+      : { ...cell, colorClass: 'white' }
+  );
+
+  if (typeof initBoard === 'function') {
+    // Do NOT overwrite root currentRotation / isFlipped from personal view
+    window.isFlipped = !!board.isFlipped;
+    // keep window.currentRotation as the root text-rotation; personal grid rotation is separate
+    initBoard(cells);
+  }
+} 
     initBoard(cells);
   }
 }
@@ -1979,6 +2061,8 @@ function enterLiveMode({ isHost }) {
   // Optional: hide join/host entry for non-host after they’re in
   const nameEl = document.getElementById('live-name-input');
   const joinIn = document.getElementById('join-code-input');
+  const rotBtn = document.getElementById('btn-local-rotate');
+  if (rotBtn) rotBtn.style.display = (liveRoomId && !liveIsHost) ? '' : 'none';
   // Keep room label visible for everyone
   if (!isHost) {
     // non-host: hide host button only (adjust selectors if needed)
@@ -2622,6 +2706,8 @@ function updateLiveAccessUI() {
   const gHost = document.getElementById('g-host');
   const gSpy = document.getElementById('g-spy');
   const exitWrap = document.getElementById('live-exit-wrap');
+  const rotBtn = document.getElementById('btn-local-rotate');
+  if (rotBtn) rotBtn.style.display = (liveRoomId && !liveIsHost) ? '' : 'none';
 
   // For players in a live room, hide the app controls unless they exit
   const hideMainControls = isGuest && !isSpymaster;
