@@ -946,12 +946,10 @@ body.grid-align-open {
 let liveRoomSettings = { autoAssign: true };
 
 function getAutoAssignmentSettings(settings = {}) {
-  const autoAssign = settings.autoAssign ??
-    (settings.autoTeams == false && settings.autoRoles == false);
+  const autoAssign = settings.autoAssign ?? true;   // default ON
 
   return {
     autoAssign,
-    // Keep the individual flags (default to true when autoAssign is on)
     autoTeams: settings.autoTeams ?? autoAssign,
     autoRoles: settings.autoRoles ?? autoAssign
   };
@@ -986,9 +984,11 @@ function normalizePlayerState(player = {}, changes = {}) {
     next.previousTeam = next.team;
   }
 
-  next.waitingForPair = false;
+  // Only clear the flag when it wasn't explicitly set
+  if (changes.waitingForPair === undefined) {
+    next.waitingForPair = false;
+  }
   return next;
-}
 
 function oppositeTeam(team) {
   return team === 'red' ? 'blue' : 'red';
