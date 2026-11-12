@@ -1252,6 +1252,7 @@ async function hostGame() {
   const code = randomCode();
   livePlayerId = getOrCreatePlayerId(code);
   liveRoomId = code;
+  liveHasExitedRoom = false;
   liveIsHost = true;
   liveRole = null;
   liveTeam = null;
@@ -1386,6 +1387,16 @@ async function leaveLiveRoomLocal() {
 
   const mode = document.getElementById('op1');
   if (mode) mode.value = 'player';
+
+  // Force unlock board / cells after leave or kick
+  const board = document.getElementById('board');
+  if (board) {
+    board.style.pointerEvents = '';
+    board.style.filter = '';
+  }
+  document.querySelectorAll('.cell').forEach(cell => {
+    cell.style.pointerEvents = '';
+  });
 
   updateLiveAccessUI();
   if (typeof uiSync === 'function') uiSync();
@@ -1550,6 +1561,7 @@ async function joinGame(code) {
 
   livePlayerId = getOrCreatePlayerId(code);  // same id if rejoining this room
   liveRoomId = code;
+  liveHasExitedRoom = false;
   liveIsHost = data.host_id === livePlayerId;
   liveRoomSettings = (data.settings);
 
@@ -2133,15 +2145,13 @@ function showHostPlayersPanel(isHost) {
 }
 
 function enterLiveMode({ isHost }) {
-  // Optional: hide join/host entry for non-host after they’re in
+  liveHasExitedRoom = false;   // rejoin / host must clear exit state
+  liveIsHost = !!isHost;
+
   const nameEl = document.getElementById('live-name-input');
-  const joinIn = document.getElementById('join-code-input');
-  const rotBtn = document.getElementById('btn-local-rotate');
-  if (rotBtn) rotBtn.style.display = (liveRoomId && !liveIsHost) ? '' : 'none';
-  // Keep room label visible for everyone
-  if (!isHost) {
-    // non-host: hide host button only (adjust selectors if needed)
-  }
+  // (keep any existing nameEl logic you already have below this)
+
+  updateLiveAccessUI();
 }
 
 
@@ -2773,9 +2783,10 @@ async function setAutoAssignmentSetting(enabled) {
 }
 	
 function updateLiveAccessUI() {
-  const roomJoined = !!liveRoomId;
-  const isGuest = roomJoined && !liveIsHost && !liveHasExitedRoom;
-  const isSpymaster = !!liveRoomId && liveRole === 'spymaster';
+  const roomJoined = !!liveRoomId && !liveHasExitedRoom;
+  const isGuest = roomJoined && !liveIsHost;
+  const isSpymaster = roomJoined && liveRole === 'spymaster';
+  const canEditBoard = !roomJoined || liveIsHost || isSpymaster;
 
   // Hide the normal top-level controls for a locked guest
   const undo = document.getElementById('btn-undo');
@@ -2791,7 +2802,7 @@ function updateLiveAccessUI() {
   if (rotBtn) rotBtn.style.display = (liveRoomId && !liveIsHost) ? '' : 'none';
 
   // For players in a live room, hide the app controls unless they exit
-  const hideMainControls = isGuest && !isSpymaster;
+  const hideMainControls = roomJoined && !liveIsHost && !isSpymaster;
 
   if (undo) undo.style.display = hideMainControls ? 'none' : '';
   if (redo) redo.style.display = hideMainControls ? 'none' : '';
@@ -2824,9 +2835,13 @@ function updateLiveAccessUI() {
   // If the player is a guest and not a spymaster, disable board interactions
   const board = document.getElementById('board');
   if (board) {
-    board.style.pointerEvents = (isGuest && !isSpymaster) ? 'none' : '';
-    board.style.filter = (isGuest && !isSpymaster) ? 'grayscale(0.1) brightness(0.98)' : '';
+    board.style.pointerEvents = canEditBoard ? '' : 'none';
+    board.style.filter = canEditBoard ? '' : 'grayscale(0.1) brightness(0.98)';
   }
+
+  document.querySelectorAll('.cell').forEach(cell => {
+    cell.style.pointerEvents = canEditBoard ? '' : 'none';
+  });
 
   // Also disable all cells explicitly
   document.querySelectorAll('.cell').forEach(cell => {
