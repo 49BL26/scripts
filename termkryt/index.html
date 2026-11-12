@@ -653,7 +653,7 @@ body.grid-align-open {
   <select id="live-self-role">
     <option value="spymaster">Spymaster</option>
     <option value="player">Player</option>
-    <option value="spectator">Spectator</option>
+    <option value="spectator">Bystander</option>
   </select>
 </div>	
 	
@@ -848,7 +848,7 @@ body.grid-align-open {
     </section>
   </div>
   <section class="roster-spectators">
-    <h4>Spectators</h4>
+    <h4>Bystanders</h4>
     <ul id="roster-spectators"></ul>
   </section>
 </div>
@@ -1069,12 +1069,15 @@ function enforcePlayerBoardLock() {
   document.getElementById('board')?.classList.toggle('locked-for-player', locked);
 }
 
+
 function syncLiveSpymasterControls() {
   const isLiveSpymaster =
     !!liveRoomId && liveRole === 'spymaster';
 
   const mode = document.getElementById('mode-select');
   const spyTeam = document.getElementById('spy-team');
+  const spyTeamLabel =
+    document.querySelector('label[for="spy-team"]');
 
   if (mode) {
     mode.value = isLiveSpymaster
@@ -1086,17 +1089,17 @@ function syncLiveSpymasterControls() {
     if (liveRoomId) {
       spyTeam.value = liveTeam || 'red';
       spyTeam.disabled = true;
-      spyTeam.closest('label')?.style.setProperty(
-        'display', 'none'
-      );
       spyTeam.style.display = 'none';
     } else {
       spyTeam.disabled = false;
       spyTeam.style.display = '';
-      spyTeam.closest('label')?.style.setProperty(
-        'display', ''
-      );
     }
+  }
+
+  if (spyTeamLabel) {
+    spyTeamLabel.style.display = liveRoomId
+      ? 'none'
+      : '';
   }
 
   document.getElementById('g-spy')
@@ -1934,7 +1937,7 @@ function renderPlayersPanel(players = {}) {
   spectatorSection.className = 'host-roster-spectators';
 
   const spectatorHeading = document.createElement('h4');
-  spectatorHeading.textContent = 'Spectators';
+  spectatorHeading.textContent = 'Bystanders';
 
   const spectatorList = document.createElement('div');
   spectatorList.className = 'host-roster-list';
@@ -1979,7 +1982,7 @@ function renderPlayersPanel(players = {}) {
     [
       ['player', 'Player'],
       ['spymaster', 'Spymaster'],
-      ['spectator', 'Spectator']
+      ['spectator', 'Bystander']
     ].forEach(([value, label]) => {
       const option = document.createElement('option');
       option.value = value;
@@ -2137,14 +2140,14 @@ if (!team) return null;
     const role = await askChoice('Choose your role', 'What role would you like?', [
       { label: 'Spymaster', value: 'spymaster' },
       { label: 'Player', value: 'player', primary: true },
-      { label: 'Spectator', value: 'spectator' }
+      { label: 'Bystander', value: 'spectator' }
     ]);
 
     if (!role) return null;
 
     if (role === 'spymaster' && hasTeamSpymaster(players, team, playerId)) {
       await uiAlert(
-        `The ${team} team already has a spymaster. Choose Player or Spectator, or cancel and try another team.`,
+        `The ${team} team already has a spymaster. Choose Player or Bystander, or cancel and try another team.`,
         'Spymaster unavailable'
       );
       continue;
@@ -2174,7 +2177,7 @@ async function setPlayerRole(playerId, team, role) {
 
   if (!previous) return;
 
-  // Spectators are beige and cannot occupy a team slot.
+  // Bystanders are beige and cannot occupy a team slot.
   if (role === 'spectator') {
     players[playerId] = normalizePlayerState(previous, {
       role: 'spectator'
