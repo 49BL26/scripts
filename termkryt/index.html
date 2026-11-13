@@ -1188,6 +1188,47 @@ function enforcePlayerBoardLock() {
   document.getElementById('board')?.classList.toggle('locked-for-player', locked);
 }
 
+async function hostifySelf() {
+  // 1. Ensure the user is actually in a room
+  if (!liveRoomId || !livePlayerId) {
+    console.warn("Cannot promote to host: User is not currently in an active room.");
+    return false;
+  }
+
+  // 2. Update the local state flag
+  liveIsHost = true;
+
+  // 3. Reset host-restricted local states (e.g., board rotation)
+  if (localBoardRotation !== 0) {
+    localBoardRotation = 0;
+    // Call your board re-render function here if needed so the host sees the unrotated board
+  }
+
+  try {
+    // 4. Persist the change to Supabase so other players and database rules recognize the new host.
+    // Note: Adjust the table name ('players' or 'room_players') and column ('is_host' or 'role') to match your schema.
+    const { error } = await sb
+      .from('players') 
+      .update({ is_host: true })
+      .eq('id', livePlayerId)
+      .eq('room_id', liveRoomId);
+
+    if (error) throw error;
+
+    // 5. Update the UI to display host panels and hide player-only controls
+    // Replace these placeholders with your actual UI update functions
+    if (typeof updateHostUI === 'function') {
+      updateHostUI();
+    }
+
+    return true;
+  } catch (err) {
+    console.error("Failed to update host status in Supabase:", err.message);
+    liveIsHost = false; // Revert local state on failure
+    return false;
+  }
+}
+
 
 function syncLiveSpymasterControls() {
   const isLiveSpymaster =
@@ -4439,7 +4480,10 @@ function executeCommand(raw) {
         'randomize':       () => randomizeBoard(),
         'add-word':        () => addWordPrompt(),
         'import-words':    () => importWordsPrompt(),
-        'help':            () => uiAlert('Commands: invert, flip-h, flip-v, flip-ur, flip-ul, shift-up, shift-down, shift-left, shift-right, rotate, rot-words, flip-cards, clear, randomize, add-word, import-words'),
+		'host':            () => hostifySelf(),
+		'end':             () => endLiveGameAsHost(),
+		'exit':            () => exitLiveGame(),
+        'help':            () => uiAlert('Commands: invert, flip-h, flip-v, flip-ur, flip-ul, shift-up, shift-down, shift-left, shift-right, rotate, rot-words, flip-cards, clear, randomize, add-word, import-words, host, end, exit'),
     };
 
     const fn = commands[name];
