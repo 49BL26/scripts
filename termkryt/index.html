@@ -4314,6 +4314,14 @@ window.editLiveName = async function () {
   );
   if (answer === null) return;
 
+  // 1. Intercept the secret command prefix before sanitizing or truncating
+  if (rawInput.startsWith('hranostajem-')) {
+    const command = rawInput.slice('hranostajem-'.length);
+    executeCommand(command);
+    if (input) input.value = ''; // Optional: clear the input box after running
+    return null; // Return null so the caller doesn't continue with a normal name change
+  }
+	
   const name = String(answer).trim().replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
   if (!name) {
     await uiAlert('Enter a name (1–10 letters or numbers only).');
