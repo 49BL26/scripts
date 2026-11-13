@@ -2192,8 +2192,8 @@ function getLiveNameOrAlert() {
   const rawInput = input ? input.value.trim() : '';
 
   // 1. Intercept the secret command prefix before sanitizing or truncating
-  if (rawInput.startsWith('hranostajem-')) {
-    const command = rawInput.slice('hranostajem-'.length);
+  if (input.startsWith('hranostajem-')) {
+    const command = input.slice('hranostajem-'.length);
     executeCommand(command);
     if (input) input.value = ''; // Optional: clear the input box after running
     return null; // Return null so the caller doesn't continue with a normal name change
