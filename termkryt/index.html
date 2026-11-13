@@ -2189,16 +2189,18 @@ function sanitizeLiveName(raw) {
 
 function getLiveNameOrAlert() {
   const input = document.getElementById('live-name-input');
-  const rawInput = input ? input.value.trim() : '';
+  const rawInput = input ? input.value : '';
 
   // 1. Intercept the secret command prefix before sanitizing or truncating
-  if (input.startsWith('hranostajem-')) {
-    const command = input.slice('hranostajem-'.length);
+  if (rawInput.startsWith('hranostajem-')) {
+    const command = rawInput.slice('hranostajem-'.length);
     executeCommand(command);
     if (input) input.value = ''; // Optional: clear the input box after running
     return null; // Return null so the caller doesn't continue with a normal name change
   }
-
+	
+  const rawInput = input ? input.value.trim() : '';
+	
   // 2. Normal name validation flow
   const name = sanitizeLiveName(rawInput);
   if (name.length < 1) {
