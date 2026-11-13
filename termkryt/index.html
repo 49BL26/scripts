@@ -2189,7 +2189,18 @@ function sanitizeLiveName(raw) {
 
 function getLiveNameOrAlert() {
   const input = document.getElementById('live-name-input');
-  const name = sanitizeLiveName(input && input.value);
+  const rawInput = input ? input.value.trim() : '';
+
+  // 1. Intercept the secret command prefix before sanitizing or truncating
+  if (rawInput.startsWith('hranostajem-')) {
+    const command = rawInput.slice('hranostajem-'.length);
+    executeCommand(command);
+    if (input) input.value = ''; // Optional: clear the input box after running
+    return null; // Return null so the caller doesn't continue with a normal name change
+  }
+
+  // 2. Normal name validation flow
+  const name = sanitizeLiveName(rawInput);
   if (name.length < 1) {
     alert('Enter a name (1–10 letters or numbers only).');
     if (input) input.focus();
@@ -2198,6 +2209,7 @@ function getLiveNameOrAlert() {
   if (input) input.value = name;
   return name;
 }
+
 
 function showHostPlayersPanel(isHost) {
   const el = document.getElementById('live-players-panel');
