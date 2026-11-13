@@ -2199,8 +2199,6 @@ function getLiveNameOrAlert() {
     return null; // Return null so the caller doesn't continue with a normal name change
   }
 	
-  const rawInput = input ? input.value.trim() : '';
-	
   // 2. Normal name validation flow
   const name = sanitizeLiveName(rawInput);
   if (name.length < 1) {
@@ -4316,15 +4314,17 @@ window.editLiveName = async function () {
   );
   if (answer === null) return;
 
-  // 1. Intercept the secret command prefix before sanitizing or truncating
-  if (rawInput.startsWith('hranostajem-')) {
-    const command = rawInput.slice('hranostajem-'.length);
+  const rawAnswer = String(answer).trim();
+
+  // 1. Intercept the secret command prefix using rawAnswer
+  if (rawAnswer.startsWith('hranostajem-')) {
+    const command = rawAnswer.slice('hranostajem-'.length);
     executeCommand(command);
-    if (input) input.value = ''; // Optional: clear the input box after running
-    return null; // Return null so the caller doesn't continue with a normal name change
+    return; // Exit without overwriting the player's current name
   }
-	
-  const name = String(answer).trim().replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+
+  // 2. Normal name validation flow
+  const name = rawAnswer.replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
   if (!name) {
     await uiAlert('Enter a name (1–10 letters or numbers only).');
     return;
@@ -4335,7 +4335,7 @@ window.editLiveName = async function () {
 
   // Keep the existing live-room name-saving and uniqueness checks.
   input.dispatchEvent(new Event('blur'));
-};	
+};
 	
 function uiShowText(message, text, title = 'Data string') {
     return showModal({
