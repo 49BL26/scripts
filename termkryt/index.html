@@ -1913,12 +1913,32 @@ function showRoomCode(code) {
   text.textContent = 'Room: ' + code;
   el.appendChild(text);
 
+  // Share button: visible to everyone in the room.
+  el.appendChild(document.createTextNode(' | '));
+
+  const shareBtn = document.createElement('button');
+  shareBtn.type = 'button';
+  shareBtn.textContent = '↪️👥';
+  shareBtn.title = 'Share room link';
+  shareBtn.setAttribute('aria-label', 'Share room link');
+  shareBtn.style.cssText =
+    'margin:0; padding:0 4px; border:none; background:transparent; color:#fff; font-size:16px; line-height:1; cursor:pointer;';
+  shareBtn.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    shareRoomUrl();
+  });
+  el.appendChild(shareBtn);
+
+  el.appendChild(document.createTextNode(' | '));
+
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.textContent = '❌';
   closeBtn.title = liveIsHost ? 'End game (kick everyone)' : 'Leave room';
   closeBtn.setAttribute('aria-label', liveIsHost ? 'End game' : 'Leave room');
-  closeBtn.style.cssText = 'margin:0; padding:0 4px; border:none; background:transparent; color:#ff6b6b; font-size:16px; line-height:1; cursor:pointer;';
+  closeBtn.style.cssText =
+    'margin:0; padding:0 4px; border:none; background:transparent; color:#ff6b6b; font-size:16px; line-height:1; cursor:pointer;';
   closeBtn.addEventListener('click', function (e) {
     e.preventDefault();
     e.stopPropagation();
@@ -2827,7 +2847,7 @@ function updateLiveAccessUI() {
   if (btnHost) btnHost.style.display = inRoom ? 'none' : '';
   if (btnJoin) btnJoin.style.display = inRoom ? 'none' : '';
   if (btnScan) btnScan.style.display = inRoom ? 'none' : '';
-  if (btnShare) btnShare.style.display = (inRoom && liveIsHost) ? '' : (inRoom ? 'none' : '');
+  if (btnShare) btnShare.style.display = inRoom ? 'none' : '';
 
   // Old EXIT UI removed — leave via ❌ on room label
   if (exitWrap) exitWrap.style.display = 'none';
