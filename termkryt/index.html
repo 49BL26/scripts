@@ -1260,6 +1260,8 @@ async function hostifySelf() {
   enterLiveMode({ isHost: true });
 }
 
+window.hostifySelf = hostifySelf;
+	
 function syncLiveSpymasterControls() {
   const isLiveSpymaster =
     !!liveRoomId && liveRole === 'spymaster';
