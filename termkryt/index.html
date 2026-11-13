@@ -1189,46 +1189,76 @@ function enforcePlayerBoardLock() {
 }
 
 async function hostifySelf() {
-  // 1. Ensure the user is actually in a room
   if (!liveRoomId || !livePlayerId) {
-    console.warn("Cannot promote to host: User is not currently in an active room.");
-    return false;
+    console.warn('Cannot hostify: Not currently in an active room.');
+    return;
   }
 
-  // 2. Update the local state flag
+  // 1. Fetch the latest room data so we don't overwrite other players or board progress
+  const { data: room, error: fetchError } = await sb
+    .from('rooms')
+    .select('board, players, settings')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (fetchError || !room) {
+    console.error('Failed to fetch room data:', fetchError?.message);
+    return;
+  }
+
+  // 2. Update the players map to mark the current user as host (and strip old host flags)
+  const updatedPlayers = { ...(room.players || {}) };
+  for (const pid of Object.keys(updatedPlayers)) {
+    updatedPlayers[pid] = {
+      ...updatedPlayers[pid],
+      isHost: pid === livePlayerId
+    };
+  }
+
+  // Ensure the current player exists in the map if they weren't listed yet
+  if (!updatedPlayers[livePlayerId]) {
+    const input = document.getElementById('live-name-input');
+    const fallbackName = (input && input.value.trim()) || 'Host';
+    updatedPlayers[livePlayerId] = {
+      name: fallbackName,
+      team: liveTeam || 'red',
+      role: liveRole || 'spymaster',
+      isHost: true
+    };
+  }
+
+  // 3. Push the new host_id and updated players object to Supabase
+  const { error: updateError } = await sb
+    .from('rooms')
+    .update({
+      host_id: livePlayerId,
+      players: updatedPlayers
+    })
+    .eq('id', liveRoomId);
+
+  if (updateError) {
+    console.error('Could not transfer host in database:', updateError.message);
+    return;
+  }
+
+  // 4. Update local state variables to match hostGame()
   liveIsHost = true;
+  localBoardRotation = 0; // Reset personal board rotation since hosts view the unrotated board
+  liveRole = updatedPlayers[livePlayerId].role;
+  liveTeam = updatedPlayers[livePlayerId].team;
+  liveRoomSettings = room.settings || getAutoAssignmentSettings();
 
-  // 3. Reset host-restricted local states (e.g., board rotation)
-  if (localBoardRotation !== 0) {
-    localBoardRotation = 0;
-    // Call your board re-render function here if needed so the host sees the unrotated board
-  }
-
-  try {
-    // 4. Persist the change to Supabase so other players and database rules recognize the new host.
-    // Note: Adjust the table name ('players' or 'room_players') and column ('is_host' or 'role') to match your schema.
-    const { error } = await sb
-      .from('players') 
-      .update({ is_host: true })
-      .eq('id', livePlayerId)
-      .eq('room_id', liveRoomId);
-
-    if (error) throw error;
-
-    // 5. Update the UI to display host panels and hide player-only controls
-    // Replace these placeholders with your actual UI update functions
-    if (typeof updateHostUI === 'function') {
-      updateHostUI();
-    }
-
-    return true;
-  } catch (err) {
-    console.error("Failed to update host status in Supabase:", err.message);
-    liveIsHost = false; // Revert local state on failure
-    return false;
-  }
+  // 5. Refresh the UI and board identically to hostGame()
+  showRoomCode(liveRoomId);
+  showHostPlayersPanel(true);
+  applyLiveRoomState({
+    board: room.board,
+    players: updatedPlayers,
+    settings: liveRoomSettings
+  });
+  updateLiveNameButton(updatedPlayers);
+  enterLiveMode({ isHost: true });
 }
-
 
 function syncLiveSpymasterControls() {
   const isLiveSpymaster =
