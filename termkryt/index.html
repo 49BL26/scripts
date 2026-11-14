@@ -3119,13 +3119,58 @@ function buildEmojiIndex(lib) {
   for (const [emoji, keywords] of Object.entries(lib)) {
     if (!Array.isArray(keywords)) continue;
     for (const kw of keywords) {
-      const key = String(kw).toLowerCase().replace(/_/g, ' ').trim();
-      if (!key) continue;
+      // Normalize and reject noise (single letters, symbols, pure numbers)
+      const key = String(kw)
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .replace(/[^\p{L}\p{N}\s]/gu, '') // strip ® and similar
+        .trim();
+      if (key.length < 3) continue;          // ← kill "e", "li", "us", etc.
       if (!index[key]) index[key] = [];
       if (!index[key].includes(emoji)) index[key].push(emoji);
     }
   }
   return index;
+}
+
+function scoreMatch(candidate, keyword) {
+  if (!candidate || !keyword) return 0;
+
+  // Exact
+  if (candidate === keyword) return 100;
+
+  // Keyword starts with the candidate (candidate is a prefix of a longer keyword)
+  // e.g. "eagle" vs "eagle face" — only if candidate is meaningful length
+  if (keyword.startsWith(candidate) && candidate.length >= 4) return 80;
+
+  // Candidate contains the whole keyword (name has the keyword inside it)
+  // e.g. "eagleittb" contains "eagle"
+  if (candidate.includes(keyword) && keyword.length >= 4) return 60;
+
+  // Keyword contains the candidate (rarer, weaker)
+  if (keyword.includes(candidate) && candidate.length >= 4) return 40;
+
+  return 0;
+}
+
+function searchEmojilib(term) {
+  if (!emojiKeywordIndex || !term) return [];
+
+  const results = [];
+  const lower = term.toLowerCase();
+
+  for (const [keyword, emojis] of Object.entries(emojiKeywordIndex)) {
+    const score = scoreMatch(lower, keyword);
+    if (score > 0) {
+      for (const emoji of emojis) {
+        results.push({ emoji, score, keyword });
+      }
+    }
+  }
+
+  // Higher score first, then LONGER keyword (more specific)
+  results.sort((a, b) => b.score - a.score || b.keyword.length - a.keyword.length);
+  return results;
 }
 
 function initEmojilib() {
@@ -3157,46 +3202,6 @@ function initEmojilib() {
 
 // Call once early
 initEmojilib();
-
-// ---------- matching ----------
-function scoreMatch(candidate, keyword) {
-  if (!candidate || !keyword) return 0;
-
-  // Exact match – best
-  if (candidate === keyword) return 100;
-
-  // Keyword is the full candidate or candidate is clearly the start of a longer keyword
-  // (e.g. "lion" vs "lion face") – strong
-  if (keyword.startsWith(candidate) && candidate.length >= 3) return 80;
-
-  // Candidate contains the whole keyword only if the keyword is long enough to be meaningful
-  if (candidate.includes(keyword) && keyword.length >= 4) return 50;
-
-  // Keyword contains the candidate only if candidate is reasonably long
-  if (keyword.includes(candidate) && candidate.length >= 4) return 40;
-
-  return 0;
-}
-
-function searchEmojilib(term) {
-  if (!emojiKeywordIndex || !term) return [];
-
-  const results = [];
-  const lower = term.toLowerCase();
-
-  for (const [keyword, emojis] of Object.entries(emojiKeywordIndex)) {
-    const score = scoreMatch(lower, keyword);
-    if (score > 0) {
-      for (const emoji of emojis) {
-        results.push({ emoji, score, keyword });
-      }
-    }
-  }
-
-  // Highest score first, then shorter keywords (more specific)
-  results.sort((a, b) => b.score - a.score || a.keyword.length - b.keyword.length);
-  return results;
-}
 
 // Deterministic fuzzy fallback when nothing good is found
 const FUZZY_POOL = [
