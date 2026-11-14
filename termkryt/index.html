@@ -1578,6 +1578,12 @@ function applyLiveBoard(board, asSpymaster) {
     raw = rotateCellsArray(raw, localBoardRotation);
   }
 
+  // Keep an unmasked copy for correct stats (revealed / total)
+  window.lastTrueBoardCells = raw.map(c => ({
+    colorClass: c.colorClass || 'white',
+    isPlayFlipped: !!c.isPlayFlipped
+  }));
+	
   const fp = boardFingerprint({ ...board, cells: raw }) +
     (asSpymaster ? ':S' : ':P') + ':R' + localBoardRotation;
   if (fp === lastBoardFingerprint) return;
@@ -1600,6 +1606,7 @@ function applyLiveBoard(board, asSpymaster) {
   if (typeof pushHistory === 'function' && typeof historyLocked !== 'undefined' && !historyLocked) {
     pushHistory();
   }
+	if (typeof updateStats === 'function') updateStats();
 }
 
 function applyLiveRoomState(state) {
@@ -5713,14 +5720,30 @@ async function clearBoardSelections() {
    STATS + CLUE NOTES
    ============================================================ */
 function updateStats() {
-    const cells = Array.from(board.getElementsByClassName('cell'));
     let totalRed = 0, totalBlue = 0, selRed = 0, selBlue = 0;
 
-    cells.forEach(cell => {
+    // Live game: use true (unmasked) cell data so totals stay correct for players
+    const trueCells = (typeof liveRoomId !== 'undefined' && liveRoomId &&
+                       Array.isArray(window.lastTrueBoardCells) &&
+                       window.lastTrueBoardCells.length)
+      ? window.lastTrueBoardCells
+      : null;
+
+    if (trueCells) {
+      trueCells.forEach(c => {
+        const color = c.colorClass || 'white';
+        const revealed = !!c.isPlayFlipped;
+        if (color === 'red')  { totalRed++;  if (revealed) selRed++; }
+        if (color === 'blue') { totalBlue++; if (revealed) selBlue++; }
+      });
+    } else {
+      const cells = Array.from(board.getElementsByClassName('cell'));
+      cells.forEach(cell => {
         const c = getColor(cell), sel = cell.classList.contains('play-active');
         if (c === 'red')  { totalRed++;  if (sel) selRed++; }
         if (c === 'blue') { totalBlue++; if (sel) selBlue++; }
-    });
+      });
+    }
 
     const redEl = document.getElementById('red-count');
     const blueEl = document.getElementById('blue-count');
