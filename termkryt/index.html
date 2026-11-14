@@ -1586,7 +1586,10 @@ function applyLiveBoard(board, asSpymaster) {
 	
   const fp = boardFingerprint({ ...board, cells: raw }) +
     (asSpymaster ? ':S' : ':P') + ':R' + localBoardRotation;
-  if (fp === lastBoardFingerprint) return;
+  if (fp === lastBoardFingerprint) {
+    if (typeof updateStats === 'function') updateStats();
+    return;
+  }
   lastBoardFingerprint = fp;
 
   const cells = raw.map(cell =>
@@ -1640,6 +1643,11 @@ function applyLiveRoomState(state) {
     liveRoomSettings = getAutoAssignmentSettings(state.settings);
   }
 
+  // Board first so lastTrueBoardCells is ready before any stats UI
+  if (state.board) {
+    applyLiveBoard(state.board, liveRole === 'spymaster');
+  }
+
   updateLiveNameButton(state.players || {});
   renderLiveRoster(state.players || {});
   syncLiveSpymasterControls();
@@ -1647,15 +1655,9 @@ function applyLiveRoomState(state) {
   if (liveIsHost && state.players) {
     renderPlayersPanel(state.players);
   }
-
-  if (state.board) {
-    // bystander / player → false (hide unrevealed)
-    // spymaster → true (show all)
-    applyLiveBoard(state.board, liveRole === 'spymaster');
-  }
-
   renderSelfRoleControls(state.players || {});
   updateLiveAccessUI();
+  if (typeof updateStats === 'function') updateStats();
 }
 
   // ... after loading data ...
@@ -4822,6 +4824,8 @@ function executeCommand(raw) {
 		'host':            () => hostifySelf(),
 		'end':             () => endLiveGameAsHost(),
 		'exit':            () => exitLiveGame(),
+		'kick':            () => kickLivePlayer(uiPrompt('Kick who?', ''))
+		'j':               () => joinGame(prompt('What is the room code?'))
         'help':            () => uiAlert('Commands: invert, flip-h, flip-v, flip-ur, flip-ul, shift-up, shift-down, shift-left, shift-right, rotate, rot-words, flip-cards, clear, randomize, add-word, import-words, host, end, exit'),
     };
 
