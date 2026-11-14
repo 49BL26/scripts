@@ -3160,9 +3160,21 @@ initEmojilib();
 
 // ---------- matching ----------
 function scoreMatch(candidate, keyword) {
-  if (candidate === keyword) return 100;          // exact
-  if (keyword.startsWith(candidate) || candidate.startsWith(keyword)) return 70;
-  if (keyword.includes(candidate) || candidate.includes(keyword)) return 40;
+  if (!candidate || !keyword) return 0;
+
+  // Exact match – best
+  if (candidate === keyword) return 100;
+
+  // Keyword is the full candidate or candidate is clearly the start of a longer keyword
+  // (e.g. "lion" vs "lion face") – strong
+  if (keyword.startsWith(candidate) && candidate.length >= 3) return 80;
+
+  // Candidate contains the whole keyword only if the keyword is long enough to be meaningful
+  if (candidate.includes(keyword) && keyword.length >= 4) return 50;
+
+  // Keyword contains the candidate only if candidate is reasonably long
+  if (keyword.includes(candidate) && candidate.length >= 4) return 40;
+
   return 0;
 }
 
