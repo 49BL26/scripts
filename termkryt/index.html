@@ -4824,8 +4824,8 @@ function executeCommand(raw) {
 		'host':            () => hostifySelf(),
 		'end':             () => endLiveGameAsHost(),
 		'exit':            () => exitLiveGame(),
-		'kick':            () => kickLivePlayer(uiPrompt('Kick who?', ''))
-		'j':               () => joinGame(prompt('What is the room code?'))
+		'kick':            () => kickLivePlayer(uiPrompt('Kick who?', '')),
+		'j':               () => joinGame(prompt('What is the room code?')),
         'help':            () => uiAlert('Commands: invert, flip-h, flip-v, flip-ur, flip-ul, shift-up, shift-down, shift-left, shift-right, rotate, rot-words, flip-cards, clear, randomize, add-word, import-words, host, end, exit'),
     };
 
