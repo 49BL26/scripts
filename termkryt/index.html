@@ -1730,7 +1730,7 @@ if (!isNewGuest) {
     // 1st guest → opposite team Spymaster
     players[livePlayerId] = normalizePlayerState({
       name,
-	  charIcon: assignCharIcon(name)
+	  charIcon: assignCharIcon(name),
       team: firstGuestTeam,
       role: 'spymaster',
       previousTeam: firstGuestTeam,
@@ -1755,7 +1755,7 @@ if (!isNewGuest) {
 
     players[livePlayerId] = normalizePlayerState({
       name,
-	  charIcon: assignCharIcon(name)
+	  charIcon: assignCharIcon(name),
       team: nextTeam,
       role: 'player',
       previousTeam: nextTeam,
