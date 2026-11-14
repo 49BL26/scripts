@@ -715,7 +715,12 @@ body.grid-align-open {
   <button type="button" id="btn-scan-qr-join" onclick="scanShareQR()">Scan QR to Join</button>
 
 	<span id="live-room-label" style="display:none; margin-left:8px; padding:6px 12px; border-radius:8px; background:#222; color:#fff; font:14px system-ui; vertical-align:middle; align-items:center; gap:8px;"></span>
-
+	
+  <div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
+    <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font:15px system-ui; font-weight:600;"></div>
+    <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">Give Clue</button>
+  </div>
+	
 	<div id="live-self-role-controls" style="display:none; align-items:center; gap:6px;">
   <label for="live-self-team">Team:</label>
 <select id="live-self-team">
@@ -1564,10 +1569,16 @@ function getLiveBoardSnapshot() {
       cellsData: cells
     };
   }
-
-  // Safe public totals for player stats (not which cards)
+  // Safe public flag: which team has 9 agents (does not reveal which cards)
   const src = snap.cellsData || snap.cells || [];
-  snap.colorTotals = countBoardColorTotals(src);
+  let red = 0, blue = 0;
+  src.forEach(c => {
+    const color = c.colorClass || c.color || 'white';
+    if (color === 'red') red++;
+    else if (color === 'blue') blue++;
+  });
+  snap.redHasMore = red >= blue; // true → Red is 9, Blue is 8
+  return snap;
   return snap;
 }
 	
@@ -1614,11 +1625,16 @@ function applyLiveBoard(board, asSpymaster) {
   );
 
   // Public totals for Tile Statistics (works for non-spymasters)
-  if (board.colorTotals && typeof board.colorTotals.red === 'number') {
-    window.lastLiveColorTotals = {
-      red: board.colorTotals.red,
-      blue: board.colorTotals.blue
-    };
+  if (typeof board.redHasMore === 'boolean') {
+    window.lastRedHasMore = board.redHasMore;
+  } else if (raw && raw.length && liveRole === 'spymaster') {
+    let red = 0, blue = 0;
+    raw.forEach(c => {
+      const color = c.colorClass || 'white';
+      if (color === 'red') red++;
+      else if (color === 'blue') blue++;
+    });
+    window.lastRedHasMore = red >= blue;
   } else if (raw && raw.length) {
     // Fallback when older rooms lack colorTotals (spymaster-only useful)
     window.lastLiveColorTotals = countBoardColorTotals(raw);
@@ -1681,6 +1697,22 @@ function applyLiveRoomState(state) {
   if (liveIsHost && state.players) {
     renderPlayersPanel(state.players);
   }
+
+  // Clue / turn from room payload
+  if (state.clue && typeof state.clue === 'object') {
+    window.liveClueState = {
+      word: state.clue.word ?? null,
+      number: state.clue.number ?? null,
+      byTeam: state.clue.byTeam ?? null,
+      turnTeam: state.clue.turnTeam ?? window.liveClueState?.turnTeam ?? null
+    };
+  } else if (liveRoomId && !window.liveClueState?.turnTeam) {
+    // First join: majority team starts
+    resetLiveClueTurn(window.lastRedHasMore);
+  }
+
+  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+
   renderSelfRoleControls(state.players || {});
   updateLiveAccessUI();
   if (typeof updateStats === 'function') updateStats();
@@ -2080,6 +2112,165 @@ function canPublishLiveBoard() {
   return !!liveRoomId && liveRole === 'spymaster';
 }
 
+// ---------- Live clue / turn ----------
+window.liveClueState = window.liveClueState || {
+  word: null,
+  number: null,
+  byTeam: null,
+  turnTeam: null // who should give the next clue
+};
+
+function majorityTeamFromFlag(redHasMore) {
+  return redHasMore ? 'red' : 'blue';
+}
+
+function remainingCardsForTeam(team) {
+  const total = (team === 'red')
+    ? (window.lastRedHasMore ? 9 : 8)
+    : (window.lastRedHasMore ? 8 : 9);
+  let revealed = 0;
+  Array.from(document.querySelectorAll('#board .cell')).forEach(cell => {
+    if (getColor(cell) === team && cell.classList.contains('play-active')) revealed++;
+  });
+  return Math.max(0, total - revealed);
+}
+
+function resetLiveClueTurn(redHasMore) {
+  const start = majorityTeamFromFlag(
+    typeof redHasMore === 'boolean' ? redHasMore : !!window.lastRedHasMore
+  );
+  window.liveClueState = {
+    word: null,
+    number: null,
+    byTeam: null,
+    turnTeam: start
+  };
+  return window.liveClueState;
+}
+
+async function publishLiveClueState(clueState) {
+  if (!liveRoomId) return;
+  const { data, error } = await sb
+    .from('rooms')
+    .update({
+      clue: clueState,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('board, players, settings, clue')
+    .single();
+
+  if (error || !data) {
+    console.error('Could not publish clue state:', error);
+    return;
+  }
+
+  applyLiveRoomState(data);
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: data }
+    });
+  }
+}
+
+function renderLiveClueUI() {
+  const bar = document.getElementById('live-clue-bar');
+  const banner = document.getElementById('live-clue-banner');
+  const btn = document.getElementById('btn-give-clue');
+  if (!bar || !banner || !btn) return;
+
+  if (!liveRoomId) {
+    bar.style.display = 'none';
+    return;
+  }
+
+  bar.style.display = 'block';
+  const clue = window.liveClueState || {};
+  const hasClue = !!(clue.word != null && clue.word !== '' && clue.number != null);
+
+  if (hasClue) {
+    const teamLabel = (clue.byTeam || '').toUpperCase();
+    banner.style.display = 'block';
+    banner.style.background = clue.byTeam === 'blue' ? '#0d47a1' : '#b71c1c';
+    banner.textContent = `${teamLabel} clue: “${clue.word}” — ${clue.number}`;
+  } else {
+    banner.style.display = 'none';
+    banner.textContent = '';
+  }
+
+  // Give Clue only for the spymaster whose turn it is
+  const myTurn =
+    liveRole === 'spymaster' &&
+    (liveTeam === 'red' || liveTeam === 'blue') &&
+    clue.turnTeam === liveTeam;
+
+  btn.style.display = myTurn ? 'inline-block' : 'none';
+  if (myTurn) {
+    btn.textContent = hasClue && clue.byTeam === liveTeam
+      ? 'Give Clue (your turn again after they play)'
+      : 'Give Clue';
+  }
+}
+
+/**
+ * Spymaster submits a clue, then turn passes to the other team.
+ */
+async function giveLiveClue() {
+  if (!liveRoomId || liveRole !== 'spymaster') return;
+  if (liveTeam !== 'red' && liveTeam !== 'blue') return;
+
+  const clue = window.liveClueState || {};
+  if (clue.turnTeam && clue.turnTeam !== liveTeam) {
+    await uiAlert('It is not your turn to give a clue.');
+    return;
+  }
+
+  const wordRaw = await uiPrompt('What is your clue?', '', {
+    title: 'Give Clue',
+    okLabel: 'Next'
+  });
+  if (wordRaw == null) return;
+  const word = String(wordRaw).trim();
+  if (!word) {
+    await uiAlert('Clue cannot be empty.');
+    return;
+  }
+
+  const maxN = remainingCardsForTeam(liveTeam);
+  // 0 = "unlimited / avoid" style clue; upper bound = remaining agents on your team
+  let number = null;
+  while (number === null) {
+    const nRaw = await uiPrompt(
+      `How many cards does your clue apply to? (0–${maxN})`,
+      '',
+      { title: 'Clue number', okLabel: 'Submit' }
+    );
+    if (nRaw == null) return;
+    const n = Number(String(nRaw).trim());
+    if (!Number.isInteger(n) || n < 0 || n > maxN) {
+      await uiAlert(`Enter a whole number from 0 to ${maxN}.`);
+      continue;
+    }
+    number = n;
+  }
+
+  const nextTeam = liveTeam === 'red' ? 'blue' : 'red';
+  const nextState = {
+    word,
+    number,
+    byTeam: liveTeam,
+    turnTeam: nextTeam
+  };
+
+  window.liveClueState = nextState;
+  await publishLiveClueState(nextState);
+}
+
+window.giveLiveClue = giveLiveClue;
+window.renderLiveClueUI = renderLiveClueUI;
+	
 async function publishLivePatch(patch) {
   if (!liveRoomId) return;
 
@@ -2309,7 +2500,7 @@ function enterLiveMode({ isHost }) {
   updateLiveAccessUI();
 }
 
-
+document.getElementById('btn-give-clue')?.addEventListener('click', () => giveLiveClue());
 
 function renderPlayersPanel(players = {}) {
   const el = document.getElementById('live-players-panel');
@@ -2799,6 +2990,20 @@ async function setPlayerRole(playerId, team, role) {
   ) {
     if (typeof randomizeBoard === 'function') {
       randomizeBoard();
+  const clueState = resetLiveClueTurn(window.lastRedHasMore);
+  // add clue: clueState to the supabase .update({ players, clue: clueState, ... })
+
+  // If no spymaster remains on the current turn team, or roles reshuffled,
+  // reset turn to majority team and clear the active clue.
+  const stillHasTurnSpy = Object.values(players).some(
+    p => p.role === 'spymaster' && p.team === (window.liveClueState?.turnTeam)
+  );
+  if (!stillHasTurnSpy) {
+    const clueState = resetLiveClueTurn(window.lastRedHasMore);
+    // optional: await publish with room update — or fold into the same players update:
+    // include clue: clueState in the .update({ players, clue: clueState })
+  }
+
     }
     board = getLiveBoardSnapshot();
   }
@@ -4752,6 +4957,16 @@ function randomizeBoard() {
     });
     updateStats();
     saveCurrentState();
+	
+  if (typeof liveRoomId !== 'undefined' && liveRoomId && liveRole === 'spymaster') {
+    // Recompute majority from the new board, reset clue turn, publish
+    const snap = getLiveBoardSnapshot();
+    window.lastRedHasMore = !!snap.redHasMore;
+    const clueState = resetLiveClueTurn(snap.redHasMore);
+    // push board + clue together if you prefer one update:
+    publishLivePatch({ board: snap, clue: clueState });
+  }
+
 }
 
 
@@ -5765,18 +5980,34 @@ function updateStats() {
     const inLive = typeof liveRoomId !== 'undefined' && !!liveRoomId;
     const liveTotals = window.lastLiveColorTotals;
 
-    if (inLive && liveTotals && (liveTotals.red > 0 || liveTotals.blue > 0)) {
-      // Live game: denominators from published totals (9 / 8 etc.)
-      totalRed = liveTotals.red;
-      totalBlue = liveTotals.blue;
+    const cells = Array.from(board.getElementsByClassName('cell'));
+
+    // Numerator = revealed cards of that color
+    cells.forEach(cell => {
+      const c = getColor(cell);
+      const sel = cell.classList.contains('play-active');
+      if (c === 'red' && sel) selRed++;
+      if (c === 'blue' && sel) selBlue++;
+    });
+
+    const inLive = typeof liveRoomId !== 'undefined' && !!liveRoomId;
+
+    if (inLive && typeof window.lastRedHasMore === 'boolean') {
+      // Majority team has 9, other has 8
+      totalRed  = window.lastRedHasMore ? 9 : 8;
+      totalBlue = window.lastRedHasMore ? 8 : 9;
     } else {
-      // Offline / no totals: count colored cells on the board
       cells.forEach(cell => {
         const c = getColor(cell);
         if (c === 'red') totalRed++;
         if (c === 'blue') totalBlue++;
       });
     }
+
+    const redEl = document.getElementById('red-count');
+    const blueEl = document.getElementById('blue-count');
+    if (redEl) redEl.textContent = `${selRed} / ${totalRed}`;
+    if (blueEl) blueEl.textContent = `${selBlue} / ${totalBlue}`;
 
     const redEl = document.getElementById('red-count');
     const blueEl = document.getElementById('blue-count');
