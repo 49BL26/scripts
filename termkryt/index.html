@@ -715,11 +715,7 @@ body.grid-align-open {
   <button type="button" id="btn-scan-qr-join" onclick="scanShareQR()">Scan QR to Join</button>
 
 	<span id="live-room-label" style="display:none; margin-left:8px; padding:6px 12px; border-radius:8px; background:#222; color:#fff; font:14px system-ui; vertical-align:middle; align-items:center; gap:8px;"></span>
-	
-  <div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
-    <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font:15px system-ui; font-weight:600;"></div>
-    <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">Give Clue</button>
-  </div>
+
 	
 	<div id="live-self-role-controls" style="display:none; align-items:center; gap:6px;">
   <label for="live-self-team">Team:</label>
@@ -736,6 +732,11 @@ body.grid-align-open {
     <option value="bystander">Bystander</option>
   </select>
 </div>	
+
+<div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
+  <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font:15px system-ui; font-weight:600;"></div>
+  <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">🧶 Give Clue</button>
+</div>
 	
   <!-- Host only: player list + role controls -->
   <div id="live-players-panel" style="display:none; margin-top:10px; padding:10px; border:1px solid #444;border-radius:8px; max-width:420px;"></div>
@@ -1698,15 +1699,20 @@ function applyLiveRoomState(state) {
   }
 
   // Clue / turn from room payload
-  if (state.clue && typeof state.clue === 'object') {
+  // Clue / turn lives under settings.clue (shared with everyone)
+  const incomingClue =
+    (state.settings && state.settings.clue) ||
+    state.clue ||
+    null;
+
+  if (incomingClue && typeof incomingClue === 'object') {
     window.liveClueState = {
-      word: state.clue.word ?? null,
-      number: state.clue.number ?? null,
-      byTeam: state.clue.byTeam ?? null,
-      turnTeam: state.clue.turnTeam ?? window.liveClueState?.turnTeam ?? null
+      word: incomingClue.word ?? null,
+      number: incomingClue.number ?? null,
+      byTeam: incomingClue.byTeam ?? null,
+      turnTeam: incomingClue.turnTeam ?? null
     };
   } else if (liveRoomId && !window.liveClueState?.turnTeam) {
-    // First join: majority team starts
     resetLiveClueTurn(window.lastRedHasMore);
   }
 
@@ -2149,27 +2155,48 @@ function resetLiveClueTurn(redHasMore) {
 
 async function publishLiveClueState(clueState) {
   if (!liveRoomId) return;
+
+  // Read current settings so we don't wipe autoAssign etc.
+  const { data: room, error: readError } = await sb
+    .from('rooms')
+    .select('settings')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (readError) {
+    console.error('Could not load settings for clue:', readError);
+    await uiAlert('Could not save clue. Check the room connection.');
+    return;
+  }
+
+  const settings = {
+    ...(room?.settings || liveRoomSettings || {}),
+    clue: clueState
+  };
+
   const { data, error } = await sb
     .from('rooms')
     .update({
-      clue: clueState,
+      settings,
       updated_at: new Date().toISOString()
     })
     .eq('id', liveRoomId)
-    .select('board, players, settings, clue')
+    .select('board, players, settings')
     .single();
 
   if (error || !data) {
     console.error('Could not publish clue state:', error);
+    await uiAlert('Could not save clue. Try again.');
     return;
   }
 
   applyLiveRoomState(data);
+
   if (liveChannel) {
     liveChannel.send({
       type: 'broadcast',
       event: 'room-state',
-      payload: { state: data }
+      payload: { state: data, sender: livePlayerId }
     });
   }
 }
@@ -2180,37 +2207,38 @@ function renderLiveClueUI() {
   const btn = document.getElementById('btn-give-clue');
   if (!bar || !banner || !btn) return;
 
-  if (!liveRoomId) {
+  if (!liveRoomId || liveHasExitedRoom) {
     bar.style.display = 'none';
     return;
   }
 
+  // Visible to everyone in the room (host, both spymasters, players)
   bar.style.display = 'block';
+
   const clue = window.liveClueState || {};
-  const hasClue = !!(clue.word != null && clue.word !== '' && clue.number != null);
+  const hasClue =
+    clue.word != null &&
+    String(clue.word).trim() !== '' &&
+    clue.number != null &&
+    clue.number !== '';
 
   if (hasClue) {
     const teamLabel = (clue.byTeam || '').toUpperCase();
     banner.style.display = 'block';
     banner.style.background = clue.byTeam === 'blue' ? '#0d47a1' : '#b71c1c';
-    banner.textContent = `${teamLabel} clue: “${clue.word}” — ${clue.number}`;
+    banner.textContent = `🧶 ${teamLabel}: “${clue.word}” — ${clue.number}`;
   } else {
     banner.style.display = 'none';
     banner.textContent = '';
   }
 
-  // Give Clue only for the spymaster whose turn it is
   const myTurn =
     liveRole === 'spymaster' &&
     (liveTeam === 'red' || liveTeam === 'blue') &&
     clue.turnTeam === liveTeam;
 
   btn.style.display = myTurn ? 'inline-block' : 'none';
-  if (myTurn) {
-    btn.textContent = hasClue && clue.byTeam === liveTeam
-      ? 'Give Clue (your turn again after they play)'
-      : 'Give Clue';
-  }
+  btn.textContent = '🧶 Give Clue';
 }
 
 /**
