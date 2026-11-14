@@ -5750,6 +5750,9 @@ function updateStats() {
     if (redEl) redEl.textContent = `${selRed} / ${totalRed}`;
     if (blueEl) blueEl.textContent = `${selBlue} / ${totalBlue}`;
 
+    // DOM cells still needed for think-panel / assassin notes
+    const cells = Array.from(board.getElementsByClassName('cell'));
+	
     const modeEl = document.getElementById('mode-select');
     const spyTeamEl = document.getElementById('spy-team');
     const spyActionEl = document.getElementById('spy-action');
