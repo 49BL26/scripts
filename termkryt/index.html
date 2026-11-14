@@ -1917,50 +1917,54 @@ function joinRoomFromUrl() {
   const code = (params.get('room') || '').trim().toUpperCase();
   if (!code) return;
 
-  // Wait until the default-name code and its data have initialized.
-  window.addEventListener('load', async () => {
+  const run = async () => {
+    // Switch UI to Online Play so host controls exist
     const modeSelect = document.getElementById('op1');
     if (modeSelect) {
       modeSelect.value = 'host';
-      uiSync();
+      if (typeof uiSync === 'function') uiSync();
     }
 
     const nameInput = document.getElementById('live-name-input');
 
-    // Keep an existing name; generate one only if the field is empty.
+    // Ensure a name exists without calling getLiveNameOrAlert()
+    // (that can alert/return null and is not needed here)
     if (nameInput && !nameInput.value.trim()) {
-      if (typeof prefillLiveName === 'function') {
-        prefillLiveName();
-      }
-
-      // Fallback in case prefillLiveName didn't populate it.
+      if (typeof prefillLiveName === 'function') prefillLiveName();
       if (!nameInput.value.trim() && typeof defaultLiveName === 'function') {
         nameInput.value = defaultLiveName();
       }
+      if (!nameInput.value.trim()) {
+        const stored = localStorage.getItem('termkryt-player-name');
+        if (stored) nameInput.value = stored;
+      }
     }
-
-	const name = makeUniqueLiveName(getLiveNameOrAlert(), players, livePlayerId);
-	if (!name) return;
-
-	const charIcon = assignCharIcon(name);
-
-    const codeInput = document.getElementById('join-code-input');
-    if (codeInput) codeInput.value = code;
 
     if (!nameInput?.value.trim()) {
       console.error('Room link join stopped: no player name was generated.');
       return;
     }
 
-    await joinGame(code);
+    try {
+      await joinGame(code);
+    } catch (err) {
+      console.error('Auto-join failed:', err);
+      alert('Could not join room ' + code + '. Try Join Game manually.');
+      return;
+    }
 
-    // Remove the room parameter after attempting to join, so reload won't
-    // automatically attempt to rejoin after the player exits.
-    params.delete('room');
+    // Strip ?room= so refresh doesn't force rejoin after leave
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete('room');
     window.history.replaceState({}, '', cleanUrl);
-  }, { once: true });
+  };
+
+  // If the page already loaded, run now; otherwise wait for load
+  if (document.readyState === 'complete') {
+    run();
+  } else {
+    window.addEventListener('load', run, { once: true });
+  }
 }
 
 joinRoomFromUrl();
@@ -2309,11 +2313,11 @@ async function publishLivePatch(patch) {
     return;
   }
 
-  const { data, error } = await sb
+const { data, error } = await sb
     .from('rooms')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', liveRoomId)
-    .select('board, players')
+    .select('board, players, settings')
     .single();
 
   if (error || !data) {
@@ -4982,16 +4986,23 @@ function randomizeBoard() {
         delete cell.dataset.seq;
         cell.querySelector('.cell-text').textContent = words[i];
     });
-    updateStats();
-    saveCurrentState();
-	
+  updateStats();
+  saveCurrentState();
+
   if (typeof liveRoomId !== 'undefined' && liveRoomId && liveRole === 'spymaster') {
-    // Recompute majority from the new board, reset clue turn, publish
     const snap = getLiveBoardSnapshot();
     window.lastRedHasMore = !!snap.redHasMore;
     const clueState = resetLiveClueTurn(snap.redHasMore);
-    // push board + clue together if you prefer one update:
-    publishLivePatch({ board: snap, clue: clueState });
+
+    // Merge into settings so everyone gets the clear via settings.clue
+    const settings = {
+      ...(liveRoomSettings || {}),
+      clue: clueState
+    };
+    liveRoomSettings = settings;
+
+    publishLivePatch({ board: snap, settings });
+    if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
   }
 
 }
