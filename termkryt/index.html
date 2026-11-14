@@ -642,7 +642,21 @@ body.grid-align-open {
 .host-player-row {
   padding: 4px 0;
 }
-	
+
+.host-kick-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: 4px;
+  opacity: 0.75;
+}
+.host-kick-btn:hover {
+  opacity: 1;
+}
+/* end of css */
 </style>
 </head>
 <body>
@@ -1598,6 +1612,18 @@ function applyLiveRoomState(state) {
   liveRole = me?.role ?? null;
   liveTeam = me?.team ?? null;
 
+  // Host kicked this player — leave the room locally
+  if (
+    liveRoomId &&
+    !liveIsHost &&
+    state.players &&
+    !me &&
+    typeof leaveLiveRoomLocal === 'function'
+  ) {
+    leaveLiveRoomLocal();
+    return;
+  }
+	
   // Force board re-render when role changes (player ↔ bystander ↔ spymaster)
   if (prevRole !== liveRole) {
     lastBoardFingerprint = '';
@@ -1716,72 +1742,45 @@ if (!isNewGuest) {
     allowRoleChoice: true
   });
 } else if (liveRoomSettings.autoAssign) {
-  // ---------- AUTO ASSIGN ----------
-  const guests = Object.entries(players).filter(
-    ([id, p]) => id !== data.host_id && !p.isHost
-  );
+  // ---------- AUTO ASSIGN (balance teams) ----------
+  const teamOf = (p) => {
+    if (!p || isBystanderRole(p.role)) return null;
+    if (p.team === 'red' || p.team === 'blue') return p.team;
+    if (p.previousTeam === 'red' || p.previousTeam === 'blue') return p.previousTeam;
+    return null;
+  };
 
-  const waitingEntry = guests.find(([, p]) =>
-    p.waitingForPair === true &&
-    (p.previousTeam === 'red' || p.previousTeam === 'blue')
-  );
-
-  if (guests.length === 0) {
-    // 1st guest → opposite team Spymaster
-    players[livePlayerId] = normalizePlayerState({
-      name,
-      charIcon: assignCharIcon(name),
-      team: firstGuestTeam,
-      role: 'spymaster',
-      previousTeam: firstGuestTeam,
-      isHost: false,
-      allowRoleChoice: false
-    });
-  } else if (waitingEntry) {
-    // Complete a waiting pair → both become Players on alternating teams
-    const [waitingId, waitingPlayer] = waitingEntry;
-    const waitingTeam = (waitingPlayer.previousTeam === 'red' || waitingPlayer.previousTeam === 'blue')
-      ? waitingPlayer.previousTeam
-      : (waitingPlayer.team === 'red' || waitingPlayer.team === 'blue')
-        ? waitingPlayer.team
-        : firstGuestTeam;
-    const nextTeam = oppositeTeam(waitingTeam);
-
-    players[waitingId] = normalizePlayerState(waitingPlayer, {
-      team: waitingTeam,
-      role: 'player',
-      waitingForPair: false
-    });
-
-    players[livePlayerId] = normalizePlayerState({
-      name,
-      charIcon: assignCharIcon(name),
-      team: nextTeam,
-      role: 'player',
-      previousTeam: nextTeam,
-      isHost: false,
-      allowRoleChoice: false
-    });
-  } else {
-    // Start a new waiting pair → this guest becomes Bystander
-    const assignedTeam = guests.length === 1
-      ? firstGuestTeam
-      : oppositeTeam(
-          guests[guests.length - 1][1].team === 'blue' ? 'blue' : 'red'
-        );
-
-    players[livePlayerId] = normalizePlayerState({
-      name,
-      charIcon: assignCharIcon(name),
-      team: assignedTeam,
-      role: 'bystander',
-      previousTeam: assignedTeam,
-      isHost: false,
-      waitingForPair: true,
-      allowRoleChoice: false
-    });
+  let redCount = 0;
+  let blueCount = 0;
+  for (const p of Object.values(players)) {
+    const t = teamOf(p);
+    if (t === 'red') redCount++;
+    else if (t === 'blue') blueCount++;
   }
-} else {
+
+  // Put the new joiner on the smaller team.
+  // Tie → opposite of host (firstGuestTeam).
+  let assignedTeam;
+  if (redCount < blueCount) assignedTeam = 'red';
+  else if (blueCount < redCount) assignedTeam = 'blue';
+  else assignedTeam = firstGuestTeam;
+
+  // Spymaster if that team has none yet; otherwise Player.
+  const assignedRole = hasTeamSpymaster(players, assignedTeam, livePlayerId)
+    ? 'player'
+    : 'spymaster';
+
+  players[livePlayerId] = normalizePlayerState({
+    name,
+    charIcon: assignCharIcon(name),
+    team: assignedTeam,
+    role: assignedRole,
+    previousTeam: assignedTeam,
+    isHost: false,
+    waitingForPair: false,
+    allowRoleChoice: false
+  });
+}  else {
   // Fallback (should rarely hit)
   players[livePlayerId] = normalizePlayerState({
     name,
@@ -2432,7 +2431,20 @@ if (!player.isHost) {
     permissionText.textContent = 'Allow changes';
 
     permissionLabel.append(permission, permissionText);
-    identity.append(name, permissionLabel);
+
+    const kickBtn = document.createElement('button');
+    kickBtn.type = 'button';
+    kickBtn.className = 'host-kick-btn';
+    kickBtn.textContent = '❌';
+    kickBtn.title = `Kick ${player.name || 'player'}`;
+    kickBtn.setAttribute('aria-label', `Kick ${player.name || 'player'}`);
+    kickBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      kickLivePlayer(id);
+    });
+
+    identity.append(name, permissionLabel, kickBtn);
 } else {
   identity.appendChild(name);
 }
@@ -2861,6 +2873,75 @@ async function setPlayerRoleChoicePermission(playerId, allowed) {
   broadcastLiveState(updated);
 }
 
+async function kickLivePlayer(playerId) {
+  if (!liveIsHost || !liveRoomId || !playerId) return;
+  if (playerId === livePlayerId) {
+    await uiAlert('You cannot kick yourself.');
+    return;
+  }
+
+  const { data: room, error } = await sb
+    .from('rooms')
+    .select('players, board, settings')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (error || !room) {
+    console.error('Could not load room to kick player:', error);
+    return;
+  }
+
+  const players = { ...(room.players || {}) };
+  const target = players[playerId];
+  if (!target) return;
+
+  if (target.isHost) {
+    await uiAlert('You cannot kick the host.');
+    return;
+  }
+
+  const playerName = target.name || 'this player';
+  const confirmed = await askChoice(
+    'Kick player',
+    `Do you really want to kick ${playerName}?`,
+    [
+      { label: 'Cancel', value: false },
+      { label: 'Kick', value: true, primary: true }
+    ]
+  );
+  if (confirmed !== true) return;
+
+  delete players[playerId];
+
+  const { data: updated, error: updateError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('players, board, settings')
+    .single();
+
+  if (updateError || !updated) {
+    console.error('Could not kick player:', updateError);
+    await uiAlert('Could not kick that player. Try again.');
+    return;
+  }
+
+  applyLiveRoomState(updated);
+
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updated }
+    });
+  }
+}
+
+window.kickLivePlayer = kickLivePlayer;
+	
 async function setAutoAssignmentSetting(enabled) {
   if (!liveIsHost || !liveRoomId) return;
 
