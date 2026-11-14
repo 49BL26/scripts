@@ -1224,7 +1224,7 @@ async function hostifySelf() {
     const fallbackName = (input && input.value.trim()) || 'Host';
     updatedPlayers[livePlayerId] = {
       name: fallbackName,
-	  charIcon: assignCharIcon(name)
+      charIcon: assignCharIcon(name)
       team: liveTeam || 'red',
       role: liveRole || 'spymaster',
       isHost: true
@@ -1341,7 +1341,7 @@ async function hostGame() {
   const players = {
     [livePlayerId]: {
       name,
-	  charIcon: assignCharIcon(name),
+      charIcon: assignCharIcon(name),
       team: 'red',
       role: 'spymaster',
       isHost: true
@@ -1730,7 +1730,7 @@ if (!isNewGuest) {
     // 1st guest → opposite team Spymaster
     players[livePlayerId] = normalizePlayerState({
       name,
-	  charIcon: assignCharIcon(name),
+      charIcon: assignCharIcon(name),
       team: firstGuestTeam,
       role: 'spymaster',
       previousTeam: firstGuestTeam,
@@ -1755,7 +1755,7 @@ if (!isNewGuest) {
 
     players[livePlayerId] = normalizePlayerState({
       name,
-	  charIcon: assignCharIcon(name),
+      charIcon: assignCharIcon(name),
       team: nextTeam,
       role: 'player',
       previousTeam: nextTeam,
@@ -1772,7 +1772,7 @@ if (!isNewGuest) {
 
     players[livePlayerId] = normalizePlayerState({
       name,
-	  charIcon: assignCharIcon(name),
+      charIcon: assignCharIcon(name),
       team: assignedTeam,
       role: 'bystander',
       previousTeam: assignedTeam,
@@ -3278,7 +3278,7 @@ if (nameInput) {
   setTimeout(() => {
     if (!nameInput.value.trim()) {
       nameInput.value = defaultLiveName();
-	  updateLiveNameButton()
+      updateLiveNameButton()
     }
   }, 0);
 }
