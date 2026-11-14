@@ -1520,40 +1520,55 @@ function getOrCreatePlayerId(code) {
   return id;
 }
 
+function countBoardColorTotals(cells) {
+  let red = 0, blue = 0;
+  (cells || []).forEach(c => {
+    const color = c.colorClass || c.color || 'white';
+    if (color === 'red') red++;
+    else if (color === 'blue') blue++;
+  });
+  return { red, blue };
+}
+
 function getLiveBoardSnapshot() {
+  let snap;
   if (typeof getBoardSnapshot === 'function') {
-    const snap = getBoardSnapshot();
+    snap = getBoardSnapshot();
     // Un-rotate personal view so host/Supabase always get root orientation
     if (!liveIsHost && localBoardRotation) {
       const src = snap.cellsData || snap.cells;
       if (src && src.length === 25) {
         const unrotated = rotateCellsArray(src, -localBoardRotation);
-        return {
+        snap = {
           ...snap,
           cellsData: unrotated,
           cells: unrotated
         };
       }
     }
-    return snap;
+  } else {
+    let cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
+      text: (c.querySelector('.cell-text') || c).textContent.trim(),
+      colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
+      isPlayFlipped: c.classList.contains('play-active')
+    }));
+
+    if (!liveIsHost && localBoardRotation) {
+      cells = rotateCellsArray(cells, -localBoardRotation);
+    }
+
+    snap = {
+      isFlipped: !!window.isFlipped,
+      rotation: window.currentRotation || 0,
+      cells,
+      cellsData: cells
+    };
   }
 
-  let cells = Array.from(document.querySelectorAll('#board .cell')).map(c => ({
-    text: (c.querySelector('.cell-text') || c).textContent.trim(),
-    colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
-    isPlayFlipped: c.classList.contains('play-active')
-  }));
-
-  if (!liveIsHost && localBoardRotation) {
-    cells = rotateCellsArray(cells, -localBoardRotation);
-  }
-
-  return {
-    isFlipped: !!window.isFlipped,
-    rotation: window.currentRotation || 0,
-    cells,
-    cellsData: cells
-  };
+  // Safe public totals for player stats (not which cards)
+  const src = snap.cellsData || snap.cells || [];
+  snap.colorTotals = countBoardColorTotals(src);
+  return snap;
 }
 	
 let lastBoardFingerprint = '';
@@ -1598,6 +1613,17 @@ function applyLiveBoard(board, asSpymaster) {
       : { ...cell, colorClass: 'white' }
   );
 
+  // Public totals for Tile Statistics (works for non-spymasters)
+  if (board.colorTotals && typeof board.colorTotals.red === 'number') {
+    window.lastLiveColorTotals = {
+      red: board.colorTotals.red,
+      blue: board.colorTotals.blue
+    };
+  } else if (raw && raw.length) {
+    // Fallback when older rooms lack colorTotals (spymaster-only useful)
+    window.lastLiveColorTotals = countBoardColorTotals(raw);
+  }
+	
   if (typeof initBoard === 'function') {
     window.isFlipped = !!board.isFlipped;
     initBoard(cells);
@@ -5726,26 +5752,29 @@ async function clearBoardSelections() {
 function updateStats() {
     let totalRed = 0, totalBlue = 0, selRed = 0, selBlue = 0;
 
-    // Live game: use true (unmasked) cell data so totals stay correct for players
-    const trueCells = (typeof liveRoomId !== 'undefined' && liveRoomId &&
-                       Array.isArray(window.lastTrueBoardCells) &&
-                       window.lastTrueBoardCells.length)
-      ? window.lastTrueBoardCells
-      : null;
+    const cells = Array.from(board.getElementsByClassName('cell'));
 
-    if (trueCells) {
-      trueCells.forEach(c => {
-        const color = c.colorClass || 'white';
-        const revealed = !!c.isPlayFlipped;
-        if (color === 'red')  { totalRed++;  if (revealed) selRed++; }
-        if (color === 'blue') { totalBlue++; if (revealed) selBlue++; }
-      });
+    // Revealed counts always come from what is visible / flipped on the DOM
+    cells.forEach(cell => {
+      const c = getColor(cell);
+      const sel = cell.classList.contains('play-active');
+      if (c === 'red' && sel) selRed++;
+      if (c === 'blue' && sel) selBlue++;
+    });
+
+    const inLive = typeof liveRoomId !== 'undefined' && !!liveRoomId;
+    const liveTotals = window.lastLiveColorTotals;
+
+    if (inLive && liveTotals && (liveTotals.red > 0 || liveTotals.blue > 0)) {
+      // Live game: denominators from published totals (9 / 8 etc.)
+      totalRed = liveTotals.red;
+      totalBlue = liveTotals.blue;
     } else {
-      const cells = Array.from(board.getElementsByClassName('cell'));
+      // Offline / no totals: count colored cells on the board
       cells.forEach(cell => {
-        const c = getColor(cell), sel = cell.classList.contains('play-active');
-        if (c === 'red')  { totalRed++;  if (sel) selRed++; }
-        if (c === 'blue') { totalBlue++; if (sel) selBlue++; }
+        const c = getColor(cell);
+        if (c === 'red') totalRed++;
+        if (c === 'blue') totalBlue++;
       });
     }
 
