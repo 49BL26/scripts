@@ -1224,7 +1224,7 @@ async function hostifySelf() {
     const fallbackName = (input && input.value.trim()) || 'Host';
     updatedPlayers[livePlayerId] = {
       name: fallbackName,
-      charIcon: assignCharIcon(name)
+      charIcon: assignCharIcon(fallbackName),
       team: liveTeam || 'red',
       role: liveRole || 'spymaster',
       isHost: true
