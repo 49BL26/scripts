@@ -1814,11 +1814,11 @@ if (!isNewGuest) {
     allowRoleChoice: true
   });
 } else if (liveRoomSettings.autoAssign) {
-  // ---------- AUTO ASSIGN (balance teams) ----------
+  // ---------- AUTO ASSIGN ----------
+  // Active team members only (not bystanders)
   const teamOf = (p) => {
     if (!p || isBystanderRole(p.role)) return null;
     if (p.team === 'red' || p.team === 'blue') return p.team;
-    if (p.previousTeam === 'red' || p.previousTeam === 'blue') return p.previousTeam;
     return null;
   };
 
@@ -1830,28 +1830,78 @@ if (!isNewGuest) {
     else if (t === 'blue') blueCount++;
   }
 
-  // Put the new joiner on the smaller team.
-  // Tie → opposite of host (firstGuestTeam).
-  let assignedTeam;
-  if (redCount < blueCount) assignedTeam = 'red';
-  else if (blueCount < redCount) assignedTeam = 'blue';
-  else assignedTeam = firstGuestTeam;
+  // Waiting bystander from a previous odd-one-out
+  const waitingEntry = Object.entries(players).find(
+    ([, p]) =>
+      p &&
+      isBystanderRole(p.role) &&
+      p.waitingForPair === true &&
+      (p.previousTeam === 'red' || p.previousTeam === 'blue')
+  );
 
-  // Spymaster if that team has none yet; otherwise Player.
-  const assignedRole = hasTeamSpymaster(players, assignedTeam, livePlayerId)
-    ? 'player'
-    : 'spymaster';
+  if (waitingEntry) {
+    // Pair: promote waiting bystander to player on previousTeam;
+    // new joiner goes opposite.
+    const [waitingId, waitingPlayer] = waitingEntry;
+    const waitingTeam =
+      waitingPlayer.previousTeam === 'blue' ? 'blue' : 'red';
+    const newTeam = oppositeTeam(waitingTeam);
 
-  players[livePlayerId] = normalizePlayerState({
-    name,
-    charIcon: assignCharIcon(name),
-    team: assignedTeam,
-    role: assignedRole,
-    previousTeam: assignedTeam,
-    isHost: false,
-    waitingForPair: false,
-    allowRoleChoice: false
-  });
+    players[waitingId] = normalizePlayerState(waitingPlayer, {
+      team: waitingTeam,
+      role: 'player',
+      previousTeam: waitingTeam,
+      waitingForPair: false,
+      allowRoleChoice: false
+    });
+
+    const newRole = hasTeamSpymaster(players, newTeam, livePlayerId)
+      ? 'player'
+      : 'spymaster';
+
+    players[livePlayerId] = normalizePlayerState({
+      name,
+      charIcon: assignCharIcon(name),
+      team: newTeam,
+      role: newRole,
+      previousTeam: newTeam,
+      isHost: false,
+      waitingForPair: false,
+      allowRoleChoice: false
+    });
+  } else if (redCount !== blueCount) {
+    // Imbalance: fill the smaller team
+    const assignedTeam = redCount < blueCount ? 'red' : 'blue';
+    const assignedRole = hasTeamSpymaster(players, assignedTeam, livePlayerId)
+      ? 'player'
+      : 'spymaster';
+
+    players[livePlayerId] = normalizePlayerState({
+      name,
+      charIcon: assignCharIcon(name),
+      team: assignedTeam,
+      role: assignedRole,
+      previousTeam: assignedTeam,
+      isHost: false,
+      waitingForPair: false,
+      allowRoleChoice: false
+    });
+  } else {
+    // Teams equal (or empty of guests): odd one out → beige bystander, wait for pair
+    // Prefer opposite of host as the team they'll join when paired
+    const reservedTeam = firstGuestTeam; // opposite of host
+
+    players[livePlayerId] = normalizePlayerState({
+      name,
+      charIcon: assignCharIcon(name),
+      team: 'beige',
+      role: 'bystander',
+      previousTeam: reservedTeam,
+      isHost: false,
+      waitingForPair: true,
+      allowRoleChoice: false
+    });
+  }
 }  else {
   // Fallback (should rarely hit)
   players[livePlayerId] = normalizePlayerState({
@@ -2668,6 +2718,14 @@ function renderPlayersPanel(players = {}) {
   (player.name || 'Player') +
   (player.isHost ? ' (host)' : '');
 
+  name.style.cursor = 'pointer';
+  name.title = 'Click to rename';
+  name.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    hostRenamePlayer(id);
+  });
+
 if (!player.isHost) {
     const permissionLabel = document.createElement('label');
     permissionLabel.className = 'host-player-permission';
@@ -3212,7 +3270,65 @@ async function kickLivePlayer(playerId) {
 }
 
 window.kickLivePlayer = kickLivePlayer;
-	
+
+async function hostRenamePlayer(playerId) {
+  if (!liveIsHost || !liveRoomId || !playerId) return;
+
+  const { data: room, error } = await sb
+    .from('rooms')
+    .select('players')
+    .eq('id', liveRoomId)
+    .single();
+
+  if (error || !room) return;
+
+  const players = { ...(room.players || {}) };
+  const target = players[playerId];
+  if (!target) return;
+
+  const current = target.name || '';
+  const raw = await uiPrompt(`Rename ${current || 'player'} to:`, current, {
+    title: 'Rename player',
+    okLabel: 'Save'
+  });
+  if (raw == null) return;
+
+  const name = makeUniqueLiveName(raw, players, playerId);
+  if (!name) return;
+
+  players[playerId] = {
+    ...target,
+    name,
+    charIcon: typeof assignCharIcon === 'function' ? assignCharIcon(name) : target.charIcon
+  };
+
+  const { data: updated, error: writeError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', liveRoomId)
+    .select('board, players, settings')
+    .single();
+
+  if (writeError || !updated) {
+    console.error('Could not rename player:', writeError);
+    return;
+  }
+
+  applyLiveRoomState(updated);
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updated, sender: livePlayerId }
+    });
+  }
+}
+
+window.hostRenamePlayer = hostRenamePlayer;
+
 async function setAutoAssignmentSetting(enabled) {
   if (!liveIsHost || !liveRoomId) return;
 
@@ -4972,41 +5088,54 @@ function switchMenu(key) {
 }
 
 /* Random whole-board generator + random word filler */
-function randomizeBoard() {
-    if (!KEY_POOL.length) {
-        uiAlert('keycards.js not loaded — check script order.');
-        return;
-    }
-    const cells = [...board.getElementsByClassName('cell')];
-    const layout = KEY_POOL[Math.floor(Math.random() * KEY_POOL.length)];
-    const words = randomWords(25);
-    cells.forEach((cell, i) => {
-        const c = layout.g[i];
-        cell.className = 'cell ' + (c === 'd' ? 'black' : c === 'r' ? 'red' : c === 'b' ? 'blue' : 'white');
-        delete cell.dataset.seq;
-        cell.querySelector('.cell-text').textContent = words[i];
-    });
-  updateStats();
-  saveCurrentState();
+async function randomizeBoard() {
+  if (!KEY_POOL.length) {
+    uiAlert('keycards.js not loaded — check script order.');
+    return;
+  }
 
-  if (typeof liveRoomId !== 'undefined' && liveRoomId && liveRole === 'spymaster') {
+  const cells = [...board.getElementsByClassName('cell')];
+  const layout = KEY_POOL[Math.floor(Math.random() * KEY_POOL.length)];
+  const words = randomWords(25);
+  cells.forEach((cell, i) => {
+    const c = layout.g[i];
+    cell.className = 'cell ' + (c === 'd' ? 'black' : c === 'r' ? 'red' : c === 'b' ? 'blue' : 'white');
+    delete cell.dataset.seq;
+    cell.querySelector('.cell-text').textContent = words[i];
+  });
+
+  updateStats();
+
+  // Local history only — do NOT call saveCurrentState() here (it pushLiveBoard's
+  // without clearing settings.clue and races the live publish below).
+  if (typeof pushHistory === 'function') pushHistory();
+  try {
+    const cellsData = Array.from(board.getElementsByClassName('cell')).map(cell => ({
+      text: getText(cell),
+      colorClass: getColor(cell),
+      isPlayFlipped: cell.classList.contains('play-active'),
+      isThink: cell.classList.contains('think'),
+      seq: +cell.dataset.seq || 0
+    }));
+    localStorage.setItem(
+      'wordBoardState',
+      JSON.stringify({ currentRotation, isFlipped, cellsData })
+    );
+  } catch (e) { /* ignore */ }
+
+  if (liveRoomId && liveRole === 'spymaster') {
     const snap = getLiveBoardSnapshot();
     window.lastRedHasMore = !!snap.redHasMore;
     const clueState = resetLiveClueTurn(snap.redHasMore);
-
-    // Merge into settings so everyone gets the clear via settings.clue
     const settings = {
       ...(liveRoomSettings || {}),
       clue: clueState
     };
     liveRoomSettings = settings;
-
-    publishLivePatch({ board: snap, settings });
+    await publishLivePatch({ board: snap, settings });
     if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
   }
-
 }
-
 
 function validBoard(a, roll) {
     const g = [0,1,2,3,4].map(r => a.slice(r * 5, r * 5 + 5));
