@@ -923,6 +923,7 @@ body.grid-align-open {
         <div class="modal-buttons" id="modal-buttons"></div>
     </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/emojilib@4.0.3/dist/emoji-en-US.json" type="application/json" id="emojilib-data"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
@@ -1078,8 +1079,8 @@ function updateLiveNameButton(players = {}) {
 
   const color = getPlayerColor(me);
   const name = me?.name || 'Name';
-
-  button.textContent = name;
+  const icon = me?.charIcon || '';
+  button.textContent = icon ? `${icon} ${name}` : name;
   button.dataset.team = color;
   button.classList.remove('name-red', 'name-blue', 'name-beige');
   button.classList.add(`name-${color}`);
@@ -1150,9 +1151,11 @@ function renderLiveRoster(players = {}) {
       button.className =
         `roster-name-button name-${getPlayerColor(person)}`;
 
-      button.textContent =
-        (person.name || 'Player') +
-        (person.role === 'spymaster' ? ' ★' : '');
+  const icon = person.charIcon || '';
+  button.textContent =
+  (icon ? icon + ' ' : '') +
+  (person.name || 'Player') +
+  (person.role === 'spymaster' ? ' ★' : '');
 
       button.disabled = true;
 
@@ -1221,6 +1224,7 @@ async function hostifySelf() {
     const fallbackName = (input && input.value.trim()) || 'Host';
     updatedPlayers[livePlayerId] = {
       name: fallbackName,
+	  charIcon: assignCharIcon(name)
       team: liveTeam || 'red',
       role: liveRole || 'spymaster',
       isHost: true
@@ -1337,6 +1341,7 @@ async function hostGame() {
   const players = {
     [livePlayerId]: {
       name,
+	  charIcon: assignCharIcon(name),
       team: 'red',
       role: 'spymaster',
       isHost: true
@@ -1696,12 +1701,14 @@ if (!isNewGuest) {
   players[livePlayerId] = {
     ...previous,
     name,
+	charIcon: assignCharIcon(name),
     ...(previous.role === 'bystander' ? { team: 'beige' } : {})
   };
 } else if (joinChoice) {
   // Manual choice path
   players[livePlayerId] = normalizePlayerState({
     name,
+	charIcon: assignCharIcon(name),
     team: joinChoice.team,
     role: joinChoice.role,
     previousTeam: joinChoice.team,
@@ -1723,6 +1730,7 @@ if (!isNewGuest) {
     // 1st guest → opposite team Spymaster
     players[livePlayerId] = normalizePlayerState({
       name,
+	  charIcon: assignCharIcon(name)
       team: firstGuestTeam,
       role: 'spymaster',
       previousTeam: firstGuestTeam,
@@ -1747,6 +1755,7 @@ if (!isNewGuest) {
 
     players[livePlayerId] = normalizePlayerState({
       name,
+	  charIcon: assignCharIcon(name)
       team: nextTeam,
       role: 'player',
       previousTeam: nextTeam,
@@ -1763,6 +1772,7 @@ if (!isNewGuest) {
 
     players[livePlayerId] = normalizePlayerState({
       name,
+	  charIcon: assignCharIcon(name),
       team: assignedTeam,
       role: 'bystander',
       previousTeam: assignedTeam,
@@ -1775,6 +1785,7 @@ if (!isNewGuest) {
   // Fallback (should rarely hit)
   players[livePlayerId] = normalizePlayerState({
     name,
+	charIcon: assignCharIcon(name),
     team: firstGuestTeam,
     role: 'player',
     previousTeam: firstGuestTeam,
@@ -1856,6 +1867,11 @@ function joinRoomFromUrl() {
         nameInput.value = defaultLiveName();
       }
     }
+
+	const name = makeUniqueLiveName(getLiveNameOrAlert(), players, livePlayerId);
+	if (!name) return;
+
+	const charIcon = assignCharIcon(name);
 
     const codeInput = document.getElementById('join-code-input');
     if (codeInput) codeInput.value = code;
@@ -2390,9 +2406,11 @@ function renderPlayersPanel(players = {}) {
     name.className =
       `player-name name-${getPlayerColor(player)}`;
 
-    name.textContent =
-      (player.name || 'Player') +
-      (player.isHost ? ' (host)' : '');
+  const icon = player.charIcon || '';
+  name.textContent =
+  (icon ? icon + ' ' : '') +
+  (player.name || 'Player') +
+  (player.isHost ? ' (host)' : '');
 
 if (!player.isHost) {
     const permissionLabel = document.createElement('label');
@@ -3075,6 +3093,162 @@ function defaultLiveName() {
   return withSuffix(word, false);
 }
 
+const LEET_MAP = {
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a',
+  '5': 's', '7': 't', '8': 'b', '9': 'g'
+};
+
+function deLeet(str) {
+  return String(str || '')
+    .toLowerCase()
+    .split('')
+    .map(c => LEET_MAP[c] || c)
+    .join('');
+}
+
+function stripNumbers(str) {
+  return String(str || '').replace(/[0-9]/g, '');
+}
+
+// ---------- emojilib index ----------
+let emojiKeywordIndex = null;   // keyword → [emoji, emoji, ...]
+let emojiReady = false;
+
+function buildEmojiIndex(lib) {
+  const index = Object.create(null);
+  for (const [emoji, keywords] of Object.entries(lib)) {
+    if (!Array.isArray(keywords)) continue;
+    for (const kw of keywords) {
+      const key = String(kw).toLowerCase().replace(/_/g, ' ').trim();
+      if (!key) continue;
+      if (!index[key]) index[key] = [];
+      if (!index[key].includes(emoji)) index[key].push(emoji);
+    }
+  }
+  return index;
+}
+
+function initEmojilib() {
+  // Try the <script type="application/json"> tag first
+  const el = document.getElementById('emojilib-data');
+  if (el && el.textContent) {
+    try {
+      const lib = JSON.parse(el.textContent);
+      emojiKeywordIndex = buildEmojiIndex(lib);
+      emojiReady = true;
+      return;
+    } catch (e) {
+      console.warn('emojilib JSON parse failed', e);
+    }
+  }
+
+  // Fallback: fetch from CDN
+  fetch('https://cdn.jsdelivr.net/npm/emojilib@4.0.3/dist/emoji-en-US.json')
+    .then(r => r.json())
+    .then(lib => {
+      emojiKeywordIndex = buildEmojiIndex(lib);
+      emojiReady = true;
+    })
+    .catch(err => {
+      console.warn('Could not load emojilib', err);
+      emojiReady = true; // still mark ready so we fall back to fuzzy
+    });
+}
+
+// Call once early
+initEmojilib();
+
+// ---------- matching ----------
+function scoreMatch(candidate, keyword) {
+  if (candidate === keyword) return 100;          // exact
+  if (keyword.startsWith(candidate) || candidate.startsWith(keyword)) return 70;
+  if (keyword.includes(candidate) || candidate.includes(keyword)) return 40;
+  return 0;
+}
+
+function searchEmojilib(term) {
+  if (!emojiKeywordIndex || !term) return [];
+
+  const results = [];
+  const lower = term.toLowerCase();
+
+  for (const [keyword, emojis] of Object.entries(emojiKeywordIndex)) {
+    const score = scoreMatch(lower, keyword);
+    if (score > 0) {
+      for (const emoji of emojis) {
+        results.push({ emoji, score, keyword });
+      }
+    }
+  }
+
+  // Highest score first, then shorter keywords (more specific)
+  results.sort((a, b) => b.score - a.score || a.keyword.length - b.keyword.length);
+  return results;
+}
+
+// Deterministic fuzzy fallback when nothing good is found
+const FUZZY_POOL = [
+  '🦊','🐱','🐶','🦁','🐯','🐻','🐼','🐨','🐸','🦉',
+  '🦄','🤖','👽','👻','⭐','🔥','🌙','🚀','🎮','🕵️',
+  '🐧','🦆','🐘','🦔','🦚','🐡','🐄','🐵','🐰','🐍'
+];
+
+function simpleHash(str) {
+  let h = 0;
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+/**
+ * Assign a character emoji from a player name.
+ * Order:
+ * 1. de-leet version (strongest)
+ * 2. original with numbers stripped
+ * 3. de-leet + numbers stripped
+ * 4. raw lower-case
+ * 5. fuzzy hash fallback
+ */
+function assignCharIcon(rawName) {
+  const original = String(rawName || '').trim();
+  if (!original) return '👤';
+
+  // If the library is still loading, return a temporary icon;
+  // the name-save / join path will re-run once ready if needed.
+  if (!emojiReady || !emojiKeywordIndex) {
+    return FUZZY_POOL[simpleHash(original) % FUZZY_POOL.length];
+  }
+
+  const candidates = [
+    deLeet(original),
+    stripNumbers(original).toLowerCase(),
+    deLeet(stripNumbers(original)),
+    original.toLowerCase()
+  ].filter(Boolean);
+
+  let best = null;
+
+  for (const cand of candidates) {
+    const hits = searchEmojilib(cand);
+    if (hits.length && hits[0].score >= 40) {   // accept anything that is at least a substring match
+      // Prefer the highest-scoring hit
+      if (!best || hits[0].score > best.score) {
+        best = hits[0];
+      }
+      // Early exit on a strong exact/prefix match
+      if (hits[0].score >= 70) break;
+    }
+  }
+
+  if (best) return best.emoji;
+
+  // Truly fuzzy / no sensible match
+  return FUZZY_POOL[simpleHash(original) % FUZZY_POOL.length];
+}
+
 function prefillLiveName() {
   const input = document.getElementById('live-name-input');
   if (!input) return;
@@ -3133,7 +3307,11 @@ async function saveLivePlayerName() {
   nameInput.value = name;
   if (existingPlayer.name === name) return;
 
-  players[livePlayerId] = { ...existingPlayer, name };
+players[livePlayerId] = {
+  ...existingPlayer,
+  name,
+  charIcon: assignCharIcon(name)
+};
 
   const { data: updatedRoom, error: writeError } = await sb
     .from('rooms')
@@ -3217,7 +3395,8 @@ async function saveOwnRoleChoice() {
 
   players[livePlayerId] = normalizePlayerState(me, {
     team,
-    role
+    role,
+	charIcon: assignCharIcon(name)
   });
 
   if (!['red', 'blue', 'beige'].includes(team)) return;
@@ -3234,7 +3413,8 @@ async function saveOwnRoleChoice() {
 
   players[livePlayerId] = normalizePlayerState(me, {
     team,
-    role
+    role,
+	charIcon: assignCharIcon(name)
   });
 
   const { data: updated, error: updateError } = await sb
