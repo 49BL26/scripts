@@ -1579,7 +1579,6 @@ function getLiveBoardSnapshot() {
   });
   snap.redHasMore = red >= blue; // true → Red is 9, Blue is 8
   return snap;
-  return snap;
 }
 	
 let lastBoardFingerprint = '';
@@ -5969,19 +5968,6 @@ function updateStats() {
 
     const cells = Array.from(board.getElementsByClassName('cell'));
 
-    // Revealed counts always come from what is visible / flipped on the DOM
-    cells.forEach(cell => {
-      const c = getColor(cell);
-      const sel = cell.classList.contains('play-active');
-      if (c === 'red' && sel) selRed++;
-      if (c === 'blue' && sel) selBlue++;
-    });
-
-    const inLive = typeof liveRoomId !== 'undefined' && !!liveRoomId;
-    const liveTotals = window.lastLiveColorTotals;
-
-    //const cells = Array.from(board.getElementsByClassName('cell'));
-
     // Numerator = revealed cards of that color
     cells.forEach(cell => {
       const c = getColor(cell);
@@ -6009,10 +5995,7 @@ function updateStats() {
     if (redEl) redEl.textContent = `${selRed} / ${totalRed}`;
     if (blueEl) blueEl.textContent = `${selBlue} / ${totalBlue}`;
 
-    const redEl = document.getElementById('red-count');
-    const blueEl = document.getElementById('blue-count');
-    if (redEl) redEl.textContent = `${selRed} / ${totalRed}`;
-    if (blueEl) blueEl.textContent = `${selBlue} / ${totalBlue}`;
+    const modeEl = document.getElementById('mode-select');
 	
     const modeEl = document.getElementById('mode-select');
     const spyTeamEl = document.getElementById('spy-team');
