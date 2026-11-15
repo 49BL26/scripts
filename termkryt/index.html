@@ -707,7 +707,7 @@ body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
   border-radius: 8px;
   font-weight: 800;
   /* ~70–80% of banner height so it fills the bar without clipping */
-  font-size: calc(var(--display-board-w) / 5 * 3 / 4 / 2 * 0.72);
+  font-size: calc(var(--display-board-w) / 5 * 3 / 4 / 2 * 0.4) !important;
   line-height: 1;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -939,7 +939,7 @@ body.display-mode #board .cell-text {
 	
 <!-- ================= CLUE BANNER ================= -->
 <div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
-  <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font:15px system-ui; font-weight:600;"></div>
+  <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font-family:system-ui; font-weight:600;"></div>
   <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">🧶 Give Clue</button>
 </div>
 
