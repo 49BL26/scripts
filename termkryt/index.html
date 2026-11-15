@@ -1083,36 +1083,22 @@ window.updateLocalRotationButton = updateLocalRotationButton;
 
 function normalizePlayerState(player = {}, changes = {}) {
   const next = { ...player, ...changes };
+
   if (next.role === 'bystander') {
-    if (next.team === 'beige' || changes.team === 'beige') {
-      next.team = 'beige';
-      // Keep explicit waitingForPair from changes; only default to false if unset
-      if (changes.waitingForPair !== undefined) {
-        next.waitingForPair = !!changes.waitingForPair;
-      } else if (player.waitingForPair !== undefined && changes.role === undefined) {
-        next.waitingForPair = !!player.waitingForPair;
-      } else {
-        next.waitingForPair = false;
-      }
-    } else {
-      if (next.team === 'red' || next.team === 'blue') {
-        next.previousTeam = next.team;
-      } else if (next.previousTeam !== 'red' && next.previousTeam !== 'blue') {
-        next.previousTeam = 'red';
-      }
-      next.team = 'beige';
-      if (changes.waitingForPair !== undefined) {
-        next.waitingForPair = !!changes.waitingForPair;
-      }
+    // Always show as beige; previousTeam remembers which side they wait for
+    if (next.team === 'red' || next.team === 'blue') {
+      next.previousTeam = next.team;
+    } else if (next.previousTeam !== 'red' && next.previousTeam !== 'blue') {
+      next.previousTeam = 'red';
     }
-  } else {
-      // Waiting for a real team — keep intended team in previousTeam
-      if (next.team === 'red' || next.team === 'blue') {
-        next.previousTeam = next.team;
-      } else if (next.previousTeam !== 'red' && next.previousTeam !== 'blue') {
-        next.previousTeam = 'red';
-      }
-      next.team = 'beige';   // display as beige, but previousTeam remembers the side
+    next.team = 'beige';
+
+    if (changes.waitingForPair !== undefined) {
+      next.waitingForPair = !!changes.waitingForPair;
+    } else if (player.waitingForPair !== undefined) {
+      next.waitingForPair = !!player.waitingForPair;
+    } else {
+      next.waitingForPair = false;
     }
   } else {
     if (next.team === 'beige') {
@@ -1125,11 +1111,6 @@ function normalizePlayerState(player = {}, changes = {}) {
     next.waitingForPair = false;
   }
 
-  if (changes.waitingForPair === undefined && player.waitingForPair === undefined) {
-    if (next.role !== 'bystander' || next.team === 'beige') {
-      next.waitingForPair = false;
-    }
-  }
   return next;
 }
 
