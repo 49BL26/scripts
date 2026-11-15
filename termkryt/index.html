@@ -729,7 +729,7 @@ body.display-mode #board .cell-text {
   font-size: clamp(14px, 2.8vw, 28px);
 }
 
-/* ---- Live Chat (minimal) ---- */
+/* ---- Live Chat ---- */
 .live-chat-panel {
   width: 100%;
   max-width: 600px;
@@ -752,49 +752,35 @@ body.display-mode #board .cell-text {
   font-size: 13px;
   line-height: 1.35;
   margin-bottom: 6px;
-  padding-right: 4px;
 }
-.live-chat-msg {
-  margin: 2px 0;
-  word-break: break-word;
-}
+.live-chat-msg { margin: 2px 0; word-break: break-word; }
 .live-chat-msg .who { font-weight: 600; margin-right: 4px; }
 .live-chat-msg.muted { opacity: 0.45; }
-.live-chat-form {
-  display: flex;
-  gap: 6px;
-}
+.live-chat-form { display: flex; gap: 6px; }
 .live-chat-form input {
-  flex: 1;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  font-size: 14px;
+  flex: 1; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid #ccc; font-size: 14px;
 }
 .live-chat-form button {
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid #888;
-  background: #f5f5f5;
-  cursor: pointer;
+  padding: 6px 12px; border-radius: 6px;
+  border: 1px solid #888; background: #f5f5f5; cursor: pointer;
 }
 .chat-view-btn {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid #aaa;
-  background: #fafafa;
-  cursor: pointer;
+  font-size: 12px; padding: 2px 8px; border-radius: 6px;
+  border: 1px solid #aaa; background: #fafafa; cursor: pointer;
 }
 
-/* Focused chat view (mobile keyboard friendly) */
+/* Focused chat view — hide EVERYTHING above the clue banner + lower chrome */
+body.chat-view-mode .controls-container,
+body.chat-view-mode #g-host,
 body.chat-view-mode #live-players-panel,
 body.chat-view-mode #live-roster,
 body.chat-view-mode #stats-blurb,
+body.chat-view-mode #think-panel,
+body.chat-view-mode #key-panel,
 body.chat-view-mode #assassin-banner,
-body.chat-view-mode .toolbar,
-body.chat-view-mode #live-self-role-controls,
-body.chat-view-mode .host-only-tools {
+body.chat-view-mode .mbar,
+body.chat-view-mode #live-self-role-controls {
   display: none !important;
 }
 body.chat-view-mode #live-clue-bar {
@@ -802,19 +788,13 @@ body.chat-view-mode #live-clue-bar {
 }
 body.chat-view-mode #live-chat-panel {
   display: block !important;
-  max-height: none;
 }
 body.chat-view-mode .live-chat-messages {
   max-height: 28vh;
 }
-body.chat-view-mode #board {
-  margin-bottom: 4px;
-}
 
-/* Cell reactions (bottom-left, Discord-style) */
-.cell {
-  position: relative;
-}
+/* Cell reactions */
+.cell { position: relative; }
 .cell-reactions {
   position: absolute;
   left: 3px;
@@ -822,17 +802,19 @@ body.chat-view-mode #board {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  pointer-events: none;
   z-index: 2;
+  max-width: 90%;
 }
 .cell-reaction {
-  background: rgba(0,0,0,0.55);
+  background: rgba(0,0,0,0.6);
   color: #fff;
   font-size: 11px;
-  line-height: 1;
-  padding: 1px 3px;
+  line-height: 1.2;
+  padding: 1px 4px;
   border-radius: 8px;
   white-space: nowrap;
+  pointer-events: auto; /* needed for hover title */
+  cursor: default;
 }
 
 /* end of css */
@@ -1052,6 +1034,19 @@ body.chat-view-mode #board {
 <!-- ================= BOARD ================= -->
 <div id="board"></div>
 
+<!-- ================= LIVE CHAT ================= -->
+<div id="live-chat-panel" class="panel live-chat-panel" style="display:none;" aria-live="polite">
+  <div class="live-chat-header">
+    <strong>Chat</strong>
+    <button type="button" id="btn-chat-view" class="chat-view-btn" title="Focused chat view">Chat</button>
+  </div>
+  <div id="live-chat-messages" class="live-chat-messages"></div>
+  <form id="live-chat-form" class="live-chat-form" autocomplete="off">
+    <input id="live-chat-input" type="text" maxlength="140" placeholder="Message (140 max)" disabled>
+    <button type="submit" id="live-chat-send" disabled>Send</button>
+  </form>
+</div>
+
 <!-- ================= KEY PANEL ================= -->
 <div class="panel" id="key-panel">
     <div class="key-head">
@@ -1090,19 +1085,6 @@ body.chat-view-mode #board {
 <div id="assassin-banner">
     <div class="lbl">&#9760; Assassin touched</div>
     <div class="wrd" id="assassin-word"></div>
-</div>
-
-<!-- ================= LIVE CHAT (minimal) ================= -->
-<div id="live-chat-panel" class="panel live-chat-panel" style="display:none;" aria-live="polite">
-  <div class="live-chat-header">
-    <strong>Chat</strong>
-    <button type="button" id="btn-chat-view" class="chat-view-btn" title="Open focused chat view">Chat</button>
-  </div>
-  <div id="live-chat-messages" class="live-chat-messages"></div>
-  <form id="live-chat-form" class="live-chat-form" autocomplete="off">
-    <input id="live-chat-input" type="text" maxlength="140" placeholder="Message (140 max)" disabled>
-    <button type="submit" id="live-chat-send" disabled>Send</button>
-  </form>
 </div>
 
 <!-- ================= STATS ================= -->
@@ -1155,356 +1137,6 @@ body.chat-view-mode #board {
 <script src="wordscanner.js"></script>
 <script src="shareboard.js"></script>
 <script>
-
-
-/* ============================================================
-   LIVE CHAT + REACTIONS MODULE
-   Philosophies: Modular, KISS, DRY, single source of truth,
-   YAGNI, no code creep into the rest of the game.
-   ============================================================ */
-(function () {
-  'use strict';
-
-  const MAX_CHARS = 140;
-  const MAX_AGE_MS = 10 * 60 * 1000;          // 10 minutes
-  const MAX_PER_PLAYER = 20;
-  const MAX_TOTAL = 100;
-
-  /** @type {{ messages: Array, allowChat: boolean, mutedPlayers: Object, mutedTeams: Object, reactions: Object }} */
-  let liveChatState = createEmptyChatState();
-
-  function createEmptyChatState() {
-    return {
-      messages: [],           // { id, playerId, name, team, icon, text, ts }
-      allowChat: false,
-      mutedPlayers: {},       // playerId → true
-      mutedTeams: {},         // 'red'|'blue' → true
-      reactions: {}           // cellIndex → { [emoji]: count }
-    };
-  }
-
-  // ---------- pure helpers ----------
-  function pruneMessages(messages, now = Date.now()) {
-    const cutoff = now - MAX_AGE_MS;
-    let list = messages.filter(m => m.ts >= cutoff);
-
-    // per-player limit (keep newest)
-    const byPlayer = new Map();
-    for (const m of list) {
-      const arr = byPlayer.get(m.playerId) || [];
-      arr.push(m);
-      byPlayer.set(m.playerId, arr);
-    }
-    const kept = [];
-    for (const arr of byPlayer.values()) {
-      arr.sort((a, b) => b.ts - a.ts);
-      kept.push(...arr.slice(0, MAX_PER_PLAYER));
-    }
-    kept.sort((a, b) => a.ts - b.ts);
-
-    // global limit
-    if (kept.length > MAX_TOTAL) {
-      return kept.slice(kept.length - MAX_TOTAL);
-    }
-    return kept;
-  }
-
-  function isMuted(playerId, team, state = liveChatState) {
-    if (state.mutedPlayers[playerId]) return true;
-    if (team && state.mutedTeams[team]) return true;
-    return false;
-  }
-
-  function canSendChat() {
-    if (!window.liveRoomId || !liveChatState.allowChat) return false;
-    if (isMuted(window.livePlayerId, window.liveTeam)) return false;
-    return true;
-  }
-
-  // ---------- render ----------
-  function renderChatMessages() {
-    const box = document.getElementById('live-chat-messages');
-    if (!box) return;
-
-    const now = Date.now();
-    liveChatState.messages = pruneMessages(liveChatState.messages, now);
-
-    box.replaceChildren();
-    for (const m of liveChatState.messages) {
-      const row = document.createElement('div');
-      row.className = 'live-chat-msg';
-      if (isMuted(m.playerId, m.team)) row.classList.add('muted');
-
-      const who = document.createElement('span');
-      who.className = 'who';
-      who.textContent = (m.icon ? m.icon + ' ' : '') + (m.name || 'Player') + ':';
-
-      const text = document.createElement('span');
-      text.textContent = m.text;
-
-      row.append(who, text);
-      box.appendChild(row);
-    }
-    box.scrollTop = box.scrollHeight;
-  }
-
-  function renderChatPanelVisibility() {
-    const panel = document.getElementById('live-chat-panel');
-    if (!panel) return;
-
-    const show = !!(window.liveRoomId && liveChatState.allowChat);
-    panel.style.display = show ? 'block' : 'none';
-
-    const input = document.getElementById('live-chat-input');
-    const send = document.getElementById('live-chat-send');
-    const enabled = canSendChat();
-    if (input) input.disabled = !enabled;
-    if (send) send.disabled = !enabled;
-  }
-
-  function renderCellReactions() {
-    document.querySelectorAll('#board .cell').forEach(cell => {
-      const idx = Number(cell.dataset.index);
-      let layer = cell.querySelector('.cell-reactions');
-      if (!layer) {
-        layer = document.createElement('div');
-        layer.className = 'cell-reactions';
-        cell.appendChild(layer);
-      }
-      layer.replaceChildren();
-
-      const map = liveChatState.reactions[idx] || {};
-      for (const [emoji, count] of Object.entries(map)) {
-        if (count < 1) continue;
-        const chip = document.createElement('span');
-        chip.className = 'cell-reaction';
-        chip.textContent = count > 1 ? `${emoji}${count}` : emoji;
-        layer.appendChild(chip);
-      }
-    });
-  }
-
-  // ---------- public API used by the rest of the app ----------
-  window.LiveChat = {
-    getState() { return liveChatState; },
-
-    /** Call from applyLiveRoomState when settings.chat arrives */
-    applyFromRoomSettings(settings) {
-      if (!settings || !settings.chat) return;
-      const c = settings.chat;
-      liveChatState.allowChat = !!c.allowChat;
-      liveChatState.mutedPlayers = { ...(c.mutedPlayers || {}) };
-      liveChatState.mutedTeams = { ...(c.mutedTeams || {}) };
-      if (Array.isArray(c.messages)) {
-        liveChatState.messages = pruneMessages(c.messages);
-      }
-      if (c.reactions && typeof c.reactions === 'object') {
-        liveChatState.reactions = { ...c.reactions };
-      }
-      renderChatPanelVisibility();
-      renderChatMessages();
-      renderCellReactions();
-    },
-
-    /** Host toggles */
-    setAllowChat(allowed) {
-      liveChatState.allowChat = !!allowed;
-      persistChatSettings();
-      renderChatPanelVisibility();
-    },
-
-    setMutePlayer(playerId, muted) {
-      if (muted) liveChatState.mutedPlayers[playerId] = true;
-      else delete liveChatState.mutedPlayers[playerId];
-      persistChatSettings();
-      renderChatMessages();
-    },
-
-    setMuteTeam(team, muted) {
-      if (muted) liveChatState.mutedTeams[team] = true;
-      else delete liveChatState.mutedTeams[team];
-      persistChatSettings();
-      renderChatMessages();
-    },
-
-    reset() {
-      liveChatState = createEmptyChatState();
-      renderChatPanelVisibility();
-      renderChatMessages();
-      renderCellReactions();
-    }
-  };
-
-  // ---------- persistence + broadcast ----------
-  function chatSnapshotForRoom() {
-    return {
-      allowChat: liveChatState.allowChat,
-      mutedPlayers: { ...liveChatState.mutedPlayers },
-      mutedTeams: { ...liveChatState.mutedTeams },
-      messages: pruneMessages(liveChatState.messages).slice(-40), // keep payload small
-      reactions: { ...liveChatState.reactions }
-    };
-  }
-
-  async function persistChatSettings() {
-    if (!window.liveRoomId || typeof window.publishLivePatch !== 'function') return;
-    // Prefer the existing patch helper if present; otherwise fall back to a minimal settings merge.
-    try {
-      await window.publishLivePatch({
-        settings: {
-          ...(window.liveRoomSettings || {}),
-          chat: chatSnapshotForRoom()
-        }
-      });
-    } catch (err) {
-      console.warn('Chat persist failed', err);
-    }
-  }
-
-  async function broadcastChatEvent(event, payload) {
-    if (!window.liveChannel) return;
-    await window.liveChannel.send({
-      type: 'broadcast',
-      event,
-      payload: { sender: window.livePlayerId, ...payload }
-    });
-  }
-
-  // ---------- send message ----------
-  async function sendChatMessage(raw) {
-    if (!canSendChat()) return;
-    const text = String(raw || '').trim().slice(0, MAX_CHARS);
-    if (!text) return;
-
-    const me = (window.lastKnownPlayers || {})[window.livePlayerId] || {};
-    const msg = {
-      id: `${window.livePlayerId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      playerId: window.livePlayerId,
-      name: me.name || 'Player',
-      team: window.liveTeam || me.team || null,
-      icon: me.charIcon || '',
-      text,
-      ts: Date.now()
-    };
-
-    liveChatState.messages = pruneMessages([...liveChatState.messages, msg]);
-    renderChatMessages();
-    await broadcastChatEvent('chat-message', { message: msg });
-    // opportunistic persist (host or anyone; last write wins is fine for this feature)
-    persistChatSettings();
-  }
-
-  // ---------- reactions ----------
-  async function addReaction(cellIndex) {
-    if (!window.liveRoomId || !window.liveClueState?.word) return; // only after a clue
-    const me = (window.lastKnownPlayers || {})[window.livePlayerId] || {};
-    const emoji = me.charIcon;
-    if (!emoji) return;
-
-    const map = liveChatState.reactions[cellIndex] || {};
-    map[emoji] = (map[emoji] || 0) + 1;
-    liveChatState.reactions[cellIndex] = map;
-    renderCellReactions();
-
-    await broadcastChatEvent('chat-reaction', {
-      cellIndex,
-      emoji,
-      count: map[emoji]
-    });
-    persistChatSettings();
-  }
-
-  // ---------- wire UI + channel ----------
-  function onChatMessageBroadcast(payload) {
-    if (!payload?.message || payload.sender === window.livePlayerId) return;
-    liveChatState.messages = pruneMessages([...liveChatState.messages, payload.message]);
-    renderChatMessages();
-  }
-
-  function onChatReactionBroadcast(payload) {
-    if (payload?.sender === window.livePlayerId) return;
-    const { cellIndex, emoji, count } = payload;
-    if (cellIndex == null || !emoji) return;
-    const map = liveChatState.reactions[cellIndex] || {};
-    map[emoji] = count;
-    liveChatState.reactions[cellIndex] = map;
-    renderCellReactions();
-  }
-
-  function enterChatViewMode() {
-    document.body.classList.add('chat-view-mode');
-    const input = document.getElementById('live-chat-input');
-    if (input) setTimeout(() => input.focus(), 50);
-  }
-
-  function exitChatViewMode() {
-    document.body.classList.remove('chat-view-mode');
-  }
-
-  function initChatUI() {
-    const form = document.getElementById('live-chat-form');
-    const input = document.getElementById('live-chat-input');
-    const viewBtn = document.getElementById('btn-chat-view');
-
-    form?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      if (!input) return;
-      sendChatMessage(input.value);
-      input.value = '';
-    });
-
-    viewBtn?.addEventListener('click', () => {
-      if (document.body.classList.contains('chat-view-mode')) {
-        exitChatViewMode();
-      } else {
-        enterChatViewMode();
-      }
-    });
-
-    // Cell click → reaction (only when a clue is active)
-    document.getElementById('board')?.addEventListener('click', (e) => {
-      const cell = e.target.closest('.cell');
-      if (!cell || !window.liveClueState?.word) return;
-      // Avoid interfering with normal flip / selection if the game uses click for that.
-      // Only react on a modifier or when the game is in a “guessing” state if you prefer.
-      // For KISS we react on plain click after a clue; adjust if it collides.
-      const idx = Number(cell.dataset.index);
-      if (Number.isFinite(idx)) addReaction(idx);
-    });
-  }
-
-  // Hook the existing channel after subscribeToRoom succeeds.
-  // Call this once from the place where liveChannel is created, or poll lightly.
-  function attachChatChannelHandlers() {
-    if (!window.liveChannel || window.liveChannel.__chatHandlersAttached) return;
-    window.liveChannel.on('broadcast', { event: 'chat-message' }, ({ payload }) => {
-      onChatMessageBroadcast(payload);
-    });
-    window.liveChannel.on('broadcast', { event: 'chat-reaction' }, ({ payload }) => {
-      onChatReactionBroadcast(payload);
-    });
-    window.liveChannel.__chatHandlersAttached = true;
-  }
-
-  // Periodic prune + re-render
-  setInterval(() => {
-    if (!window.liveRoomId) return;
-    const before = liveChatState.messages.length;
-    liveChatState.messages = pruneMessages(liveChatState.messages);
-    if (liveChatState.messages.length !== before) renderChatMessages();
-  }, 30_000);
-
-  // Boot
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initChatUI);
-  } else {
-    initChatUI();
-  }
-
-  // Expose attach so the main live code can call it after subscribeToRoom
-  window.LiveChat.attachChannelHandlers = attachChatChannelHandlers;
-})();
-
 //END OF CHAT AND REACT BLOCKS
 	
 (function () {
@@ -1562,6 +1194,11 @@ function cycleLocalBoardRotation() {
     text: (c.querySelector('.cell-text') || c).textContent.trim(),
     colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
     isPlayFlipped: c.classList.contains('play-active')
+
+	  if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+}
+	  
   }));
   if (current.length !== 25) return;
 
@@ -2097,6 +1734,9 @@ async function leaveLiveRoomLocal() {
   if (typeof stopLivePoll === 'function') stopLivePoll();
 
   liveRoomId = null;
+
+  if (typeof window.LiveChat?.reset === 'function') window.LiveChat.reset();
+
   livePlayerId = getOrCreatePlayerId('local');
 
   showRoomCode(null);
@@ -2176,6 +1816,9 @@ function getLiveBoardSnapshot() {
       text: (c.querySelector('.cell-text') || c).textContent.trim(),
       colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
       isPlayFlipped: c.classList.contains('play-active')
+		if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+}
     }));
 
     if (!liveIsHost && localBoardRotation) {
@@ -2347,9 +1990,17 @@ if (state.settings && typeof window.LiveChat?.applyFromRoomSettings === 'functio
 // keep a cheap reference for chat name/icon lookups
 window.lastKnownPlayers = state.players || {};
 
+  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+
   renderSelfRoleControls(state.players || {});
   updateLiveAccessUI();
   if (typeof updateStats === 'function') updateStats();
+
+  // --- LiveChat hook ---
+  window.lastKnownPlayers = state.players || {};
+  if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
+    window.LiveChat.applyFromRoomSettings(state.settings || {});
+  }
 }
 
   // ... after loading data ...
@@ -3159,12 +2810,16 @@ async function subscribeToRoom(code) {
     liveChannel.subscribe(status => {
       console.log('Realtime status:', status);
 
-      if (status === 'SUBSCRIBED') finish(true);
+    liveChannel.subscribe(status => {
+      console.log('Realtime status:', status);
 
-if (typeof window.LiveChat?.attachChannelHandlers === 'function') {
-  window.LiveChat.attachChannelHandlers();
-}
-	
+      if (status === 'SUBSCRIBED') {
+        if (typeof window.LiveChat?.attachChannelHandlers === 'function') {
+          window.LiveChat.attachChannelHandlers();
+        }
+        finish(true);
+      }
+
       if (
         status === 'CHANNEL_ERROR' ||
         status === 'TIMED_OUT' ||
@@ -3173,8 +2828,6 @@ if (typeof window.LiveChat?.attachChannelHandlers === 'function') {
         finish(false);
       }
     });
-  });
-}
 
 let livePollTimer = null;
 
@@ -3318,6 +2971,34 @@ function renderPlayersPanel(players = {}) {
 
   content.appendChild(autoOptions);
 
+  // --- Allow chat (host) ---
+  const chatOpts = document.createElement('div');
+  chatOpts.style.marginTop = '8px';
+  const allowLbl = document.createElement('label');
+  const allowCb = document.createElement('input');
+  allowCb.type = 'checkbox';
+  allowCb.checked = !!(window.LiveChat?.getState()?.allowChat);
+  allowCb.addEventListener('change', () => {
+    window.LiveChat?.setAllowChat(allowCb.checked);
+  });
+  allowLbl.append(allowCb, document.createTextNode(' Allow chat'));
+  chatOpts.appendChild(allowLbl);
+
+  ['red', 'blue'].forEach(team => {
+    const lbl = document.createElement('label');
+    lbl.style.display = 'block';
+    lbl.style.marginTop = '4px';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!(window.LiveChat?.getState()?.mutedTeams?.[team]);
+    cb.addEventListener('change', () => {
+      window.LiveChat?.setMuteTeam(team, cb.checked);
+    });
+    lbl.append(cb, document.createTextNode(` Mute whole ${team} team`));
+    chatOpts.appendChild(lbl);
+  });
+  content.appendChild(chatOpts);
+
   // TEAM COLUMNS
   const myTeam =
     players[livePlayerId]?.team === 'blue'
@@ -3455,21 +3136,18 @@ if (!player.isHost) {
       e.stopPropagation();
       kickLivePlayer(id);
     });
-
 if (!player.isHost) {
-  const muteLabel = document.createElement('label');
-  muteLabel.className = 'host-player-mute';
-  const muteCb = document.createElement('input');
-  muteCb.type = 'checkbox';
-  muteCb.checked = !!(window.LiveChat?.getState()?.mutedPlayers?.[id]);
-  muteCb.addEventListener('change', () => {
-    window.LiveChat?.setMutePlayer(id, muteCb.checked);
-  });
-  muteLabel.append(muteCb, document.createTextNode(' Mute'));
-  row.appendChild(muteLabel);
-}
-
     identity.append(name, permissionLabel, kickBtn);
+	const muteLbl = document.createElement('label');
+    muteLbl.style.marginLeft = '6px';
+    const muteCb = document.createElement('input');
+    muteCb.type = 'checkbox';
+    muteCb.checked = !!(window.LiveChat?.getState()?.mutedPlayers?.[id]);
+    muteCb.addEventListener('change', () => {
+    window.LiveChat?.setMutePlayer(id, muteCb.checked);
+    });
+    muteLbl.append(muteCb, document.createTextNode(' Mute'));
+    row.appendChild(muteLbl);
 } else {
   identity.appendChild(name);
 }
@@ -4685,7 +4363,349 @@ function randomPlayerId() {
   window.pushLiveBoard = pushLiveBoard;
 })();
 </script>
-	
+<script>
+
+/* ============================================================
+   LIVE CHAT + REACTIONS
+   Single source of truth, KISS, no creep into game logic.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  const MAX_CHARS = 140;
+  const MAX_AGE_MS = 10 * 60 * 1000;
+  const MAX_PER_PLAYER = 20;
+  const MAX_TOTAL = 100;
+
+  /** @type {object} */
+  let state = emptyState();
+
+  function emptyState() {
+    return {
+      messages: [],
+      allowChat: false,
+      mutedPlayers: Object.create(null),
+      mutedTeams: Object.create(null),
+      // reactions[cellIndex] = { [playerId]: { emoji, name } }
+      reactions: Object.create(null),
+      // playerId → cellIndex (one reaction per player at a time)
+      playerReactionCell: Object.create(null)
+    };
+  }
+
+  function pruneMessages(list, now = Date.now()) {
+    const cutoff = now - MAX_AGE_MS;
+    let msgs = list.filter(m => m.ts >= cutoff);
+
+    const byPlayer = new Map();
+    for (const m of msgs) {
+      const arr = byPlayer.get(m.playerId) || [];
+      arr.push(m);
+      byPlayer.set(m.playerId, arr);
+    }
+    const kept = [];
+    for (const arr of byPlayer.values()) {
+      arr.sort((a, b) => b.ts - a.ts);
+      kept.push(...arr.slice(0, MAX_PER_PLAYER));
+    }
+    kept.sort((a, b) => a.ts - b.ts);
+    return kept.length > MAX_TOTAL ? kept.slice(-MAX_TOTAL) : kept;
+  }
+
+  function isMuted(playerId, team) {
+    if (state.mutedPlayers[playerId]) return true;
+    if (team && state.mutedTeams[team]) return true;
+    return false;
+  }
+
+  function canSend() {
+    return !!(window.liveRoomId && state.allowChat &&
+      !isMuted(window.livePlayerId, window.liveTeam));
+  }
+
+  // ---------- render ----------
+  function renderMessages() {
+    const box = document.getElementById('live-chat-messages');
+    if (!box) return;
+    state.messages = pruneMessages(state.messages);
+    box.replaceChildren();
+    for (const m of state.messages) {
+      const row = document.createElement('div');
+      row.className = 'live-chat-msg' + (isMuted(m.playerId, m.team) ? ' muted' : '');
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = (m.icon ? m.icon + ' ' : '') + (m.name || 'Player') + ':';
+      const text = document.createElement('span');
+      text.textContent = m.text;
+      row.append(who, text);
+      box.appendChild(row);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderVisibility() {
+    const panel = document.getElementById('live-chat-panel');
+    if (!panel) return;
+    const show = !!(window.liveRoomId && state.allowChat);
+    panel.style.display = show ? 'block' : 'none';
+    const input = document.getElementById('live-chat-input');
+    const send = document.getElementById('live-chat-send');
+    const on = canSend();
+    if (input) input.disabled = !on;
+    if (send) send.disabled = !on;
+  }
+
+  function renderReactions() {
+    document.querySelectorAll('#board .cell').forEach(cell => {
+      const idx = Number(cell.dataset.index);
+      let layer = cell.querySelector('.cell-reactions');
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'cell-reactions';
+        cell.appendChild(layer);
+      }
+      layer.replaceChildren();
+
+      const byPlayer = state.reactions[idx] || {};
+      // Aggregate: emoji → { count, names[] }
+      const agg = Object.create(null);
+      for (const entry of Object.values(byPlayer)) {
+        if (!agg[entry.emoji]) agg[entry.emoji] = { count: 0, names: [] };
+        agg[entry.emoji].count += 1;
+        agg[entry.emoji].names.push(entry.name || 'Player');
+      }
+      for (const [emoji, info] of Object.entries(agg)) {
+        const chip = document.createElement('span');
+        chip.className = 'cell-reaction';
+        chip.textContent = info.count > 1 ? `${emoji}${info.count}` : emoji;
+        chip.title = info.names.join(', ');
+        layer.appendChild(chip);
+      }
+    });
+  }
+
+  // ---------- persistence / broadcast ----------
+  function snapshot() {
+    return {
+      allowChat: state.allowChat,
+      mutedPlayers: { ...state.mutedPlayers },
+      mutedTeams: { ...state.mutedTeams },
+      messages: pruneMessages(state.messages).slice(-40),
+      reactions: state.reactions,
+      playerReactionCell: state.playerReactionCell
+    };
+  }
+
+  async function persist() {
+    if (!window.liveRoomId || typeof window.publishLivePatch !== 'function') return;
+    const settings = {
+      ...(window.liveRoomSettings || {}),
+      chat: snapshot()
+    };
+    // publishLivePatch merges and re-applies; board not touched
+    await window.publishLivePatch({ settings });
+  }
+
+  async function broadcast(event, payload) {
+    if (!window.liveChannel) return;
+    await window.liveChannel.send({
+      type: 'broadcast',
+      event,
+      payload: { sender: window.livePlayerId, ...payload }
+    });
+  }
+
+  // ---------- messages ----------
+  async function sendMessage(raw) {
+    if (!canSend()) return;
+    const text = String(raw || '').trim().slice(0, MAX_CHARS);
+    if (!text) return;
+
+    const players = window.lastKnownPlayers || {};
+    const me = players[window.livePlayerId] || {};
+    const msg = {
+      id: `${window.livePlayerId}-${Date.now()}`,
+      playerId: window.livePlayerId,
+      name: me.name || 'Player',
+      team: window.liveTeam || me.team || null,
+      icon: me.charIcon || '',
+      text,
+      ts: Date.now()
+    };
+    state.messages = pruneMessages([...state.messages, msg]);
+    renderMessages();
+    await broadcast('chat-message', { message: msg });
+    persist();
+  }
+
+  // ---------- reactions (one per player; click toggles) ----------
+  async function toggleReaction(cellIndex) {
+    if (!window.liveRoomId || !window.liveClueState?.word) return;
+
+    const players = window.lastKnownPlayers || {};
+    const me = players[window.livePlayerId] || {};
+    const emoji = me.charIcon;
+    if (!emoji) return;
+
+    const pid = window.livePlayerId;
+    const prevCell = state.playerReactionCell[pid];
+
+    // Remove existing reaction first (one at a time)
+    if (prevCell != null && state.reactions[prevCell]) {
+      delete state.reactions[prevCell][pid];
+      if (Object.keys(state.reactions[prevCell]).length === 0) {
+        delete state.reactions[prevCell];
+      }
+    }
+
+    // Toggle: same cell → just remove; different cell → move
+    if (prevCell === cellIndex) {
+      delete state.playerReactionCell[pid];
+    } else {
+      if (!state.reactions[cellIndex]) state.reactions[cellIndex] = {};
+      state.reactions[cellIndex][pid] = {
+        emoji,
+        name: me.name || 'Player'
+      };
+      state.playerReactionCell[pid] = cellIndex;
+    }
+
+    renderReactions();
+    await broadcast('chat-reaction', {
+      reactions: state.reactions,
+      playerReactionCell: state.playerReactionCell
+    });
+    persist();
+  }
+
+  /** Called when a cell is flipped — clear all reactions on that cell */
+  function clearReactionsOnCell(cellIndex) {
+    const byPlayer = state.reactions[cellIndex];
+    if (!byPlayer) return;
+    for (const pid of Object.keys(byPlayer)) {
+      if (state.playerReactionCell[pid] === cellIndex) {
+        delete state.playerReactionCell[pid];
+      }
+    }
+    delete state.reactions[cellIndex];
+    renderReactions();
+    // fire-and-forget persist/broadcast
+    broadcast('chat-reaction', {
+      reactions: state.reactions,
+      playerReactionCell: state.playerReactionCell
+    });
+    persist();
+  }
+
+  // ---------- public API ----------
+  window.LiveChat = {
+    applyFromRoomSettings(settings) {
+      if (!settings || !settings.chat) {
+        // still refresh visibility (e.g. allowChat false)
+        renderVisibility();
+        return;
+      }
+      const c = settings.chat;
+      state.allowChat = !!c.allowChat;
+      state.mutedPlayers = { ...(c.mutedPlayers || {}) };
+      state.mutedTeams = { ...(c.mutedTeams || {}) };
+      if (Array.isArray(c.messages)) state.messages = pruneMessages(c.messages);
+      if (c.reactions && typeof c.reactions === 'object') {
+        state.reactions = { ...c.reactions };
+      }
+      if (c.playerReactionCell && typeof c.playerReactionCell === 'object') {
+        state.playerReactionCell = { ...c.playerReactionCell };
+      }
+      renderVisibility();
+      renderMessages();
+      renderReactions();
+    },
+
+    setAllowChat(allowed) {
+      state.allowChat = !!allowed;
+      renderVisibility();
+      persist();
+    },
+
+    setMutePlayer(playerId, muted) {
+      if (muted) state.mutedPlayers[playerId] = true;
+      else delete state.mutedPlayers[playerId];
+      renderMessages();
+      persist();
+    },
+
+    setMuteTeam(team, muted) {
+      if (muted) state.mutedTeams[team] = true;
+      else delete state.mutedTeams[team];
+      renderMessages();
+      persist();
+    },
+
+    getState() { return state; },
+
+    reset() {
+      state = emptyState();
+      renderVisibility();
+      renderMessages();
+      renderReactions();
+    },
+
+    refreshReactions: renderReactions,
+    clearReactionsOnCell,
+    toggleReaction,
+
+    attachChannelHandlers() {
+      if (!window.liveChannel || window.liveChannel.__chatAttached) return;
+      window.liveChannel.on('broadcast', { event: 'chat-message' }, ({ payload }) => {
+        if (!payload?.message || payload.sender === window.livePlayerId) return;
+        state.messages = pruneMessages([...state.messages, payload.message]);
+        renderMessages();
+      });
+      window.liveChannel.on('broadcast', { event: 'chat-reaction' }, ({ payload }) => {
+        if (payload?.sender === window.livePlayerId) return;
+        if (payload.reactions) state.reactions = payload.reactions;
+        if (payload.playerReactionCell) {
+          state.playerReactionCell = payload.playerReactionCell;
+        }
+        renderReactions();
+      });
+      window.liveChannel.__chatAttached = true;
+    }
+  };
+
+  // ---------- UI wiring ----------
+  function initUI() {
+    document.getElementById('live-chat-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('live-chat-input');
+      if (!input) return;
+      sendMessage(input.value);
+      input.value = '';
+    });
+
+    document.getElementById('btn-chat-view')?.addEventListener('click', () => {
+      document.body.classList.toggle('chat-view-mode');
+      if (document.body.classList.contains('chat-view-mode')) {
+        document.getElementById('live-chat-input')?.focus();
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initUI);
+  } else {
+    initUI();
+  }
+
+  setInterval(() => {
+    if (!window.liveRoomId) return;
+    const n = state.messages.length;
+    state.messages = pruneMessages(state.messages);
+    if (state.messages.length !== n) renderMessages();
+  }, 30_000);
+})();
+
+</script>
 <script>
 
 (function () {
@@ -5822,6 +5842,11 @@ async function randomizeBoard() {
       text: getText(cell),
       colorClass: getColor(cell),
       isPlayFlipped: cell.classList.contains('play-active'),
+
+if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+}
+		
       isThink: cell.classList.contains('think'),
       seq: +cell.dataset.seq || 0
     }));
@@ -6431,6 +6456,9 @@ function getBoardSnapshot() {
         text: getText(cell),
         colorClass: getColor(cell),
         isPlayFlipped: cell.classList.contains('play-active')
+		if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+  		window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+		}
     }));
     return {
         currentRotation,
@@ -6559,6 +6587,11 @@ function saveCurrentState() {
         text: getText(cell),
         colorClass: getColor(cell),
         isPlayFlipped: cell.classList.contains('play-active'),
+
+if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+}
+		
         isThink: cell.classList.contains('think'),
         seq: +cell.dataset.seq || 0
     }));
@@ -6576,6 +6609,11 @@ function initBoard(cellsData) {
         cell.className = 'cell';
         cell.classList.add(cellData.colorClass || 'white');
         if (cellData.isPlayFlipped) cell.classList.add('play-active');
+
+		if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+}
+		
         if (cellData.isThink) { cell.classList.add('think'); cell.dataset.seq = cellData.seq || thinkCounter++; }
         cell.dataset.index = i;
 
@@ -6585,7 +6623,17 @@ function initBoard(cellsData) {
         textSpan.style.transform = `rotate(${currentRotation}deg)`;
 
         cell.appendChild(textSpan);
-        cell.addEventListener('click', () => handleCellClick(cell));
+		
+cell.addEventListener('click', (e) => {
+  if (e.shiftKey && window.liveClueState?.word &&
+      typeof window.LiveChat?.toggleReaction === 'function') {
+    const idx = Number(cell.dataset.index);
+    if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
+    return; // do not also flip/select
+  }
+  handleCellClick(cell);
+});
+		
         board.appendChild(cell);
     });
     handleModeChange();
@@ -6660,6 +6708,19 @@ async function handleCellClick(cell) {
             updateStats(); saveCurrentState();
         }
     }
+
+  // LiveChat reaction: only when a clue is active and chat module present.
+  // Shift-click (or Alt-click) to avoid fighting normal flip/select.
+  // Change to plain click if you prefer and accept the collision.
+  if (window.liveClueState?.word && typeof window.LiveChat?.toggleReaction === 'function') {
+    // Use shiftKey so normal play is unchanged. Remove the shiftKey check
+    // if you want plain click to react instead.
+    if (window.event?.shiftKey || (typeof event !== 'undefined' && event.shiftKey)) {
+      const idx = Number(cell.dataset.index);
+      if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
+    }
+  }
+
 }
 
 function paintCell(cell, color, reveal) {
