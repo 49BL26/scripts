@@ -667,49 +667,12 @@ body.display-mode #assassin-banner,
 body.display-mode .mbar {
   display: none !important;
 }
-body.display-mode #board {
-  max-width: min(96vw, 96vh * 1.25);
-  width: 96vw;
-  margin: 12px auto;
-}
-body.display-mode #board .cell-text {
-  font-size: clamp(14px, 2.8vw, 28px);
-}
-body.display-mode #live-clue-bar.display-clue-on {
-  display: block !important;
-  max-width: min(96vw, 900px);
-  margin: 8px auto 12px;
-}
-body.display-mode #live-clue-bar.display-clue-on #btn-give-clue {
-  display: none !important;
-}
-#btn-exit-display {
-  display: none;
-  position: fixed;
-  top: 10px;
-  right: 10px;
-  z-index: 9999;
-  padding: 8px 12px;
-  font-size: 14px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  background: #fff;
-  cursor: pointer;
-}
-body.display-mode #btn-exit-display {
-  display: block;
-}
 
-body.display-mode #g-host {
-  display: block !important;
-}
-body.display-mode #g-host > :not(#live-clue-bar) {
-  display: none !important;
-}
+/* Clue bar sits outside controls, so it can show above the board */
 body.display-mode #live-clue-bar.display-clue-on {
   display: block !important;
   max-width: min(96vw, 900px);
-  margin: 8px auto 12px;
+  margin: 12px auto 8px;
 }
 body.display-mode #live-clue-bar.display-clue-on #btn-give-clue {
   display: none !important;
@@ -718,6 +681,15 @@ body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
   display: block !important;
   font-size: clamp(18px, 3vw, 32px);
   padding: 14px 18px;
+}
+
+body.display-mode #board {
+  max-width: min(96vw, 96vh * 1.25);
+  width: 96vw;
+  margin: 12px auto;
+}
+body.display-mode #board .cell-text {
+  font-size: clamp(14px, 2.8vw, 28px);
 }
 
 /* end of css */
@@ -802,11 +774,6 @@ body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
     <option value="bystander">Bystander</option>
   </select>
 </div>	
-
-<div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
-  <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font:15px system-ui; font-weight:600;"></div>
-  <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">🧶 Give Clue</button>
-</div>
 	
   <!-- Host only: player list + role controls -->
   <div id="live-players-panel" style="display:none; margin-top:10px; padding:10px; border:1px solid #444;border-radius:8px; max-width:420px;"></div>
@@ -931,6 +898,12 @@ body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
         <button onclick="shareBoardUrl(true)">Copy Colorblind Share Link</button>
         <button onclick="importDataString()">Import Board Setup</button>
     </div>
+</div>
+	
+<!-- ================= CLUE BANNER ================= -->
+<div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
+  <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font:15px system-ui; font-weight:600;"></div>
+  <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">🧶 Give Clue</button>
 </div>
 
 <!-- ================= BOARD ================= -->
