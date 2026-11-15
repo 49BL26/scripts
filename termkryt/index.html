@@ -736,6 +736,12 @@ body.display-mode #btn-exit-display {
 		<button id="btn-undo" onclick="undoBoard()" title="Undo (previous board state)">↶ Undo</button>
 		<button id="btn-redo" onclick="redoBoard()" title="Redo (next board state)">↷ Redo</button>
         <label for="op1" id="op1lbl">Mode:</label>
+		
+		    <!-- ===== DISPLAYMODE UI ===== -->
+
+<button type="button" id="btn-display-mode" onclick="enterDisplayMode()">📺 Display mode</button>
+<button type="button" id="btn-exit-display" onclick="exitDisplayMode()">Exit display</button>
+
         <select id="op1" onchange="uiSync()">
             <option value="player">Player</option>
             <option value="spymaster">Spymaster</option>
@@ -787,6 +793,8 @@ body.display-mode #btn-exit-display {
 
   </div>
 </div>
+
+
 
     <!-- ===== SPYMASTER ===== -->
 	
@@ -1921,7 +1929,10 @@ if (!isNewGuest) {
   });
 } else if (liveRoomSettings.autoAssign) {
   // ---------- AUTO ASSIGN ----------
-  // Active team members only (not bystanders)
+  // 1) If teams unequal → fill the smaller team
+  // 2) Else if a bystander is waiting → both join (waiting on reserved team, new on opposite)
+  // 3) Else → new joiner becomes waiting beige bystander
+
   const teamOf = (p) => {
     if (!p || isBystanderRole(p.role)) return null;
     if (p.team === 'red' || p.team === 'blue') return p.team;
@@ -1935,140 +1946,77 @@ if (!isNewGuest) {
     if (t === 'red') redCount++;
     else if (t === 'blue') blueCount++;
   }
-  // Any bystander marked waitingForPair (or beige with a reserved previousTeam)
-  const waitingEntry = Object.entries(players).find(([, p]) => {
-    if (!p || !isBystanderRole(p.role)) return false;
-    if (p.waitingForPair === true) return true;
-    return (
-      (p.team === 'beige' || !p.team) &&
-      (p.previousTeam === 'red' || p.previousTeam === 'blue') &&
-      p.waitingForPair !== false
-    );
-  });
 
-  if (waitingEntry) {
-    // Pair: promote waiting bystander to player on previousTeam;
-    // new joiner goes opposite.
-    const [waitingId, waitingPlayer] = waitingEntry;
-    const waitingTeam =
-      waitingPlayer.previousTeam === 'blue' ? 'blue' : 'red';
-    const newTeam = oppositeTeam(waitingTeam);
+  // Only true waiting bystanders (odd one out)
+  const waitingEntry = Object.entries(players).find(
+    ([, p]) =>
+      p &&
+      isBystanderRole(p.role) &&
+      p.waitingForPair === true &&
+      (p.previousTeam === 'red' || p.previousTeam === 'blue')
+  );
 
-    players[waitingId] = normalizePlayerState(waitingPlayer, {
-      team: waitingTeam,
-      role: 'player',
-      previousTeam: waitingTeam,
-      waitingForPair: false,
-      allowRoleChoice: false
-    });
-
-    const newRole = hasTeamSpymaster(players, newTeam, livePlayerId)
-      ? 'player'
-      : 'spymaster';
-
-    players[livePlayerId] = normalizePlayerState(
-      {
-        name,
-        charIcon: assignCharIcon(name),
-        isHost: false,
-        allowRoleChoice: false
-      },
-      {
-        team: 'beige',
-        role: 'bystander',
-        previousTeam: firstGuestTeam,
-        waitingForPair: true
-      }
-    );
-  } else if (redCount !== blueCount) {
-    // Imbalance: fill the smaller team
+  if (redCount !== blueCount) {
+    // Prefer fixing imbalance first
     const assignedTeam = redCount < blueCount ? 'red' : 'blue';
     const assignedRole = hasTeamSpymaster(players, assignedTeam, livePlayerId)
       ? 'player'
       : 'spymaster';
 
-    players[livePlayerId] = normalizePlayerState({
-      name,
-      charIcon: assignCharIcon(name),
-      team: assignedTeam,
-      role: assignedRole,
-      previousTeam: assignedTeam,
-      isHost: false,
+    players[livePlayerId] = normalizePlayerState(
+      { name, charIcon: assignCharIcon(name), isHost: false },
+      {
+        team: assignedTeam,
+        role: assignedRole,
+        previousTeam: assignedTeam,
+        waitingForPair: false,
+        allowRoleChoice: false
+      }
+    );
+  } else if (waitingEntry) {
+    // Teams balanced AND someone is waiting → put both on teams
+    const [waitingId, waitingPlayer] = waitingEntry;
+    const waitingTeam =
+      waitingPlayer.previousTeam === 'blue' ? 'blue' : 'red';
+    const newTeam = oppositeTeam(waitingTeam);
+
+    // Waiting bystander → player on their reserved team
+    players[waitingId] = normalizePlayerState(waitingPlayer, {
+      team: waitingTeam,
+      role: hasTeamSpymaster(players, waitingTeam, waitingId)
+        ? 'player'
+        : 'spymaster',
+      previousTeam: waitingTeam,
       waitingForPair: false,
       allowRoleChoice: false
     });
+
+    // New joiner → opposite team
+    players[livePlayerId] = normalizePlayerState(
+      { name, charIcon: assignCharIcon(name), isHost: false },
+      {
+        team: newTeam,
+        role: hasTeamSpymaster(players, newTeam, livePlayerId)
+          ? 'player'
+          : 'spymaster',
+        previousTeam: newTeam,
+        waitingForPair: false,
+        allowRoleChoice: false
+      }
+    );
   } else {
-    // Teams equal (or empty of guests): odd one out → beige bystander, wait for pair
-    // Prefer opposite of host as the team they'll join when paired
-    const reservedTeam = firstGuestTeam; // opposite of host
-
-    players[livePlayerId] = normalizePlayerState({
-      name,
-      charIcon: assignCharIcon(name),
-      team: 'beige',
-      role: 'bystander',
-      previousTeam: reservedTeam,
-      isHost: false,
-      waitingForPair: true,
-      allowRoleChoice: false
-    });
+    // Balanced, no one waiting → odd one out sits as bystander
+    players[livePlayerId] = normalizePlayerState(
+      { name, charIcon: assignCharIcon(name), isHost: false },
+      {
+        team: 'beige',
+        role: 'bystander',
+        previousTeam: firstGuestTeam, // side they'll take when paired
+        waitingForPair: true,
+        allowRoleChoice: false
+      }
+    );
   }
-}  else {
-  // Fallback (should rarely hit)
-  players[livePlayerId] = normalizePlayerState({
-    name,
-	charIcon: assignCharIcon(name),
-    team: firstGuestTeam,
-    role: 'player',
-    previousTeam: firstGuestTeam,
-    isHost: false,
-    allowRoleChoice: true
-  });
-}
-
-const hostAllowsChoice =
-  canPlayerChoose(previous);
-
-// Always write the player into the room (for non-hosts)
-if (!liveIsHost) {
-  const { data: updatedRoom, error: updateError } = await sb
-    .from('rooms')
-    .update({
-      players,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', code)
-    .select('players, board, settings')
-    .maybeSingle();
-
-  if (updateError || !updatedRoom) {
-    console.error('Could not save player:', updateError);
-    alert('Could not join the room. Check permissions or try again.');
-    return;
-  }
-
-  const me = updatedRoom.players?.[livePlayerId] || players[livePlayerId];
-  liveRole = me?.role ?? null;
-  liveTeam = me?.team ?? null;
-
-  applyLiveBoard(updatedRoom.board || data.board, liveRole === 'spymaster');
-  await subscribeToRoom(code);
-
-  if (liveChannel) {
-    liveChannel.send({
-      type: 'broadcast',
-      event: 'room-state',
-      payload: { state: updatedRoom }
-    });
-  }
-
-  applyLiveRoomState(updatedRoom);
-  showRoomCode(code);
-  showHostPlayersPanel(false);
-  enterLiveMode({ isHost: false });
-  renderLiveRoster(updatedRoom.players || players);
-  updateLiveAccessUI();
-}
 }
 
 window.joinGame = joinGame;
@@ -5238,7 +5186,8 @@ async function randomizeBoard() {
     );
   } catch (e) { /* ignore */ }
 
-  if (liveRoomId && liveRole === 'spymaster') {
+  // Any spymaster OR the host can publish a new board + clear clue
+  if (liveRoomId && (liveRole === 'spymaster' || liveIsHost)) {
     const snap = getLiveBoardSnapshot();
     window.lastRedHasMore = !!snap.redHasMore;
 
@@ -5250,20 +5199,22 @@ async function randomizeBoard() {
     };
     window.liveClueState = clueState;
 
-    // Force board re-apply on clients
     if (typeof lastBoardFingerprint !== 'undefined') lastBoardFingerprint = '';
 
+    // Always write a full settings object with cleared clue
     const settings = {
+      autoAssign: liveRoomSettings?.autoAssign !== false,
+      autoTeams: liveRoomSettings?.autoTeams,
+      autoRoles: liveRoomSettings?.autoRoles,
       ...(liveRoomSettings || {}),
       clue: clueState
     };
     liveRoomSettings = settings;
 
-    const result = await publishLivePatch({ board: snap, settings });
-    if (result === false) {
-      // Fallback: settings-only clue clear
-      await publishLiveClueState(clueState);
-    }
+    // Prefer settings-only clear first (always allowed), then board
+    await publishLiveClueState(clueState);
+    await publishLivePatch({ board: snap, settings });
+
     if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
   }
 }
