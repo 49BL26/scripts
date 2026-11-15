@@ -2011,13 +2011,67 @@ if (!isNewGuest) {
       {
         team: 'beige',
         role: 'bystander',
-        previousTeam: firstGuestTeam, // side they'll take when paired
+        previousTeam: firstGuestTeam,
         waitingForPair: true,
         allowRoleChoice: false
       }
     );
   }
+} else {
+  // Fallback (autoAssign off and no manual choice)
+  players[livePlayerId] = normalizePlayerState(
+    { name, charIcon: assignCharIcon(name), isHost: false },
+    {
+      team: firstGuestTeam,
+      role: 'player',
+      previousTeam: firstGuestTeam,
+      waitingForPair: false,
+      allowRoleChoice: true
+    }
+  );
 }
+
+// Always write the player into the room (for non-hosts)
+if (!liveIsHost) {
+  const { data: updatedRoom, error: updateError } = await sb
+    .from('rooms')
+    .update({
+      players,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', code)
+    .select('players, board, settings')
+    .maybeSingle();
+
+  if (updateError || !updatedRoom) {
+    console.error('Could not save player:', updateError);
+    alert('Could not join the room. Check permissions or try again.');
+    return;
+  }
+
+  const me = updatedRoom.players?.[livePlayerId] || players[livePlayerId];
+  liveRole = me?.role ?? null;
+  liveTeam = me?.team ?? null;
+
+  applyLiveBoard(updatedRoom.board || data.board, liveRole === 'spymaster');
+  await subscribeToRoom(code);
+
+  if (liveChannel) {
+    liveChannel.send({
+      type: 'broadcast',
+      event: 'room-state',
+      payload: { state: updatedRoom }
+    });
+  }
+
+  applyLiveRoomState(updatedRoom);
+  showRoomCode(code);
+  showHostPlayersPanel(false);
+  enterLiveMode({ isHost: false });
+  renderLiveRoster(updatedRoom.players || players);
+  updateLiveAccessUI();
+}
+} // end joinGame
 
 window.joinGame = joinGame;
 
