@@ -656,6 +656,50 @@ body.grid-align-open {
 .host-kick-btn:hover {
   opacity: 1;
 }
+
+body.display-mode .controls-container,
+body.display-mode #live-roster,
+body.display-mode #live-players-panel,
+body.display-mode #stats-blurb,
+body.display-mode #think-panel,
+body.display-mode #key-panel,
+body.display-mode #assassin-banner,
+body.display-mode .mbar {
+  display: none !important;
+}
+body.display-mode #board {
+  max-width: min(96vw, 96vh * 1.25);
+  width: 96vw;
+  margin: 12px auto;
+}
+body.display-mode #board .cell-text {
+  font-size: clamp(14px, 2.8vw, 28px);
+}
+body.display-mode #live-clue-bar.display-clue-on {
+  display: block !important;
+  max-width: min(96vw, 900px);
+  margin: 8px auto 12px;
+}
+body.display-mode #live-clue-bar.display-clue-on #btn-give-clue {
+  display: none !important;
+}
+#btn-exit-display {
+  display: none;
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 9999;
+  padding: 8px 12px;
+  font-size: 14px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
+body.display-mode #btn-exit-display {
+  display: block;
+}
+
 /* end of css */
 </style>
 </head>
@@ -1039,13 +1083,29 @@ window.updateLocalRotationButton = updateLocalRotationButton;
 
 function normalizePlayerState(player = {}, changes = {}) {
   const next = { ...player, ...changes };
-
   if (next.role === 'bystander') {
-    // Explicit watch-only
     if (next.team === 'beige' || changes.team === 'beige') {
       next.team = 'beige';
-      next.waitingForPair = false;
+      // Keep explicit waitingForPair from changes; only default to false if unset
+      if (changes.waitingForPair !== undefined) {
+        next.waitingForPair = !!changes.waitingForPair;
+      } else if (player.waitingForPair !== undefined && changes.role === undefined) {
+        next.waitingForPair = !!player.waitingForPair;
+      } else {
+        next.waitingForPair = false;
+      }
     } else {
+      if (next.team === 'red' || next.team === 'blue') {
+        next.previousTeam = next.team;
+      } else if (next.previousTeam !== 'red' && next.previousTeam !== 'blue') {
+        next.previousTeam = 'red';
+      }
+      next.team = 'beige';
+      if (changes.waitingForPair !== undefined) {
+        next.waitingForPair = !!changes.waitingForPair;
+      }
+    }
+  } else {
       // Waiting for a real team — keep intended team in previousTeam
       if (next.team === 'red' || next.team === 'blue') {
         next.previousTeam = next.team;
@@ -1106,8 +1166,74 @@ function updateLiveNameButton(players = {}) {
   button.classList.add(`name-${color}`);
 }
 
-  const EXIT_CODE = 'EXIT';
+window.__displayMode = { active: false, showClue: false };
 
+async function enterDisplayMode() {
+  if (!document.getElementById('board')) return;
+
+  const showClue = await askChoice(
+    'Display mode',
+    'Do you want to display the clues as well?',
+    [
+      { label: 'No', value: false },
+      { label: 'Yes', value: true, primary: true }
+    ]
+  );
+  // Cancel → null
+  if (showClue === null || showClue === undefined) return;
+
+  window.__displayMode = { active: true, showClue: showClue === true };
+  document.body.classList.add('display-mode');
+
+  const clueBar = document.getElementById('live-clue-bar');
+  if (clueBar) {
+    clueBar.classList.toggle('display-clue-on', window.__displayMode.showClue);
+    if (window.__displayMode.showClue && typeof renderLiveClueUI === 'function') {
+      renderLiveClueUI();
+    }
+  }
+
+  // Player/bystander view: no key colors
+  if (typeof applyLiveBoard === 'function' && liveRoomId) {
+    // Re-apply current board as non-spymaster if we have last state
+    // (mask unrevealed). Host TV should join as bystander/player for this.
+  }
+
+  try {
+    const root = document.documentElement;
+    if (root.requestFullscreen) await root.requestFullscreen();
+    else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+  } catch (e) {
+    console.warn('Fullscreen not available', e);
+  }
+}
+
+async function exitDisplayMode() {
+  window.__displayMode = { active: false, showClue: false };
+  document.body.classList.remove('display-mode');
+  const clueBar = document.getElementById('live-clue-bar');
+  if (clueBar) clueBar.classList.remove('display-clue-on');
+
+  if (document.fullscreenElement) {
+    try { await document.exitFullscreen(); } catch (e) { /* ignore */ }
+  }
+  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && window.__displayMode?.active) {
+    exitDisplayMode();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && window.__displayMode?.active) {
+    exitDisplayMode();
+  }
+});
+
+window.enterDisplayMode = enterDisplayMode;
+window.exitDisplayMode = exitDisplayMode;
 
 function renderLiveRoster(players = {}) {
   const roster = document.getElementById('live-roster');
@@ -1698,12 +1824,11 @@ function applyLiveRoomState(state) {
     renderPlayersPanel(state.players);
   }
 
-  // Clue / turn from room payload
   // Clue / turn lives under settings.clue (shared with everyone)
   const incomingClue =
-    (state.settings && state.settings.clue) ||
-    state.clue ||
-    null;
+    (state.settings && Object.prototype.hasOwnProperty.call(state.settings, 'clue'))
+      ? state.settings.clue
+      : (state.clue !== undefined ? state.clue : undefined);
 
   if (incomingClue && typeof incomingClue === 'object') {
     window.liveClueState = {
@@ -1829,15 +1954,16 @@ if (!isNewGuest) {
     if (t === 'red') redCount++;
     else if (t === 'blue') blueCount++;
   }
-
-  // Waiting bystander from a previous odd-one-out
-  const waitingEntry = Object.entries(players).find(
-    ([, p]) =>
-      p &&
-      isBystanderRole(p.role) &&
-      p.waitingForPair === true &&
-      (p.previousTeam === 'red' || p.previousTeam === 'blue')
-  );
+  // Any bystander marked waitingForPair (or beige with a reserved previousTeam)
+  const waitingEntry = Object.entries(players).find(([, p]) => {
+    if (!p || !isBystanderRole(p.role)) return false;
+    if (p.waitingForPair === true) return true;
+    return (
+      (p.team === 'beige' || !p.team) &&
+      (p.previousTeam === 'red' || p.previousTeam === 'blue') &&
+      p.waitingForPair !== false
+    );
+  });
 
   if (waitingEntry) {
     // Pair: promote waiting bystander to player on previousTeam;
@@ -1859,16 +1985,20 @@ if (!isNewGuest) {
       ? 'player'
       : 'spymaster';
 
-    players[livePlayerId] = normalizePlayerState({
-      name,
-      charIcon: assignCharIcon(name),
-      team: newTeam,
-      role: newRole,
-      previousTeam: newTeam,
-      isHost: false,
-      waitingForPair: false,
-      allowRoleChoice: false
-    });
+    players[livePlayerId] = normalizePlayerState(
+      {
+        name,
+        charIcon: assignCharIcon(name),
+        isHost: false,
+        allowRoleChoice: false
+      },
+      {
+        team: 'beige',
+        role: 'bystander',
+        previousTeam: firstGuestTeam,
+        waitingForPair: true
+      }
+    );
   } else if (redCount !== blueCount) {
     // Imbalance: fill the smaller team
     const assignedTeam = redCount < blueCount ? 'red' : 'blue';
@@ -2266,6 +2396,12 @@ function renderLiveClueUI() {
     return;
   }
 
+  // In display mode with clues on, keep bar visible even if role UI is hidden
+  if (window.__displayMode?.active && window.__displayMode.showClue) {
+    bar.style.display = 'block';
+    bar.classList.add('display-clue-on');
+  }
+
   // Visible to everyone in the room (host, both spymasters, players)
   bar.style.display = 'block';
 
@@ -2353,17 +2489,15 @@ window.giveLiveClue = giveLiveClue;
 window.renderLiveClueUI = renderLiveClueUI;
 	
 async function publishLivePatch(patch) {
-  if (!liveRoomId) return;
+  if (!liveRoomId) return false;
 
   const isBoardPatch = !!patch && Object.prototype.hasOwnProperty.call(patch, 'board');
-
-  // Only spymasters may publish board updates.
   if (isBoardPatch && !canPublishLiveBoard()) {
     console.warn('Blocked: only spymasters may publish board updates.');
-    return;
+    return false;
   }
 
-const { data, error } = await sb
+  const { data, error } = await sb
     .from('rooms')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', liveRoomId)
@@ -2372,19 +2506,19 @@ const { data, error } = await sb
 
   if (error || !data) {
     console.error('Could not publish room update:', error);
-    return;
+    return false;
   }
 
-  // Apply locally so everyone sees the latest room state immediately.
   applyLiveRoomState(data);
 
   if (liveChannel) {
     liveChannel.send({
       type: 'broadcast',
       event: 'room-state',
-      payload: { state: data }
+      payload: { state: data, sender: livePlayerId }
     });
   }
+  return true;
 }
 
 async function pushLiveBoard() {
@@ -5126,13 +5260,29 @@ async function randomizeBoard() {
   if (liveRoomId && liveRole === 'spymaster') {
     const snap = getLiveBoardSnapshot();
     window.lastRedHasMore = !!snap.redHasMore;
-    const clueState = resetLiveClueTurn(snap.redHasMore);
+
+    const clueState = {
+      word: null,
+      number: null,
+      byTeam: null,
+      turnTeam: snap.redHasMore ? 'red' : 'blue'
+    };
+    window.liveClueState = clueState;
+
+    // Force board re-apply on clients
+    if (typeof lastBoardFingerprint !== 'undefined') lastBoardFingerprint = '';
+
     const settings = {
       ...(liveRoomSettings || {}),
       clue: clueState
     };
     liveRoomSettings = settings;
-    await publishLivePatch({ board: snap, settings });
+
+    const result = await publishLivePatch({ board: snap, settings });
+    if (result === false) {
+      // Fallback: settings-only clue clear
+      await publishLiveClueState(clueState);
+    }
     if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
   }
 }
