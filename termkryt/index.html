@@ -667,7 +667,7 @@ body.display-mode #assassin-banner,
 body.display-mode .mbar {
   display: none !important;
 }
-
+	
 /* Same width basis as the board */
 body.display-mode #board,
 body.display-mode #live-clue-bar.display-clue-on {
@@ -701,17 +701,23 @@ body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
   justify-content: center;
   box-sizing: border-box;
   width: 100%;
-  /* half a row of cards */
   height: calc(var(--display-board-w) / 5 * 3 / 4 / 2);
   min-height: 28px;
-  padding: 0 12px;
+  padding: 0 16px;
   border-radius: 8px;
-  font-weight: 700;
-  font-size: clamp(14px, 2.2vw, 28px);
-  line-height: 1.1;
+  font-weight: 800;
+  /* ~70–80% of banner height so it fills the bar without clipping */
+  font-size: calc(var(--display-board-w) / 5 * 3 / 4 / 2 * 0.72);
+  line-height: 1;
+  letter-spacing: 0.02em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+body.display-mode #live-clue-bar.display-clue-on.flipped-board #live-clue-banner {
+  height: calc(var(--display-board-w) / 5 * 4 / 3 / 2);
+  font-size: calc(var(--display-board-w) / 5 * 4 / 3 / 2 * 0.72);
 }
 
 /* Flipped board uses taller cells (aspect 3/4) — half-row still matches */
