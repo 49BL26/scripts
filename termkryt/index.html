@@ -700,6 +700,26 @@ body.display-mode #btn-exit-display {
   display: block;
 }
 
+body.display-mode #g-host {
+  display: block !important;
+}
+body.display-mode #g-host > :not(#live-clue-bar) {
+  display: none !important;
+}
+body.display-mode #live-clue-bar.display-clue-on {
+  display: block !important;
+  max-width: min(96vw, 900px);
+  margin: 8px auto 12px;
+}
+body.display-mode #live-clue-bar.display-clue-on #btn-give-clue {
+  display: none !important;
+}
+body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
+  display: block !important;
+  font-size: clamp(18px, 3vw, 32px);
+  padding: 14px 18px;
+}
+
 /* end of css */
 </style>
 </head>
@@ -1168,24 +1188,28 @@ async function enterDisplayMode() {
       { label: 'Yes', value: true, primary: true }
     ]
   );
-  // Cancel → null
   if (showClue === null || showClue === undefined) return;
 
   window.__displayMode = { active: true, showClue: showClue === true };
   document.body.classList.add('display-mode');
 
   const clueBar = document.getElementById('live-clue-bar');
+  const banner = document.getElementById('live-clue-banner');
   if (clueBar) {
-    clueBar.classList.toggle('display-clue-on', window.__displayMode.showClue);
-    if (window.__displayMode.showClue && typeof renderLiveClueUI === 'function') {
-      renderLiveClueUI();
+    if (window.__displayMode.showClue) {
+      clueBar.classList.add('display-clue-on');
+      clueBar.style.display = 'block';
+      if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+      // If there is an active clue, force banner visible
+      const clue = window.liveClueState || {};
+      if (banner && clue.word) {
+        banner.style.display = 'block';
+        banner.style.background = clue.byTeam === 'blue' ? '#0d47a1' : '#b71c1c';
+        banner.textContent = `🧶 ${(clue.byTeam || '').toUpperCase()}: “${clue.word}” — ${clue.number}`;
+      }
+    } else {
+      clueBar.classList.remove('display-clue-on');
     }
-  }
-
-  // Player/bystander view: no key colors
-  if (typeof applyLiveBoard === 'function' && liveRoomId) {
-    // Re-apply current board as non-spymaster if we have last state
-    // (mask unrevealed). Host TV should join as bystander/player for this.
   }
 
   try {
@@ -2367,6 +2391,35 @@ async function publishLiveClueState(clueState) {
     });
   }
 }
+
+/** Called from randomizeBoard (outside this IIFE) after a new board is generated. */
+window.clearLiveClueForNewBoard = async function clearLiveClueForNewBoard() {
+  if (!liveRoomId) return false;
+  if (!(liveRole === 'spymaster' || liveIsHost)) return false;
+
+  const snap = getLiveBoardSnapshot();
+  window.lastRedHasMore = !!snap.redHasMore;
+
+  const clueState = {
+    word: null,
+    number: null,
+    byTeam: null,
+    turnTeam: snap.redHasMore ? 'red' : 'blue'
+  };
+  window.liveClueState = clueState;
+  lastBoardFingerprint = '';
+
+  const settings = {
+    ...(liveRoomSettings || {}),
+    clue: clueState
+  };
+  liveRoomSettings = settings;
+
+  await publishLiveClueState(clueState);
+  await publishLivePatch({ board: snap, settings });
+  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+  return true;
+};
 
 function renderLiveClueUI() {
   const bar = document.getElementById('live-clue-bar');
@@ -5223,8 +5276,6 @@ async function randomizeBoard() {
 
   updateStats();
 
-  // Local history only — do NOT call saveCurrentState() here (it pushLiveBoard's
-  // without clearing settings.clue and races the live publish below).
   if (typeof pushHistory === 'function') pushHistory();
   try {
     const cellsData = Array.from(board.getElementsByClassName('cell')).map(cell => ({
@@ -5240,36 +5291,13 @@ async function randomizeBoard() {
     );
   } catch (e) { /* ignore */ }
 
-  // Any spymaster OR the host can publish a new board + clear clue
-  if (liveRoomId && (liveRole === 'spymaster' || liveIsHost)) {
-    const snap = getLiveBoardSnapshot();
-    window.lastRedHasMore = !!snap.redHasMore;
-
-    const clueState = {
-      word: null,
-      number: null,
-      byTeam: null,
-      turnTeam: snap.redHasMore ? 'red' : 'blue'
-    };
-    window.liveClueState = clueState;
-
-    if (typeof lastBoardFingerprint !== 'undefined') lastBoardFingerprint = '';
-
-    // Always write a full settings object with cleared clue
-    const settings = {
-      autoAssign: liveRoomSettings?.autoAssign !== false,
-      autoTeams: liveRoomSettings?.autoTeams,
-      autoRoles: liveRoomSettings?.autoRoles,
-      ...(liveRoomSettings || {}),
-      clue: clueState
-    };
-    liveRoomSettings = settings;
-
-    // Prefer settings-only clear first (always allowed), then board
-    await publishLiveClueState(clueState);
-    await publishLivePatch({ board: snap, settings });
-
-    if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+  // MUST go through the live IIFE helper (liveRoomId is not in scope here)
+  if (typeof window.clearLiveClueForNewBoard === 'function') {
+    try {
+      await window.clearLiveClueForNewBoard();
+    } catch (err) {
+      console.error('clearLiveClueForNewBoard failed:', err);
+    }
   }
 }
 
