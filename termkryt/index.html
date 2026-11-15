@@ -717,12 +717,11 @@ body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
 
 body.display-mode #live-clue-bar.display-clue-on.flipped-board #live-clue-banner {
   height: calc(var(--display-board-w) / 5 * 4 / 3 / 2);
-  font-size: calc(var(--display-board-w) / 5 * 4 / 3 / 2 * 0.72);
+  font-size: calc(var(--display-board-w) / 5 * 4 / 3 / 2 * 0.65);
 }
 
 /* Flipped board uses taller cells (aspect 3/4) — half-row still matches */
-body.display-mode #board.flipped ~ #live-clue-bar.display-clue-on #live-clue-banner,
-body.display-mode #live-clue-bar.display-clue-on.flipped-board #live-clue-banner {
+body.display-mode #board.flipped ~ #live-clue-bar.display-clue-on #live-clue-banner {
   height: calc(var(--display-board-w) / 5 * 4 / 3 / 2);
 }
 
