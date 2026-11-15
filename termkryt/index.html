@@ -668,26 +668,58 @@ body.display-mode .mbar {
   display: none !important;
 }
 
-/* Clue bar sits outside controls, so it can show above the board */
+/* Same width basis as the board */
+body.display-mode #board,
 body.display-mode #live-clue-bar.display-clue-on {
-  display: block !important;
-  max-width: min(96vw, 900px);
-  margin: 12px auto 8px;
-}
-body.display-mode #live-clue-bar.display-clue-on #btn-give-clue {
-  display: none !important;
-}
-body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
-  display: block !important;
-  font-size: clamp(18px, 3vw, 32px);
-  padding: 14px 18px;
+  --display-board-w: min(96vw, 96vh * 1.2);
+  width: var(--display-board-w);
+  max-width: var(--display-board-w);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 body.display-mode #board {
-  max-width: min(96vw, 96vh * 1.25);
-  width: 96vw;
-  margin: 12px auto;
+  margin-top: 8px;
+  margin-bottom: 12px;
 }
+
+/* One cell row ≈ (board width / 5) * (3/4) with aspect-ratio 4/3
+   Banner = half of that */
+body.display-mode #live-clue-bar.display-clue-on {
+  display: block !important;
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+body.display-mode #live-clue-bar.display-clue-on #btn-give-clue {
+  display: none !important;
+}
+
+body.display-mode #live-clue-bar.display-clue-on #live-clue-banner {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  /* half a row of cards */
+  height: calc(var(--display-board-w) / 5 * 3 / 4 / 2);
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: clamp(14px, 2.2vw, 28px);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Flipped board uses taller cells (aspect 3/4) — half-row still matches */
+body.display-mode #board.flipped ~ #live-clue-bar.display-clue-on #live-clue-banner,
+body.display-mode #live-clue-bar.display-clue-on.flipped-board #live-clue-banner {
+  height: calc(var(--display-board-w) / 5 * 4 / 3 / 2);
+}
+
 body.display-mode #board .cell-text {
   font-size: clamp(14px, 2.8vw, 28px);
 }
@@ -1192,6 +1224,8 @@ async function enterDisplayMode() {
   } catch (e) {
     console.warn('Fullscreen not available', e);
   }
+  document.getElementById('live-clue-bar')
+  ?.classList.toggle('flipped-board', document.getElementById('board')?.classList.contains('flipped'));
 }
 
 async function exitDisplayMode() {
