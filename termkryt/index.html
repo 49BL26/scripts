@@ -1990,19 +1990,13 @@ if (state.settings && typeof window.LiveChat?.applyFromRoomSettings === 'functio
 // keep a cheap reference for chat name/icon lookups
 window.lastKnownPlayers = state.players || {};
 
-  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
 
   renderSelfRoleControls(state.players || {});
   updateLiveAccessUI();
   if (typeof updateStats === 'function') updateStats();
-
-  // --- LiveChat hook ---
-  window.lastKnownPlayers = state.players || {};
-  if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
-    window.LiveChat.applyFromRoomSettings(state.settings || {});
-  }
 }
-
+	
   // ... after loading data ...
 
 async function joinGame(code) {
@@ -2810,15 +2804,7 @@ async function subscribeToRoom(code) {
     liveChannel.subscribe(status => {
       console.log('Realtime status:', status);
 
-    liveChannel.subscribe(status => {
-      console.log('Realtime status:', status);
-
-      if (status === 'SUBSCRIBED') {
-        if (typeof window.LiveChat?.attachChannelHandlers === 'function') {
-          window.LiveChat.attachChannelHandlers();
-        }
-        finish(true);
-      }
+      if (status === 'SUBSCRIBED') finish(true);
 
       if (
         status === 'CHANNEL_ERROR' ||
