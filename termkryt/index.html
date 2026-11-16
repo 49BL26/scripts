@@ -3027,12 +3027,12 @@ function renderPlayersPanel(players = {}) {
   });
   content.appendChild(banBtn);
 
-  if (typeof formatIndexRanges === 'function' && typeof sessionBannedPairIndices !== 'undefined') {
+  if (typeof formatBannedWordIndexRanges === 'function') {
     const banInfo = document.createElement('div');
     banInfo.style.fontSize = '12px';
     banInfo.style.marginTop = '4px';
     banInfo.style.opacity = '0.85';
-    banInfo.textContent = 'Banned pairs: ' + formatIndexRanges(sessionBannedPairIndices);
+    banInfo.textContent = 'Banned (pair ranges): ' + formatBannedWordIndexRanges();
     content.appendChild(banInfo);
   }
 
@@ -4555,13 +4555,7 @@ function randomPlayerId() {
   }
 
   // ---------- reactions (one per player; click toggles) ----------
-  async function toggleReaction(cellIndex) {
-    if (!window.liveRoomId || !window.liveClueState?.word) return;
-
-    const players = window.lastKnownPlayers || {};
-    const me = players[window.livePlayerId] || {};
-    const emoji = me.charIcon;
-    if (!emoji) return;
+async function toggleReaction(cellIndex) {
 
     const pid = window.livePlayerId;
     const prevCell = state.playerReactionCell[pid];
@@ -5924,24 +5918,34 @@ function assassinOk(a) {
     return n <= 3;
 }
 
-// Session-banned WORD_PAIRS indices (host can add current board)
-const sessionBannedPairIndices = new Set(
-  (sessionStorage.getItem('termkryt_banned_pairs') || '')
-    .split(',')
-    .map(s => parseInt(s, 10))
-    .filter(n => Number.isFinite(n))
+// Session-banned *visible words only* (normalized). Other side of a pair stays usable.
+const sessionBannedWords = new Set(
+  (sessionStorage.getItem('termkryt_banned_words') || '')
+    .split('|')
+    .map(s => s.trim())
+    .filter(Boolean)
 );
 
-function saveSessionBannedPairs() {
-  sessionStorage.setItem(
-    'termkryt_banned_pairs',
-    [...sessionBannedPairIndices].sort((a, b) => a - b).join(',')
-  );
+function normWord(w) {
+  return String(w || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-/** Compress sorted integers to "1-4, 7, 10-12" */
-function formatIndexRanges(indices) {
-  const nums = [...indices].filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+function saveSessionBannedWords() {
+  sessionStorage.setItem('termkryt_banned_words', [...sessionBannedWords].join('|'));
+}
+
+/** Map banned words → pair indices, then compress to "1-4, 7, 10-12" for display */
+function formatBannedWordIndexRanges() {
+  if (typeof WORD_PAIRS === 'undefined' || !Array.isArray(WORD_PAIRS)) {
+    return sessionBannedWords.size ? String(sessionBannedWords.size) + ' words' : '(none)';
+  }
+  const indices = [];
+  WORD_PAIRS.forEach((pair, i) => {
+    if (sessionBannedWords.has(normWord(pair[0])) || sessionBannedWords.has(normWord(pair[1]))) {
+      indices.push(i);
+    }
+  });
+  const nums = indices.sort((a, b) => a - b);
   if (!nums.length) return '(none)';
   const parts = [];
   let start = nums[0];
@@ -5959,46 +5963,46 @@ function formatIndexRanges(indices) {
 }
 
 function banCurrentBoardWordsForSession() {
-  if (typeof WORD_PAIRS === 'undefined' || !Array.isArray(WORD_PAIRS)) {
-    alert('Word list not loaded.');
-    return;
-  }
-  const norm = w => String(w || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const onBoard = new Set(
-    Array.from(document.querySelectorAll('#board .cell .cell-text'))
-      .map(el => norm(el.textContent))
-      .filter(Boolean)
-  );
+  const onBoard = Array.from(document.querySelectorAll('#board .cell .cell-text'))
+    .map(el => normWord(el.textContent))
+    .filter(Boolean);
   let added = 0;
-  WORD_PAIRS.forEach((pair, i) => {
-    const a = norm(pair[0]);
-    const b = norm(pair[1]);
-    if (onBoard.has(a) || onBoard.has(b)) {
-      if (!sessionBannedPairIndices.has(i)) {
-        sessionBannedPairIndices.add(i);
-        added++;
-      }
+  onBoard.forEach(w => {
+    if (!sessionBannedWords.has(w)) {
+      sessionBannedWords.add(w);
+      added++;
     }
   });
-  saveSessionBannedPairs();
-  const ranges = formatIndexRanges(sessionBannedPairIndices);
+  saveSessionBannedWords();
   alert(
-    'Banned ' + added + ' new pair(s) from this board.\n' +
-    'Session banned pairs (' + sessionBannedPairIndices.size + '): ' + ranges
+    'Banned ' + added + ' visible word(s) this board.\n' +
+    'Session banned words: ' + sessionBannedWords.size + '\n' +
+    'Pair index ranges touched: ' + formatBannedWordIndexRanges()
   );
 }
 
 function randomWords(n = 25) {
-    const idx = WORD_PAIRS.map((_, i) => i)
-      .filter(i => !sessionBannedPairIndices.has(i));
+    // Keep pairs that still have at least one non-banned side
+    const idx = WORD_PAIRS.map((_, i) => i).filter(i => {
+      const a = normWord(WORD_PAIRS[i][0]);
+      const b = normWord(WORD_PAIRS[i][1]);
+      return !sessionBannedWords.has(a) || !sessionBannedWords.has(b);
+    });
     for (let i = idx.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [idx[i], idx[j]] = [idx[j], idx[i]];
     }
     if (idx.length < n) {
-      console.warn('Not enough unbanned word pairs; using what is left.');
+      console.warn('Not enough word pairs with a free side; using what is left.');
     }
-    return idx.slice(0, n).map(i => WORD_PAIRS[i][Math.random() < .5 ? 0 : 1]);
+    return idx.slice(0, n).map(i => {
+      const a = WORD_PAIRS[i][0];
+      const b = WORD_PAIRS[i][1];
+      const aOk = !sessionBannedWords.has(normWord(a));
+      const bOk = !sessionBannedWords.has(normWord(b));
+      if (aOk && bOk) return Math.random() < 0.5 ? a : b;
+      return aOk ? a : b;
+    });
 }
 
 function addRandomWord() {
@@ -6008,9 +6012,8 @@ function addRandomWord() {
     const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
     const used = new Set(cells.map(c => norm(c.querySelector('.cell-text').textContent)));
     const free = WORD_PAIRS
-      .filter((_, i) => typeof sessionBannedPairIndices === 'undefined' || !sessionBannedPairIndices.has(i))
       .flat()
-      .filter(w => !used.has(norm(w)));
+      .filter(w => !used.has(norm(w)) && !sessionBannedWords.has(norm(w)));
     target.querySelector('.cell-text').textContent = free.length ? free[Math.random() * free.length | 0] : 'word';
     updateStats();
     saveCurrentState();
@@ -6696,20 +6699,21 @@ function initBoard(cellsData) {
 cell.addEventListener('click', (e) => {
   const clue = window.liveClueState;
   const myTeam = window.liveTeam;
-  const isCluedTeamPlayer =
+  const myRole = window.liveRole;
+  // byTeam = team that received the clue (guessers). turnTeam = next clue-giver.
+  const isGuessingPlayer =
+    !!window.liveRoomId &&
     clue && clue.word &&
-    myTeam && clue.turnTeam &&
-    myTeam === clue.turnTeam &&
-    window.liveRole === 'player';
+    myTeam && clue.byTeam &&
+    myTeam === clue.byTeam &&
+    myRole === 'player';
 
-  if (isCluedTeamPlayer &&
-      typeof window.LiveChat !== 'undefined' &&
+  if (isGuessingPlayer &&
+      window.LiveChat &&
       typeof window.LiveChat.toggleReaction === 'function') {
     const idx = Number(cell.dataset.index);
-    if (Number.isFinite(idx)) {
-      window.LiveChat.toggleReaction(idx);
-    }
-    return; // reaction only — do not flip / paint / open modal
+    if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
+    return; // reaction only — no flip / modal
   }
   handleCellClick(cell);
 });
@@ -6718,6 +6722,9 @@ cell.addEventListener('click', (e) => {
     });
     handleModeChange();
     updateStats();
+    if (window.LiveChat && typeof window.LiveChat.refreshReactions === 'function') {
+      window.LiveChat.refreshReactions();
+    }
 }
 
 /* ========== KEYBOARD SHORTCUTS FOR HISTORY ========== */
