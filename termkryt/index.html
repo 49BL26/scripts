@@ -1713,6 +1713,10 @@ async function endLiveGameAsHost() {
 window.endLiveGameAsHost = endLiveGameAsHost;
 
 async function leaveLiveRoomLocal() {
+  if (typeof window.LiveChat?.reset === 'function') window.LiveChat.reset();
+  const chatPanel = document.getElementById('live-chat-panel');
+  if (chatPanel) chatPanel.style.display = 'none';
+  document.body.classList.remove('chat-view-mode');
   liveHasExitedRoom = true;
   liveRole = null;
   liveTeam = null;
@@ -1975,10 +1979,17 @@ function applyLiveRoomState(state) {
   window.lastKnownPlayers = state.players || {};
   if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
     window.LiveChat.applyFromRoomSettings(state.settings || {});
-  } else if (typeof window.LiveChat?.getState === 'function') {
-    // Module present but no apply yet: still force visibility in-room.
-    const panel = document.getElementById('live-chat-panel');
-    if (panel && window.liveRoomId) panel.style.display = 'block';
+  }
+  // Use local liveRoomId (same IIFE) — do not rely on window here
+  const chatPanel = document.getElementById('live-chat-panel');
+  if (chatPanel) {
+    chatPanel.style.display = liveRoomId ? 'block' : 'none';
+    if (liveRoomId) {
+      const input = document.getElementById('live-chat-input');
+      const send = document.getElementById('live-chat-send');
+      if (input) input.disabled = false;
+      if (send) send.disabled = false;
+    }
   }
 }
 	
@@ -2870,11 +2881,29 @@ function showHostPlayersPanel(isHost) {
 function enterLiveMode({ isHost }) {
   liveHasExitedRoom = false;   // rejoin / host must clear exit state
   liveIsHost = !!isHost;
+  const panel = document.getElementById('live-chat-panel');
+  if (panel) {
+    panel.style.display = liveRoomId ? 'block' : 'none';
+    if (liveRoomId) {
+      const input = document.getElementById('live-chat-input');
+      const send = document.getElementById('live-chat-send');
+      if (input) input.disabled = false;
+      if (send) send.disabled = false;
+    }
+  }
   if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
-    window.LiveChat.applyFromRoomSettings(window.liveRoomSettings || {});
+    window.LiveChat.applyFromRoomSettings(liveRoomSettings || {});
   }
   const panel = document.getElementById('live-chat-panel');
-  if (panel && window.liveRoomId) panel.style.display = 'block';
+  if (panel) {
+    panel.style.display = liveRoomId ? 'block' : 'none';
+    if (liveRoomId) {
+      const input = document.getElementById('live-chat-input');
+      const send = document.getElementById('live-chat-send');
+      if (input) input.disabled = false;
+      if (send) send.disabled = false;
+    }
+  }
 
   const nameEl = document.getElementById('live-name-input');
   // (keep any existing nameEl logic you already have below this)
@@ -2981,6 +3010,31 @@ function renderPlayersPanel(players = {}) {
     chatOpts.appendChild(lbl);
   });
   content.appendChild(chatOpts);
+
+  // Ban current board words for this browser session
+  const banBtn = document.createElement('button');
+  banBtn.type = 'button';
+  banBtn.textContent = 'Ban all current words for this session';
+  banBtn.style.marginTop = '8px';
+  banBtn.style.display = 'block';
+  banBtn.title = 'Adds this board\'s WORD_PAIRS indices to a session ban list (shown as ranges)';
+  banBtn.addEventListener('click', () => {
+    if (typeof banCurrentBoardWordsForSession === 'function') {
+      banCurrentBoardWordsForSession();
+    } else {
+      alert('Ban helper not loaded.');
+    }
+  });
+  content.appendChild(banBtn);
+
+  if (typeof formatIndexRanges === 'function' && typeof sessionBannedPairIndices !== 'undefined') {
+    const banInfo = document.createElement('div');
+    banInfo.style.fontSize = '12px';
+    banInfo.style.marginTop = '4px';
+    banInfo.style.opacity = '0.85';
+    banInfo.textContent = 'Banned pairs: ' + formatIndexRanges(sessionBannedPairIndices);
+    content.appendChild(banInfo);
+  }
 
   // TEAM COLUMNS
   const myTeam =
@@ -4308,10 +4362,19 @@ function randomPlayerId() {
   return 'p_' + Math.random().toString(36).slice(2, 10);
 }
 	
-  // Expose for onclick handlers
+  // Expose for onclick handlers + LiveChat module
   window.hostGame = hostGame;
   window.joinGame = joinGame;
   window.pushLiveBoard = pushLiveBoard;
+  window.publishLivePatch = publishLivePatch;
+
+  Object.defineProperty(window, 'liveRoomId', { get() { return liveRoomId; }, configurable: true });
+  Object.defineProperty(window, 'livePlayerId', { get() { return livePlayerId; }, configurable: true });
+  Object.defineProperty(window, 'liveTeam', { get() { return liveTeam; }, configurable: true });
+  Object.defineProperty(window, 'liveRole', { get() { return liveRole; }, configurable: true });
+  Object.defineProperty(window, 'liveChannel', { get() { return liveChannel; }, configurable: true });
+  Object.defineProperty(window, 'liveIsHost', { get() { return liveIsHost; }, configurable: true });
+  Object.defineProperty(window, 'liveRoomSettings', { get() { return liveRoomSettings; }, configurable: true });
 })();
 </script>
 <script>
@@ -5861,11 +5924,79 @@ function assassinOk(a) {
     return n <= 3;
 }
 
+// Session-banned WORD_PAIRS indices (host can add current board)
+const sessionBannedPairIndices = new Set(
+  (sessionStorage.getItem('termkryt_banned_pairs') || '')
+    .split(',')
+    .map(s => parseInt(s, 10))
+    .filter(n => Number.isFinite(n))
+);
+
+function saveSessionBannedPairs() {
+  sessionStorage.setItem(
+    'termkryt_banned_pairs',
+    [...sessionBannedPairIndices].sort((a, b) => a - b).join(',')
+  );
+}
+
+/** Compress sorted integers to "1-4, 7, 10-12" */
+function formatIndexRanges(indices) {
+  const nums = [...indices].filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!nums.length) return '(none)';
+  const parts = [];
+  let start = nums[0];
+  let prev = nums[0];
+  for (let i = 1; i <= nums.length; i++) {
+    const cur = nums[i];
+    if (cur === prev + 1) {
+      prev = cur;
+      continue;
+    }
+    parts.push(start === prev ? String(start) : start + '-' + prev);
+    start = prev = cur;
+  }
+  return parts.join(', ');
+}
+
+function banCurrentBoardWordsForSession() {
+  if (typeof WORD_PAIRS === 'undefined' || !Array.isArray(WORD_PAIRS)) {
+    alert('Word list not loaded.');
+    return;
+  }
+  const norm = w => String(w || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const onBoard = new Set(
+    Array.from(document.querySelectorAll('#board .cell .cell-text'))
+      .map(el => norm(el.textContent))
+      .filter(Boolean)
+  );
+  let added = 0;
+  WORD_PAIRS.forEach((pair, i) => {
+    const a = norm(pair[0]);
+    const b = norm(pair[1]);
+    if (onBoard.has(a) || onBoard.has(b)) {
+      if (!sessionBannedPairIndices.has(i)) {
+        sessionBannedPairIndices.add(i);
+        added++;
+      }
+    }
+  });
+  saveSessionBannedPairs();
+  const ranges = formatIndexRanges(sessionBannedPairIndices);
+  alert(
+    'Banned ' + added + ' new pair(s) from this board.\n' +
+    'Session banned pairs (' + sessionBannedPairIndices.size + '): ' + ranges
+  );
+}
+
 function randomWords(n = 25) {
-    const idx = WORD_PAIRS.map((_, i) => i);
+    const idx = WORD_PAIRS.map((_, i) => i)
+      .filter(i => !sessionBannedPairIndices.has(i));
     for (let i = idx.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    if (idx.length < n) {
+      console.warn('Not enough unbanned word pairs; using what is left.');
     }
     return idx.slice(0, n).map(i => WORD_PAIRS[i][Math.random() < .5 ? 0 : 1]);
 }
@@ -5876,7 +6007,10 @@ function addRandomWord() {
     if (!target) { uiAlert('Board is full'); return; }
     const norm = w => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
     const used = new Set(cells.map(c => norm(c.querySelector('.cell-text').textContent)));
-    const free = WORD_PAIRS.flat().filter(w => !used.has(norm(w)));
+    const free = WORD_PAIRS
+      .filter((_, i) => typeof sessionBannedPairIndices === 'undefined' || !sessionBannedPairIndices.has(i))
+      .flat()
+      .filter(w => !used.has(norm(w)));
     target.querySelector('.cell-text').textContent = free.length ? free[Math.random() * free.length | 0] : 'word';
     updateStats();
     saveCurrentState();
