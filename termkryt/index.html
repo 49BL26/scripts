@@ -2788,7 +2788,12 @@ async function subscribeToRoom(code) {
     liveChannel.subscribe(status => {
       console.log('Realtime status:', status);
 
-      if (status === 'SUBSCRIBED') finish(true);
+      if (status === 'SUBSCRIBED') {
+        if (typeof window.LiveChat !== 'undefined' && window.LiveChat.attachChannelHandlers) {
+          window.LiveChat.attachChannelHandlers();
+        }
+        finish(true);
+      }
 
       if (
         status === 'CHANNEL_ERROR' ||
@@ -2798,6 +2803,8 @@ async function subscribeToRoom(code) {
         finish(false);
       }
     });
+  });
+}
 
 let livePollTimer = null;
 
@@ -6389,9 +6396,6 @@ function getBoardSnapshot() {
         text: getText(cell),
         colorClass: getColor(cell),
         isPlayFlipped: cell.classList.contains('play-active')
-		if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-  		window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
-		}
     }));
     return {
         currentRotation,
@@ -6520,11 +6524,6 @@ function saveCurrentState() {
         text: getText(cell),
         colorClass: getColor(cell),
         isPlayFlipped: cell.classList.contains('play-active'),
-
-if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
-}
-		
         isThink: cell.classList.contains('think'),
         seq: +cell.dataset.seq || 0
     }));
@@ -6553,11 +6552,22 @@ function initBoard(cellsData) {
         cell.appendChild(textSpan);
 		
 cell.addEventListener('click', (e) => {
-  if (e.shiftKey && window.liveClueState?.word &&
-      typeof window.LiveChat?.toggleReaction === 'function') {
+  const clue = window.liveClueState;
+  const myTeam = window.liveTeam;
+  const isCluedTeamPlayer =
+    clue && clue.word &&
+    myTeam && clue.turnTeam &&
+    myTeam === clue.turnTeam &&
+    window.liveRole === 'player';
+
+  if (isCluedTeamPlayer &&
+      typeof window.LiveChat !== 'undefined' &&
+      typeof window.LiveChat.toggleReaction === 'function') {
     const idx = Number(cell.dataset.index);
-    if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
-    return; // do not also flip/select
+    if (Number.isFinite(idx)) {
+      window.LiveChat.toggleReaction(idx);
+    }
+    return; // reaction only — do not flip / paint / open modal
   }
   handleCellClick(cell);
 });
