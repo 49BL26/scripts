@@ -4555,9 +4555,21 @@ function randomPlayerId() {
   }
 
   // ---------- reactions (one per player; click toggles) ----------
-async function toggleReaction(cellIndex) {
+  async function toggleReaction(cellIndex) {
+    if (!window.liveRoomId || !window.liveClueState || !window.liveClueState.word) {
+      console.warn('LiveChat.toggleReaction: no room or no active clue');
+      return;
+    }
 
+    const players = window.lastKnownPlayers || {};
+    const me = players[window.livePlayerId] || {};
+    const emoji = me.charIcon || '⭐';
     const pid = window.livePlayerId;
+    if (!pid) {
+      console.warn('LiveChat.toggleReaction: no livePlayerId');
+      return;
+    }
+
     const prevCell = state.playerReactionCell[pid];
 
     // Remove existing reaction first (one at a time)
@@ -4568,13 +4580,13 @@ async function toggleReaction(cellIndex) {
       }
     }
 
-    // Toggle: same cell → just remove; different cell → move
+    // Toggle: same cell → remove; different cell → move
     if (prevCell === cellIndex) {
       delete state.playerReactionCell[pid];
     } else {
       if (!state.reactions[cellIndex]) state.reactions[cellIndex] = {};
       state.reactions[cellIndex][pid] = {
-        emoji,
+        emoji: emoji,
         name: me.name || 'Player'
       };
       state.playerReactionCell[pid] = cellIndex;
