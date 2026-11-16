@@ -1194,11 +1194,6 @@ function cycleLocalBoardRotation() {
     text: (c.querySelector('.cell-text') || c).textContent.trim(),
     colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
     isPlayFlipped: c.classList.contains('play-active')
-
-	  if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
-}
-	  
   }));
   if (current.length !== 25) return;
 
@@ -1816,9 +1811,6 @@ function getLiveBoardSnapshot() {
       text: (c.querySelector('.cell-text') || c).textContent.trim(),
       colorClass: ['red','blue','white','black'].find(k => c.classList.contains(k)) || 'white',
       isPlayFlipped: c.classList.contains('play-active')
-		if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
-}
     }));
 
     if (!liveIsHost && localBoardRotation) {
@@ -1913,12 +1905,7 @@ function applyLiveBoard(board, asSpymaster) {
   if (typeof pushHistory === 'function' && typeof historyLocked !== 'undefined' && !historyLocked) {
     pushHistory();
   }
-	if (typeof updateStats === 'function') updateStats();
-}
-
-if (typeof window.LiveChat?.getState === 'function') {
-  // reactions are re-applied by the module’s renderCellReactions
-  // (expose a small refresh if you want: window.LiveChat.refreshReactions?.())
+if (typeof updateStats === 'function') updateStats();
 }
 
 function applyLiveRoomState(state) {
@@ -1984,17 +1971,14 @@ function applyLiveRoomState(state) {
 
   if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
 
-if (state.settings && typeof window.LiveChat?.applyFromRoomSettings === 'function') {
-  window.LiveChat.applyFromRoomSettings(state.settings);
-}
-// keep a cheap reference for chat name/icon lookups
-window.lastKnownPlayers = state.players || {};
-
-if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
-
   renderSelfRoleControls(state.players || {});
   updateLiveAccessUI();
   if (typeof updateStats === 'function') updateStats();
+
+  window.lastKnownPlayers = state.players || {};
+  if (state.settings && typeof window.LiveChat?.applyFromRoomSettings === 'function') {
+    window.LiveChat.applyFromRoomSettings(state.settings);
+  }
 }
 	
   // ... after loading data ...
@@ -2991,38 +2975,6 @@ function renderPlayersPanel(players = {}) {
       ? 'blue'
       : 'red';
 
-// --- Chat controls (host only) ---
-const chatSection = document.createElement('div');
-chatSection.className = 'host-chat-options';
-chatSection.style.marginTop = '10px';
-
-const allowLabel = document.createElement('label');
-const allowCb = document.createElement('input');
-allowCb.type = 'checkbox';
-allowCb.checked = !!(window.LiveChat?.getState()?.allowChat);
-allowCb.addEventListener('change', () => {
-  window.LiveChat?.setAllowChat(allowCb.checked);
-});
-allowLabel.append(allowCb, document.createTextNode(' Allow chat'));
-chatSection.appendChild(allowLabel);
-
-// Per-team mute
-['red', 'blue'].forEach(team => {
-  const lbl = document.createElement('label');
-  lbl.style.display = 'block';
-  lbl.style.marginTop = '4px';
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  cb.checked = !!(window.LiveChat?.getState()?.mutedTeams?.[team]);
-  cb.addEventListener('change', () => {
-    window.LiveChat?.setMuteTeam(team, cb.checked);
-  });
-  lbl.append(cb, document.createTextNode(` Mute whole ${team} team`));
-  chatSection.appendChild(lbl);
-});
-
-content.appendChild(chatSection);
-	
   const otherTeam = oppositeTeam(myTeam);
 
   const roster = document.createElement('div');
@@ -3122,18 +3074,18 @@ if (!player.isHost) {
       e.stopPropagation();
       kickLivePlayer(id);
     });
-if (!player.isHost) {
-    identity.append(name, permissionLabel, kickBtn);
-	const muteLbl = document.createElement('label');
+
+    const muteLbl = document.createElement('label');
     muteLbl.style.marginLeft = '6px';
     const muteCb = document.createElement('input');
     muteCb.type = 'checkbox';
     muteCb.checked = !!(window.LiveChat?.getState()?.mutedPlayers?.[id]);
     muteCb.addEventListener('change', () => {
-    window.LiveChat?.setMutePlayer(id, muteCb.checked);
+      window.LiveChat?.setMutePlayer(id, muteCb.checked);
     });
     muteLbl.append(muteCb, document.createTextNode(' Mute'));
-    row.appendChild(muteLbl);
+
+    identity.append(name, permissionLabel, kickBtn, muteLbl);
 } else {
   identity.appendChild(name);
 }
@@ -5828,11 +5780,6 @@ async function randomizeBoard() {
       text: getText(cell),
       colorClass: getColor(cell),
       isPlayFlipped: cell.classList.contains('play-active'),
-
-if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
-}
-		
       isThink: cell.classList.contains('think'),
       seq: +cell.dataset.seq || 0
     }));
@@ -6595,11 +6542,6 @@ function initBoard(cellsData) {
         cell.className = 'cell';
         cell.classList.add(cellData.colorClass || 'white');
         if (cellData.isPlayFlipped) cell.classList.add('play-active');
-
-		if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-  window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
-}
-		
         if (cellData.isThink) { cell.classList.add('think'); cell.dataset.seq = cellData.seq || thinkCounter++; }
         cell.dataset.index = i;
 
@@ -6657,7 +6599,12 @@ async function handleCellClick(cell) {
         if (action === 'flip') {
             const nowRevealed = !cell.classList.contains('play-active');
             cell.classList.toggle('play-active', nowRevealed);
-            if (nowRevealed) unthink(cell);
+            if (nowRevealed) {
+              unthink(cell);
+              if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+                window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+              }
+            }
         } else {
             toggleThink(cell);
         }
@@ -6694,26 +6641,18 @@ async function handleCellClick(cell) {
             updateStats(); saveCurrentState();
         }
     }
-
-  // LiveChat reaction: only when a clue is active and chat module present.
-  // Shift-click (or Alt-click) to avoid fighting normal flip/select.
-  // Change to plain click if you prefer and accept the collision.
-  if (window.liveClueState?.word && typeof window.LiveChat?.toggleReaction === 'function') {
-    // Use shiftKey so normal play is unchanged. Remove the shiftKey check
-    // if you want plain click to react instead.
-    if (window.event?.shiftKey || (typeof event !== 'undefined' && event.shiftKey)) {
-      const idx = Number(cell.dataset.index);
-      if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
-    }
-  }
-
 }
 
 function paintCell(cell, color, reveal) {
     unthink(cell);
     cell.classList.remove(...COLORS, 'play-active');
     cell.classList.add(color);
-    if (reveal) cell.classList.add('play-active');
+    if (reveal) {
+      cell.classList.add('play-active');
+      if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
+        window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+      }
+    }
 }
 
 function toggleThink(cell) {
