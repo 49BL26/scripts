@@ -2894,7 +2894,7 @@ function enterLiveMode({ isHost }) {
   if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
     window.LiveChat.applyFromRoomSettings(liveRoomSettings || {});
   }
-  const panel = document.getElementById('live-chat-panel');
+  //const panel = document.getElementById('live-chat-panel');
   if (panel) {
     panel.style.display = liveRoomId ? 'block' : 'none';
     if (liveRoomId) {
