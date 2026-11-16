@@ -1455,7 +1455,22 @@ function renderLiveRoster(players = {}) {
 }
 	
 function enforcePlayerBoardLock() {
-  const locked = !!liveRoomId && !liveIsHost && liveRole !== 'spymaster' && !liveHasExitedRoom;
+  const clue = window.liveClueState;
+  // Guessing team players need clicks for reactions while a clue is active
+  const canReact =
+    liveRole === 'player' &&
+    !!clue &&
+    !!clue.word &&
+    !!clue.byTeam &&
+    clue.byTeam === liveTeam;
+
+  const locked =
+    !!liveRoomId &&
+    !liveIsHost &&
+    liveRole !== 'spymaster' &&
+    !liveHasExitedRoom &&
+    !canReact;
+
   document.getElementById('board')?.classList.toggle('locked-for-player', locked);
 }
 
@@ -1991,6 +2006,7 @@ function applyLiveRoomState(state) {
       if (send) send.disabled = false;
     }
   }
+  if (typeof enforcePlayerBoardLock === 'function') enforcePlayerBoardLock();
 }
 	
   // ... after loading data ...
@@ -2597,6 +2613,7 @@ function renderLiveClueUI() {
 
   btn.style.display = myTurn ? 'inline-block' : 'none';
   btn.textContent = '🧶 Give Clue';
+  if (typeof enforcePlayerBoardLock === 'function') enforcePlayerBoardLock();
 }
 
 /**
