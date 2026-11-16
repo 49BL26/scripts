@@ -770,17 +770,14 @@ body.display-mode #board .cell-text {
   border: 1px solid #aaa; background: #fafafa; cursor: pointer;
 }
 
-/* Focused chat view — hide EVERYTHING above the clue banner + lower chrome */
-body.chat-view-mode .controls-container,
-body.chat-view-mode #g-host,
+/* Focused chat view: hide secondary chrome only; keep board + clue + chat */
 body.chat-view-mode #live-players-panel,
 body.chat-view-mode #live-roster,
 body.chat-view-mode #stats-blurb,
 body.chat-view-mode #think-panel,
 body.chat-view-mode #key-panel,
 body.chat-view-mode #assassin-banner,
-body.chat-view-mode .mbar,
-body.chat-view-mode #live-self-role-controls {
+body.chat-view-mode .mbar {
   display: none !important;
 }
 body.chat-view-mode #live-clue-bar {
@@ -1976,8 +1973,12 @@ function applyLiveRoomState(state) {
   if (typeof updateStats === 'function') updateStats();
 
   window.lastKnownPlayers = state.players || {};
-  if (state.settings && typeof window.LiveChat?.applyFromRoomSettings === 'function') {
-    window.LiveChat.applyFromRoomSettings(state.settings);
+  if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
+    window.LiveChat.applyFromRoomSettings(state.settings || {});
+  } else if (typeof window.LiveChat?.getState === 'function') {
+    // Module present but no apply yet: still force visibility in-room.
+    const panel = document.getElementById('live-chat-panel');
+    if (panel && window.liveRoomId) panel.style.display = 'block';
   }
 }
 	
@@ -2869,6 +2870,11 @@ function showHostPlayersPanel(isHost) {
 function enterLiveMode({ isHost }) {
   liveHasExitedRoom = false;   // rejoin / host must clear exit state
   liveIsHost = !!isHost;
+  if (typeof window.LiveChat?.applyFromRoomSettings === 'function') {
+    window.LiveChat.applyFromRoomSettings(window.liveRoomSettings || {});
+  }
+  const panel = document.getElementById('live-chat-panel');
+  if (panel && window.liveRoomId) panel.style.display = 'block';
 
   const nameEl = document.getElementById('live-name-input');
   // (keep any existing nameEl logic you already have below this)
@@ -4328,12 +4334,10 @@ function randomPlayerId() {
   function emptyState() {
     return {
       messages: [],
-      allowChat: false,
+      allowChat: true,
       mutedPlayers: Object.create(null),
       mutedTeams: Object.create(null),
-      // reactions[cellIndex] = { [playerId]: { emoji, name } }
       reactions: Object.create(null),
-      // playerId → cellIndex (one reaction per player at a time)
       playerReactionCell: Object.create(null)
     };
   }
@@ -4391,8 +4395,12 @@ function randomPlayerId() {
   function renderVisibility() {
     const panel = document.getElementById('live-chat-panel');
     if (!panel) return;
-    const show = !!(window.liveRoomId && state.allowChat);
-    panel.style.display = show ? 'block' : 'none';
+    // Always show the panel while in a live room. allowChat only gates sending.
+    const inRoom = !!window.liveRoomId;
+    panel.style.display = inRoom ? 'block' : 'none';
+    if (!inRoom) {
+      document.body.classList.remove('chat-view-mode');
+    }
     const input = document.getElementById('live-chat-input');
     const send = document.getElementById('live-chat-send');
     const on = canSend();
@@ -4546,20 +4554,20 @@ function randomPlayerId() {
   window.LiveChat = {
     applyFromRoomSettings(settings) {
       if (!settings || !settings.chat) {
-        // still refresh visibility (e.g. allowChat false)
+        // No saved chat settings yet: keep default allowChat true and show panel.
+        if (state.allowChat !== false) state.allowChat = true;
         renderVisibility();
         return;
       }
       const c = settings.chat;
-      state.allowChat = !!c.allowChat;
-      state.mutedPlayers = { ...(c.mutedPlayers || {}) };
-      state.mutedTeams = { ...(c.mutedTeams || {}) };
+      // Default ON if host has never set the flag.
+      state.allowChat = c.allowChat !== false;
+      state.mutedPlayers = Object.assign(Object.create(null), c.mutedPlayers || {});
+      state.mutedTeams = Object.assign(Object.create(null), c.mutedTeams || {});
       if (Array.isArray(c.messages)) state.messages = pruneMessages(c.messages);
-      if (c.reactions && typeof c.reactions === 'object') {
-        state.reactions = { ...c.reactions };
-      }
+      if (c.reactions && typeof c.reactions === 'object') state.reactions = c.reactions;
       if (c.playerReactionCell && typeof c.playerReactionCell === 'object') {
-        state.playerReactionCell = { ...c.playerReactionCell };
+        state.playerReactionCell = c.playerReactionCell;
       }
       renderVisibility();
       renderMessages();
