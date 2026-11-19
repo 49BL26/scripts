@@ -4466,7 +4466,7 @@ function randomPlayerId() {
 
   function renderReactions() {
     document.querySelectorAll('#board .cell').forEach(cell => {
-      const idx = Number(cell.dataset.index);
+      const key = String(cell.dataset.index);
       let layer = cell.querySelector('.cell-reactions');
       if (!layer) {
         layer = document.createElement('div');
@@ -4475,10 +4475,10 @@ function randomPlayerId() {
       }
       layer.replaceChildren();
 
-      const byPlayer = state.reactions[idx] || {};
-      // Aggregate: emoji → { count, names[] }
+      const byPlayer = state.reactions[key] || state.reactions[cell.dataset.index] || {};
       const agg = Object.create(null);
       for (const entry of Object.values(byPlayer)) {
+        if (!entry || !entry.emoji) continue;
         if (!agg[entry.emoji]) agg[entry.emoji] = { count: 0, names: [] };
         agg[entry.emoji].count += 1;
         agg[entry.emoji].names.push(entry.name || 'Player');
@@ -4486,7 +4486,7 @@ function randomPlayerId() {
       for (const [emoji, info] of Object.entries(agg)) {
         const chip = document.createElement('span');
         chip.className = 'cell-reaction';
-        chip.textContent = info.count > 1 ? `${emoji}${info.count}` : emoji;
+        chip.textContent = info.count > 1 ? (emoji + info.count) : emoji;
         chip.title = info.names.join(', ');
         layer.appendChild(chip);
       }
@@ -4549,10 +4549,13 @@ function randomPlayerId() {
 
   // ---------- reactions (one per player; click toggles) ----------
   async function toggleReaction(cellIndex) {
-    if (!window.liveRoomId || !window.liveClueState || !window.liveClueState.word) {
-      console.warn('LiveChat.toggleReaction: no room or no active clue');
+    if (!window.liveRoomId) {
+      console.warn('LiveChat.toggleReaction: not in a room');
       return;
     }
+
+    const idx = Number(cellIndex);
+    if (!Number.isFinite(idx)) return;
 
     const players = window.lastKnownPlayers || {};
     const me = players[window.livePlayerId] || {};
@@ -4563,26 +4566,29 @@ function randomPlayerId() {
       return;
     }
 
-    const prevCell = state.playerReactionCell[pid];
+    const key = String(idx);
+    const prevKey = state.playerReactionCell[pid] != null
+      ? String(state.playerReactionCell[pid])
+      : null;
 
     // Remove existing reaction first (one at a time)
-    if (prevCell != null && state.reactions[prevCell]) {
-      delete state.reactions[prevCell][pid];
-      if (Object.keys(state.reactions[prevCell]).length === 0) {
-        delete state.reactions[prevCell];
+    if (prevKey != null && state.reactions[prevKey]) {
+      delete state.reactions[prevKey][pid];
+      if (Object.keys(state.reactions[prevKey]).length === 0) {
+        delete state.reactions[prevKey];
       }
     }
 
     // Toggle: same cell → remove; different cell → move
-    if (prevCell === cellIndex) {
+    if (prevKey === key) {
       delete state.playerReactionCell[pid];
     } else {
-      if (!state.reactions[cellIndex]) state.reactions[cellIndex] = {};
-      state.reactions[cellIndex][pid] = {
+      if (!state.reactions[key]) state.reactions[key] = {};
+      state.reactions[key][pid] = {
         emoji: emoji,
         name: me.name || 'Player'
       };
-      state.playerReactionCell[pid] = cellIndex;
+      state.playerReactionCell[pid] = idx;
     }
 
     renderReactions();
@@ -4590,7 +4596,6 @@ function randomPlayerId() {
       reactions: state.reactions,
       playerReactionCell: state.playerReactionCell
     });
-    persist();
   }
 
   /** Called when a cell is flipped — clear all reactions on that cell */
@@ -4704,6 +4709,38 @@ function randomPlayerId() {
         document.getElementById('live-chat-input')?.focus();
       }
     });
+
+    // Capture-phase: live non-spymaster clicks never fall through to Player modal
+    const boardEl = document.getElementById('board');
+    if (boardEl && !boardEl.__liveChatReactBound) {
+      boardEl.addEventListener('click', (e) => {
+        if (!window.liveRoomId) return;
+        if (window.liveRole === 'spymaster' || window.liveIsHost) return;
+
+        const cell = e.target.closest('.cell');
+        if (!cell || !boardEl.contains(cell)) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const word = (cell.querySelector('.cell-text') || cell).textContent.trim();
+        const inChatView = document.body.classList.contains('chat-view-mode');
+
+        if (inChatView) {
+          const input = document.getElementById('live-chat-input');
+          if (input && word) {
+            const cur = input.value.trim();
+            input.value = cur ? (cur + ' ' + word) : word;
+            input.focus();
+          }
+          return;
+        }
+
+        const idx = Number(cell.dataset.index);
+        if (Number.isFinite(idx)) toggleReaction(idx);
+      }, true);
+      boardEl.__liveChatReactBound = true;
+    }
   }
 
   if (document.readyState === 'loading') {
@@ -6702,23 +6739,32 @@ function initBoard(cellsData) {
         cell.appendChild(textSpan);
 		
 cell.addEventListener('click', (e) => {
-  const clue = window.liveClueState;
-  const myTeam = window.liveTeam;
-  const myRole = window.liveRole;
-  // byTeam = team that received the clue (guessers). turnTeam = next clue-giver.
-  const isGuessingPlayer =
-    !!window.liveRoomId &&
-    clue && clue.word &&
-    myTeam && clue.byTeam &&
-    myTeam === clue.byTeam &&
-    myRole === 'player';
-
-  if (isGuessingPlayer &&
-      window.LiveChat &&
-      typeof window.LiveChat.toggleReaction === 'function') {
+  // Live non-spymaster: never open local Player-mode color modal
+  if (window.liveRoomId && window.liveRole !== 'spymaster' && !window.liveIsHost) {
     const idx = Number(cell.dataset.index);
-    if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
-    return; // reaction only — no flip / modal
+    const word = (cell.querySelector('.cell-text') || cell).textContent.trim();
+    const inChatView = document.body.classList.contains('chat-view-mode');
+
+    if (inChatView) {
+      // Chat mode: append word to the message box
+      const input = document.getElementById('live-chat-input');
+      if (input && word) {
+        const cur = input.value.trim();
+        input.value = cur ? (cur + ' ' + word) : word;
+        input.focus();
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    // Outside chat mode: toggle emoji reaction on this tile
+    if (window.LiveChat && typeof window.LiveChat.toggleReaction === 'function') {
+      if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return;
   }
   handleCellClick(cell);
 });
@@ -6755,6 +6801,11 @@ document.addEventListener('keydown', e => {
    INTERACTION
    ============================================================ */
 async function handleCellClick(cell) {
+    // Live non-spymaster players must not use local Player color modal
+    if (window.liveRoomId && window.liveRole !== 'spymaster' && !window.liveIsHost) {
+      return;
+    }
+
     const mode = document.getElementById('mode-select').value;
 	
     if (mode === 'keyassist') { keyCellClick(cell); return; }
