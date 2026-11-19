@@ -3833,21 +3833,6 @@ function updateLiveAccessUI() {
   // Old EXIT UI removed — leave via ❌ on room label
   if (exitWrap) exitWrap.style.display = 'none';
 
-  // If the player is a guest and not a spymaster, disable board interactions
-  const board = document.getElementById('board');
-  if (board) {
-    board.style.pointerEvents = canEditBoard ? '' : 'none';
-    board.style.filter = canEditBoard ? '' : 'grayscale(0.1) brightness(0.98)';
-  }
-
-  document.querySelectorAll('.cell').forEach(cell => {
-    cell.style.pointerEvents = canEditBoard ? '' : 'none';
-  });
-
-  // Also disable all cells explicitly
-  document.querySelectorAll('.cell').forEach(cell => {
-  });
-
   // Force the hidden mode selector to remain in sync
   syncLiveSpymasterControls();
 }
