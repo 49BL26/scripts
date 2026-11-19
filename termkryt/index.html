@@ -454,6 +454,50 @@ body.grid-align-open {
   border-radius: 8px;
   background: #fafafa;
 }
+.host-advanced-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.host-advanced-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+.host-advanced-header strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.host-advanced-toggle {
+  margin-left: auto;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  font-size: 19px;
+}
+.host-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.host-advanced-body label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.host-advanced-body button {
+  align-self: flex-start;
+}
 .host-swap-teams {
   order: -1;          /* forces it to the far left */
 }
@@ -1151,6 +1195,7 @@ body.chat-view-mode .live-chat-messages {
   let liveIsHost = false;
   let liveHasExitedRoom = false;
   let hostPanelMinimized = false;
+  let hostAdvancedMinimized = true; // Advanced options collapsed by default
 
 let liveRoomSettings = { autoAssign: true };
 
@@ -3005,81 +3050,98 @@ function renderPlayersPanel(players = {}) {
 
   content.appendChild(autoOptions);
 
-  // --- Session words + auto-flip (host game options) ---
-  const gameOpts = document.createElement('div');
-  gameOpts.style.marginTop = '10px';
-  gameOpts.style.paddingTop = '8px';
-  gameOpts.style.borderTop = '1px solid #ddd';
+  // --- Advanced options (same gray box; collapsible +/−) ---
+  const advanced = document.createElement('div');
+  advanced.className = 'host-advanced-options';
 
-  const banBtn = document.createElement('button');
-  banBtn.type = 'button';
-  banBtn.textContent = 'Ban all current words for this session';
-  banBtn.style.display = 'block';
-  banBtn.style.marginTop = '4px';
-  banBtn.title = 'Ban only the visible sides of cards on this board';
-  banBtn.addEventListener('click', () => {
-    if (typeof banCurrentBoardWordsForSession === 'function') {
-      banCurrentBoardWordsForSession();
-    } else {
-      alert('Ban helper not loaded.');
-    }
+  const advHeader = document.createElement('div');
+  advHeader.className = 'host-advanced-header';
+
+  const advTitle = document.createElement('strong');
+  advTitle.textContent = 'Advanced options';
+
+  const advToggle = document.createElement('button');
+  advToggle.type = 'button';
+  advToggle.className = 'host-advanced-toggle';
+  advToggle.textContent = hostAdvancedMinimized ? '+' : '−';
+  advToggle.title = hostAdvancedMinimized
+    ? 'Expand Advanced options'
+    : 'Minimize Advanced options';
+  advToggle.setAttribute('aria-label', advToggle.title);
+  advToggle.addEventListener('click', () => {
+    hostAdvancedMinimized = !hostAdvancedMinimized;
+    renderPlayersPanel(players);
   });
-  gameOpts.appendChild(banBtn);
 
-  const clearBanBtn = document.createElement('button');
-  clearBanBtn.type = 'button';
-  clearBanBtn.textContent = 'Clear Banlist';
-  clearBanBtn.style.display = 'block';
-  clearBanBtn.style.marginTop = '4px';
-  clearBanBtn.addEventListener('click', () => {
-    if (typeof clearSessionBanlist === 'function') {
-      clearSessionBanlist();
-    } else {
-      alert('Clear banlist helper not loaded.');
+  advHeader.append(advTitle, advToggle);
+  advanced.appendChild(advHeader);
+
+  if (!hostAdvancedMinimized) {
+    const advBody = document.createElement('div');
+    advBody.className = 'host-advanced-body';
+
+    const banBtn = document.createElement('button');
+    banBtn.type = 'button';
+    banBtn.textContent = 'Ban all current words for this session';
+    banBtn.title = 'Ban only the visible sides of cards on this board';
+    banBtn.addEventListener('click', () => {
+      if (typeof banCurrentBoardWordsForSession === 'function') {
+        banCurrentBoardWordsForSession();
+      } else {
+        alert('Ban helper not loaded.');
+      }
+    });
+    advBody.appendChild(banBtn);
+
+    const clearBanBtn = document.createElement('button');
+    clearBanBtn.type = 'button';
+    clearBanBtn.textContent = 'Clear Banlist';
+    clearBanBtn.addEventListener('click', () => {
+      if (typeof clearSessionBanlist === 'function') {
+        clearSessionBanlist();
+      } else {
+        alert('Clear banlist helper not loaded.');
+      }
+    });
+    advBody.appendChild(clearBanBtn);
+
+    if (typeof formatBannedWordIndexRanges === 'function') {
+      const banInfo = document.createElement('div');
+      banInfo.style.fontSize = '12px';
+      banInfo.style.opacity = '0.85';
+      banInfo.textContent = 'Banned (pair ranges): ' + formatBannedWordIndexRanges();
+      advBody.appendChild(banInfo);
     }
-  });
-  gameOpts.appendChild(clearBanBtn);
 
-  if (typeof formatBannedWordIndexRanges === 'function') {
-    const banInfo = document.createElement('div');
-    banInfo.style.fontSize = '12px';
-    banInfo.style.marginTop = '4px';
-    banInfo.style.opacity = '0.85';
-    banInfo.textContent = 'Banned (pair ranges): ' + formatBannedWordIndexRanges();
-    gameOpts.appendChild(banInfo);
+    const autoFlipLbl = document.createElement('label');
+    const autoFlipCb = document.createElement('input');
+    autoFlipCb.type = 'checkbox';
+    autoFlipCb.checked = !!(window.LiveChat?.getState()?.autoFlipEnabled);
+    autoFlipCb.addEventListener('change', () => {
+      window.LiveChat?.setAutoFlipEnabled(autoFlipCb.checked);
+    });
+    autoFlipLbl.append(autoFlipCb, document.createTextNode(' Auto-flip cards at vote threshold'));
+    advBody.appendChild(autoFlipLbl);
+
+    const pctRow = document.createElement('label');
+    pctRow.appendChild(document.createTextNode('Auto-flip threshold % '));
+    const pctInput = document.createElement('input');
+    pctInput.type = 'number';
+    pctInput.min = '1';
+    pctInput.max = '100';
+    pctInput.step = '1';
+    pctInput.value = String(window.LiveChat?.getState()?.autoFlipPercent ?? 100);
+    pctInput.style.width = '64px';
+    pctInput.addEventListener('change', () => {
+      window.LiveChat?.setAutoFlipPercent(pctInput.value);
+    });
+    pctRow.appendChild(pctInput);
+    advBody.appendChild(pctRow);
+
+    advanced.appendChild(advBody);
   }
 
-  // Auto-flip toggle (default OFF) + percentage (default 100)
-  const autoFlipLbl = document.createElement('label');
-  autoFlipLbl.style.display = 'block';
-  autoFlipLbl.style.marginTop = '8px';
-  const autoFlipCb = document.createElement('input');
-  autoFlipCb.type = 'checkbox';
-  autoFlipCb.checked = !!(window.LiveChat?.getState()?.autoFlipEnabled);
-  autoFlipCb.addEventListener('change', () => {
-    window.LiveChat?.setAutoFlipEnabled(autoFlipCb.checked);
-  });
-  autoFlipLbl.append(autoFlipCb, document.createTextNode(' Auto-flip cards at vote threshold'));
-  gameOpts.appendChild(autoFlipLbl);
-
-  const pctRow = document.createElement('label');
-  pctRow.style.display = 'block';
-  pctRow.style.marginTop = '4px';
-  pctRow.appendChild(document.createTextNode('Auto-flip threshold % '));
-  const pctInput = document.createElement('input');
-  pctInput.type = 'number';
-  pctInput.min = '1';
-  pctInput.max = '100';
-  pctInput.step = '1';
-  pctInput.value = String(window.LiveChat?.getState()?.autoFlipPercent ?? 100);
-  pctInput.style.width = '64px';
-  pctInput.addEventListener('change', () => {
-    window.LiveChat?.setAutoFlipPercent(pctInput.value);
-  });
-  pctRow.appendChild(pctInput);
-  gameOpts.appendChild(pctRow);
-
-  content.appendChild(gameOpts);
+  content.appendChild(advanced);
 
   // --- Allow chat (host) ---
   const chatOpts = document.createElement('div');
