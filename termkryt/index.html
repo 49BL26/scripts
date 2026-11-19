@@ -3846,15 +3846,6 @@ function updateLiveAccessUI() {
 
   // Also disable all cells explicitly
   document.querySelectorAll('.cell').forEach(cell => {
-    if (isGuest && !isSpymaster) {
-      cell.style.pointerEvents = 'none';
-      cell.style.cursor = 'not-allowed';
-      cell.setAttribute('aria-disabled', 'true');
-    } else {
-      cell.style.pointerEvents = '';
-      cell.style.cursor = '';
-      cell.removeAttribute('aria-disabled');
-    }
   });
 
   // Force the hidden mode selector to remain in sync
