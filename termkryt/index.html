@@ -2668,6 +2668,11 @@ async function giveLiveClue() {
 
   window.liveClueState = nextState;
   await publishLiveClueState(nextState);
+
+  // Voting round ends when the next clue is given
+  if (typeof window.LiveChat?.clearAllReactions === 'function') {
+    await window.LiveChat.clearAllReactions();
+  }
 }
 
 window.giveLiveClue = giveLiveClue;
@@ -4548,9 +4553,27 @@ function randomPlayerId() {
   }
 
   // ---------- reactions (one per player; click toggles) ----------
+  function canVoteNow() {
+    const clue = window.liveClueState;
+    // byTeam = team that received the clue (guessers). Spymasters cannot vote.
+    return !!(
+      window.liveRoomId &&
+      window.liveRole === 'player' &&
+      clue &&
+      clue.word &&
+      clue.byTeam &&
+      window.liveTeam === clue.byTeam
+    );
+  }
+
   async function toggleReaction(cellIndex) {
-    if (!window.liveRoomId) {
-      console.warn('LiveChat.toggleReaction: not in a room');
+    if (!canVoteNow()) {
+      console.warn('LiveChat.toggleReaction: not allowed to vote now', {
+        role: window.liveRole,
+        team: window.liveTeam,
+        byTeam: window.liveClueState?.byTeam,
+        word: window.liveClueState?.word
+      });
       return;
     }
 
@@ -4571,7 +4594,6 @@ function randomPlayerId() {
       ? String(state.playerReactionCell[pid])
       : null;
 
-    // Remove existing reaction first (one at a time)
     if (prevKey != null && state.reactions[prevKey]) {
       delete state.reactions[prevKey][pid];
       if (Object.keys(state.reactions[prevKey]).length === 0) {
@@ -4579,7 +4601,6 @@ function randomPlayerId() {
       }
     }
 
-    // Toggle: same cell → remove; different cell → move
     if (prevKey === key) {
       delete state.playerReactionCell[pid];
     } else {
@@ -4596,6 +4617,20 @@ function randomPlayerId() {
       reactions: state.reactions,
       playerReactionCell: state.playerReactionCell
     });
+    // Persist so votes survive tab close / rejoin until next clue
+    await persist();
+  }
+
+  /** Clear all tile votes (called when a new clue is given) */
+  async function clearAllReactions() {
+    state.reactions = Object.create(null);
+    state.playerReactionCell = Object.create(null);
+    renderReactions();
+    await broadcast('chat-reaction', {
+      reactions: state.reactions,
+      playerReactionCell: state.playerReactionCell
+    });
+    await persist();
   }
 
   /** Called when a cell is flipped — clear all reactions on that cell */
@@ -4672,7 +4707,9 @@ function randomPlayerId() {
 
     refreshReactions: renderReactions,
     clearReactionsOnCell,
+    clearAllReactions,
     toggleReaction,
+    canVoteNow,
 
     attachChannelHandlers() {
       if (!window.liveChannel || window.liveChannel.__chatAttached) return;
@@ -4735,6 +4772,9 @@ function randomPlayerId() {
           }
           return;
         }
+
+        // Only guessing-team players vote; others ignore the click
+        if (!canVoteNow()) return;
 
         const idx = Number(cell.dataset.index);
         if (Number.isFinite(idx)) toggleReaction(idx);
@@ -6746,7 +6786,6 @@ cell.addEventListener('click', (e) => {
     const inChatView = document.body.classList.contains('chat-view-mode');
 
     if (inChatView) {
-      // Chat mode: append word to the message box
       const input = document.getElementById('live-chat-input');
       if (input && word) {
         const cur = input.value.trim();
@@ -6758,8 +6797,13 @@ cell.addEventListener('click', (e) => {
       return;
     }
 
-    // Outside chat mode: toggle emoji reaction on this tile
+    // Outside chat mode: only current guessing-team players may vote
     if (window.LiveChat && typeof window.LiveChat.toggleReaction === 'function') {
+      if (typeof window.LiveChat.canVoteNow === 'function' && !window.LiveChat.canVoteNow()) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (Number.isFinite(idx)) window.LiveChat.toggleReaction(idx);
     }
     e.preventDefault();
