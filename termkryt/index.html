@@ -2989,7 +2989,7 @@ function renderPlayersPanel(players = {}) {
   swapButton.addEventListener('click', swapLiveTeams);
   autoOptions.appendChild(swapButton);
 
-  // Auto-assign checkbox (right)
+  // Auto-assign checkbox
   const label = document.createElement('label');
   label.className = 'host-auto-option';
   const checkbox = document.createElement('input');
@@ -3005,9 +3005,87 @@ function renderPlayersPanel(players = {}) {
 
   content.appendChild(autoOptions);
 
+  // --- Session words + auto-flip (host game options) ---
+  const gameOpts = document.createElement('div');
+  gameOpts.style.marginTop = '10px';
+  gameOpts.style.paddingTop = '8px';
+  gameOpts.style.borderTop = '1px solid #ddd';
+
+  const banBtn = document.createElement('button');
+  banBtn.type = 'button';
+  banBtn.textContent = 'Ban all current words for this session';
+  banBtn.style.display = 'block';
+  banBtn.style.marginTop = '4px';
+  banBtn.title = 'Ban only the visible sides of cards on this board';
+  banBtn.addEventListener('click', () => {
+    if (typeof banCurrentBoardWordsForSession === 'function') {
+      banCurrentBoardWordsForSession();
+    } else {
+      alert('Ban helper not loaded.');
+    }
+  });
+  gameOpts.appendChild(banBtn);
+
+  const clearBanBtn = document.createElement('button');
+  clearBanBtn.type = 'button';
+  clearBanBtn.textContent = 'Clear Banlist';
+  clearBanBtn.style.display = 'block';
+  clearBanBtn.style.marginTop = '4px';
+  clearBanBtn.addEventListener('click', () => {
+    if (typeof clearSessionBanlist === 'function') {
+      clearSessionBanlist();
+    } else {
+      alert('Clear banlist helper not loaded.');
+    }
+  });
+  gameOpts.appendChild(clearBanBtn);
+
+  if (typeof formatBannedWordIndexRanges === 'function') {
+    const banInfo = document.createElement('div');
+    banInfo.style.fontSize = '12px';
+    banInfo.style.marginTop = '4px';
+    banInfo.style.opacity = '0.85';
+    banInfo.textContent = 'Banned (pair ranges): ' + formatBannedWordIndexRanges();
+    gameOpts.appendChild(banInfo);
+  }
+
+  // Auto-flip toggle (default OFF) + percentage (default 100)
+  const autoFlipLbl = document.createElement('label');
+  autoFlipLbl.style.display = 'block';
+  autoFlipLbl.style.marginTop = '8px';
+  const autoFlipCb = document.createElement('input');
+  autoFlipCb.type = 'checkbox';
+  autoFlipCb.checked = !!(window.LiveChat?.getState()?.autoFlipEnabled);
+  autoFlipCb.addEventListener('change', () => {
+    window.LiveChat?.setAutoFlipEnabled(autoFlipCb.checked);
+  });
+  autoFlipLbl.append(autoFlipCb, document.createTextNode(' Auto-flip cards at vote threshold'));
+  gameOpts.appendChild(autoFlipLbl);
+
+  const pctRow = document.createElement('label');
+  pctRow.style.display = 'block';
+  pctRow.style.marginTop = '4px';
+  pctRow.appendChild(document.createTextNode('Auto-flip threshold % '));
+  const pctInput = document.createElement('input');
+  pctInput.type = 'number';
+  pctInput.min = '1';
+  pctInput.max = '100';
+  pctInput.step = '1';
+  pctInput.value = String(window.LiveChat?.getState()?.autoFlipPercent ?? 100);
+  pctInput.style.width = '64px';
+  pctInput.addEventListener('change', () => {
+    window.LiveChat?.setAutoFlipPercent(pctInput.value);
+  });
+  pctRow.appendChild(pctInput);
+  gameOpts.appendChild(pctRow);
+
+  content.appendChild(gameOpts);
+
   // --- Allow chat (host) ---
   const chatOpts = document.createElement('div');
-  chatOpts.style.marginTop = '8px';
+  chatOpts.style.marginTop = '10px';
+  chatOpts.style.paddingTop = '8px';
+  chatOpts.style.borderTop = '1px solid #ddd';
   const allowLbl = document.createElement('label');
   const allowCb = document.createElement('input');
   allowCb.type = 'checkbox';
@@ -3032,31 +3110,6 @@ function renderPlayersPanel(players = {}) {
     chatOpts.appendChild(lbl);
   });
   content.appendChild(chatOpts);
-
-  // Ban current board words for this browser session
-  const banBtn = document.createElement('button');
-  banBtn.type = 'button';
-  banBtn.textContent = 'Ban all current words for this session';
-  banBtn.style.marginTop = '8px';
-  banBtn.style.display = 'block';
-  banBtn.title = 'Adds this board\'s WORD_PAIRS indices to a session ban list (shown as ranges)';
-  banBtn.addEventListener('click', () => {
-    if (typeof banCurrentBoardWordsForSession === 'function') {
-      banCurrentBoardWordsForSession();
-    } else {
-      alert('Ban helper not loaded.');
-    }
-  });
-  content.appendChild(banBtn);
-
-  if (typeof formatBannedWordIndexRanges === 'function') {
-    const banInfo = document.createElement('div');
-    banInfo.style.fontSize = '12px';
-    banInfo.style.marginTop = '4px';
-    banInfo.style.opacity = '0.85';
-    banInfo.textContent = 'Banned (pair ranges): ' + formatBannedWordIndexRanges();
-    content.appendChild(banInfo);
-  }
 
   // TEAM COLUMNS
   const myTeam =
@@ -4399,7 +4452,9 @@ function randomPlayerId() {
       mutedPlayers: Object.create(null),
       mutedTeams: Object.create(null),
       reactions: Object.create(null),
-      playerReactionCell: Object.create(null)
+      playerReactionCell: Object.create(null),
+      autoFlipEnabled: false,
+      autoFlipPercent: 100
     };
   }
 
@@ -4506,7 +4561,9 @@ function randomPlayerId() {
       mutedTeams: { ...state.mutedTeams },
       messages: pruneMessages(state.messages).slice(-40),
       reactions: state.reactions,
-      playerReactionCell: state.playerReactionCell
+      playerReactionCell: state.playerReactionCell,
+      autoFlipEnabled: !!state.autoFlipEnabled,
+      autoFlipPercent: Number(state.autoFlipPercent) || 100
     };
   }
 
@@ -4566,6 +4623,57 @@ function randomPlayerId() {
     );
   }
 
+  function countTeamPlayers(team) {
+    const players = window.lastKnownPlayers || {};
+    return Object.values(players).filter(
+      p => p && p.team === team && p.role === 'player'
+    ).length;
+  }
+
+  function votesNeeded() {
+    const team = window.liveClueState && window.liveClueState.byTeam;
+    const n = Math.max(1, countTeamPlayers(team));
+    const pct = Number(state.autoFlipPercent) || 100;
+    return Math.max(1, Math.ceil(n * (pct / 100)));
+  }
+
+  function voteCountOnCell(cellIndex) {
+    const key = String(cellIndex);
+    const byPlayer = state.reactions[key] || state.reactions[cellIndex] || {};
+    return Object.keys(byPlayer).length;
+  }
+
+  /** Reveal a cell on the live board when auto-flip threshold is met */
+  async function performAutoFlip(cellIndex) {
+    const idx = Number(cellIndex);
+    const cell = document.querySelector('#board .cell[data-index="' + idx + '"]');
+    if (!cell || cell.classList.contains('play-active')) return;
+
+    // Prefer true color from last known board; fall back to current class
+    let color = 'white';
+    const trueCells = window.lastTrueBoardCells;
+    if (Array.isArray(trueCells) && trueCells[idx] && trueCells[idx].colorClass) {
+      color = trueCells[idx].colorClass;
+    } else {
+      color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
+    }
+
+    if (typeof paintCell === 'function') {
+      paintCell(cell, color, true);
+    } else {
+      cell.classList.add('play-active');
+    }
+    if (typeof updateStats === 'function') updateStats();
+
+    // Clear votes on this cell (paintCell may already call this)
+    clearReactionsOnCell(idx);
+
+    // Spymaster/host publishes board so everyone sees the flip
+    if (typeof window.pushLiveBoard === 'function') {
+      try { await window.pushLiveBoard(); } catch (e) { /* ignore */ }
+    }
+  }
+
   async function toggleReaction(cellIndex) {
     if (!canVoteNow()) {
       console.warn('LiveChat.toggleReaction: not allowed to vote now', {
@@ -4594,6 +4702,29 @@ function randomPlayerId() {
       ? String(state.playerReactionCell[pid])
       : null;
 
+    // Removing own vote — no confirm, no auto-flip check
+    const isRemoving = prevKey === key;
+
+    // If this NEW vote would reach threshold and auto-flip is on, confirm first
+    if (!isRemoving && state.autoFlipEnabled) {
+      const current = voteCountOnCell(idx);
+      // If voter already on another cell, moving vote: count as +1 on new cell
+      const alreadyHere = prevKey === key;
+      const nextCount = alreadyHere ? current : current + (prevKey === key ? 0 : 1);
+      // If they had a vote elsewhere, still +1 on this cell
+      const projected = (state.reactions[key] && state.reactions[key][pid])
+        ? current
+        : current + 1;
+      const need = votesNeeded();
+      if (projected >= need) {
+        const ok = window.confirm(
+          'Are you sure you want to vote for this card?\n\n' +
+          'This will reach the auto-flip threshold (' + need + ' vote(s)).'
+        );
+        if (!ok) return;
+      }
+    }
+
     if (prevKey != null && state.reactions[prevKey]) {
       delete state.reactions[prevKey][pid];
       if (Object.keys(state.reactions[prevKey]).length === 0) {
@@ -4617,8 +4748,26 @@ function randomPlayerId() {
       reactions: state.reactions,
       playerReactionCell: state.playerReactionCell
     });
-    // Persist so votes survive tab close / rejoin until next clue
     await persist();
+
+    // Auto-flip if enabled and threshold met
+    if (state.autoFlipEnabled && !isRemoving) {
+      const need = votesNeeded();
+      if (voteCountOnCell(idx) >= need) {
+        await performAutoFlip(idx);
+      }
+    }
+  }
+
+  function setAutoFlipEnabled(on) {
+    state.autoFlipEnabled = !!on;
+    persist();
+  }
+
+  function setAutoFlipPercent(pct) {
+    const n = Number(pct);
+    state.autoFlipPercent = Number.isFinite(n) ? Math.min(100, Math.max(1, n)) : 100;
+    persist();
   }
 
   /** Clear all tile votes (called when a new clue is given) */
@@ -4671,6 +4820,9 @@ function randomPlayerId() {
       if (c.playerReactionCell && typeof c.playerReactionCell === 'object') {
         state.playerReactionCell = c.playerReactionCell;
       }
+      state.autoFlipEnabled = !!c.autoFlipEnabled;
+      const pct = Number(c.autoFlipPercent);
+      state.autoFlipPercent = Number.isFinite(pct) ? Math.min(100, Math.max(1, pct)) : 100;
       renderVisibility();
       renderMessages();
       renderReactions();
@@ -4710,6 +4862,8 @@ function randomPlayerId() {
     clearAllReactions,
     toggleReaction,
     canVoteNow,
+    setAutoFlipEnabled,
+    setAutoFlipPercent,
 
     attachChannelHandlers() {
       if (!window.liveChannel || window.liveChannel.__chatAttached) return;
@@ -4718,13 +4872,22 @@ function randomPlayerId() {
         state.messages = pruneMessages([...state.messages, payload.message]);
         renderMessages();
       });
-      window.liveChannel.on('broadcast', { event: 'chat-reaction' }, ({ payload }) => {
+      window.liveChannel.on('broadcast', { event: 'chat-reaction' }, async ({ payload }) => {
         if (payload?.sender === window.livePlayerId) return;
         if (payload.reactions) state.reactions = payload.reactions;
         if (payload.playerReactionCell) {
           state.playerReactionCell = payload.playerReactionCell;
         }
         renderReactions();
+        // Host/spymaster applies auto-flip if threshold already met
+        if (state.autoFlipEnabled && (window.liveIsHost || window.liveRole === 'spymaster')) {
+          const need = votesNeeded();
+          for (const key of Object.keys(state.reactions || {})) {
+            if (voteCountOnCell(key) >= need) {
+              await performAutoFlip(Number(key));
+            }
+          }
+        }
       });
       window.liveChannel.__chatAttached = true;
     }
@@ -6063,6 +6226,12 @@ function banCurrentBoardWordsForSession() {
   );
 }
 
+function clearSessionBanlist() {
+  sessionBannedWords.clear();
+  saveSessionBannedWords();
+  alert('Session banlist cleared.');
+}
+
 function randomWords(n = 25) {
     // Keep pairs that still have at least one non-banned side
     const idx = WORD_PAIRS.map((_, i) => i).filter(i => {
@@ -6130,6 +6299,8 @@ function executeCommand(raw) {
 		'exit':            () => exitLiveGame(),
 		'kick':            () => kickLivePlayer(uiPrompt('Kick who?', '')),
 		'j':               () => joinGame(prompt('What is the room code?')),
+		'jubilee':         () => clearSessionBanlist(),
+		'wban':            () => banCurrentBoardWordsForSession(),
         'help':            () => uiAlert('Commands: invert, flip-h, flip-v, flip-ur, flip-ul, shift-up, shift-down, shift-left, shift-right, rotate, rot-words, flip-cards, clear, randomize, add-word, import-words, host, end, exit'),
     };
 
