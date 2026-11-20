@@ -1201,11 +1201,21 @@ let liveRoomSettings = { autoAssign: true };
 
 function getAutoAssignmentSettings(settings = {}) {
   const autoAssign = settings.autoAssign ?? true;   // default ON
-
   return {
     autoAssign,
     autoTeams: settings.autoTeams ?? autoAssign,
     autoRoles: settings.autoRoles ?? autoAssign
+  };
+}
+
+/** Always keep the FULL settings object (clue, chat, etc.). Never strip it. */
+function mergeRoomSettings(existing = {}, patch = {}) {
+  return {
+    ...(existing || {}),
+    ...patch,
+    // nested objects that must survive partial writes
+    clue: patch.clue !== undefined ? patch.clue : (existing?.clue ?? null),
+    chat: patch.chat !== undefined ? patch.chat : (existing?.chat ?? null)
   };
 }
 
@@ -1996,8 +2006,9 @@ function applyLiveRoomState(state) {
     lastBoardFingerprint = '';
   }
 
-  if (state.settings) {
-    liveRoomSettings = getAutoAssignmentSettings(state.settings);
+if (state.settings) {
+    // Keep the COMPLETE settings object so clue / chat are never lost
+    liveRoomSettings = { ...(state.settings) };
   }
 
   // Board first so lastTrueBoardCells is ready before any stats UI
@@ -2540,7 +2551,7 @@ function resetLiveClueTurn(redHasMore) {
 async function publishLiveClueState(clueState) {
   if (!liveRoomId) return;
 
-  // Read current settings so we don't wipe autoAssign etc.
+  // Always read the latest full settings so we never wipe chat / other keys
   const { data: room, error: readError } = await sb
     .from('rooms')
     .select('settings')
@@ -2553,10 +2564,8 @@ async function publishLiveClueState(clueState) {
     return;
   }
 
-  const settings = {
-    ...(room?.settings || liveRoomSettings || {}),
-    clue: clueState
-  };
+  const settings = mergeRoomSettings(room?.settings || {}, { clue: clueState });
+  liveRoomSettings = settings;   // keep local copy complete
 
   const { data, error } = await sb
     .from('rooms')
@@ -2602,10 +2611,16 @@ window.clearLiveClueForNewBoard = async function clearLiveClueForNewBoard() {
   window.liveClueState = clueState;
   lastBoardFingerprint = '';
 
-  const settings = {
-    ...(liveRoomSettings || {}),
+  // Re-fetch so we never overwrite with a stripped liveRoomSettings
+  const { data: room } = await sb
+    .from('rooms')
+    .select('settings')
+    .eq('id', liveRoomId)
+    .single();
+
+  const settings = mergeRoomSettings(room?.settings || liveRoomSettings || {}, {
     clue: clueState
-  };
+  });
   liveRoomSettings = settings;
 
   await publishLiveClueState(clueState);
@@ -2651,10 +2666,12 @@ function renderLiveClueUI() {
     banner.textContent = '';
   }
 
-const myTurn =
+// Once a turnTeam exists, ONLY that team's spymaster sees the button.
+  // When turnTeam is still null (brand-new room) either spymaster may start.
+  const myTurn =
     liveRole === 'spymaster' &&
     (liveTeam === 'red' || liveTeam === 'blue') &&
-    (!clue.turnTeam || clue.turnTeam === liveTeam);   // null = anyone can start
+    (clue.turnTeam == null || clue.turnTeam === liveTeam);
 
   btn.style.display = myTurn ? 'inline-block' : 'none';
   btn.textContent = '🧶 Give Clue';
@@ -4639,13 +4656,26 @@ function randomPlayerId() {
     };
   }
 
-  async function persist() {
+async function persist() {
     if (!window.liveRoomId || typeof window.publishLivePatch !== 'function') return;
+
+    // Re-fetch full settings so we never destroy settings.clue
+    let base = window.liveRoomSettings || {};
+    try {
+      const { data: room } = await window.sb
+        .from('rooms')
+        .select('settings')
+        .eq('id', window.liveRoomId)
+        .single();
+      if (room?.settings) base = room.settings;
+    } catch (_) { /* fall back to local */ }
+
     const settings = {
-      ...(window.liveRoomSettings || {}),
-      chat: snapshot()
+      ...base,
+      chat: snapshot(),
+      // explicitly preserve clue if present
+      clue: base.clue ?? window.liveClueState ?? null
     };
-    // publishLivePatch merges and re-applies; board not touched
     await window.publishLivePatch({ settings });
   }
 
