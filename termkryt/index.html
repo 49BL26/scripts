@@ -2909,7 +2909,7 @@ async function subscribeToRoom(code) {
 
 let livePollTimer = null;
 
-function startLivePoll() {
+function startLivePoll() {/*
   stopLivePoll();
   livePollTimer = setInterval(async () => {
     if (!liveRoomId) return;
@@ -2920,7 +2920,8 @@ function startLivePoll() {
       .single();
     if (error || !data) return;
     applyLiveRoomState(data);
-  }, 1500);
+  }, 1500);*/
+	return false;
 }
 
 function stopLivePoll() {
