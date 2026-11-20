@@ -2651,10 +2651,10 @@ function renderLiveClueUI() {
     banner.textContent = '';
   }
 
-  const myTurn =
+const myTurn =
     liveRole === 'spymaster' &&
     (liveTeam === 'red' || liveTeam === 'blue') &&
-    clue.turnTeam === liveTeam;
+    (!clue.turnTeam || clue.turnTeam === liveTeam);   // null = anyone can start
 
   btn.style.display = myTurn ? 'inline-block' : 'none';
   btn.textContent = '🧶 Give Clue';
