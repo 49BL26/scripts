@@ -2664,6 +2664,9 @@ function renderLiveClueUI() {
 /**
  * Spymaster submits a clue, then turn passes to the other team.
  */
+/**
+ * Spymaster submits a clue, then turn passes to the other team.
+ */
 async function giveLiveClue() {
   if (!liveRoomId || liveRole !== 'spymaster') return;
   if (liveTeam !== 'red' && liveTeam !== 'blue') return;
@@ -2686,7 +2689,6 @@ async function giveLiveClue() {
   }
 
   const maxN = remainingCardsForTeam(liveTeam);
-  // 0 = "unlimited / avoid" style clue; upper bound = remaining agents on your team
   let number = null;
   while (number === null) {
     const nRaw = await uiPrompt(
@@ -2708,10 +2710,13 @@ async function giveLiveClue() {
     word,
     number,
     byTeam: liveTeam,
-    turnTeam: nextTeam
+    turnTeam: nextTeam          // ← this is what hands the button to the other spymaster
   };
 
+  // Optimistic local update so the giver’s button disappears immediately
   window.liveClueState = nextState;
+  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
+
   await publishLiveClueState(nextState);
 
   // Voting round ends when the next clue is given
@@ -3554,7 +3559,6 @@ if (!team) return null;
     return { team, role };
   }
 }
-	
 
 async function setPlayerRole(playerId, team, role) {
   if (!liveIsHost || !liveRoomId) return;
@@ -3572,7 +3576,6 @@ async function setPlayerRole(playerId, team, role) {
 
   const players = { ...(room.players || {}) };
   const previous = players[playerId];
-
   if (!previous) return;
 
   // Bystanders are beige and cannot occupy a team slot.
@@ -3587,9 +3590,7 @@ async function setPlayerRole(playerId, team, role) {
       role === 'spymaster' &&
       hasTeamSpymaster(players, team, playerId)
     ) {
-      await uiAlert(
-        `The ${team} team already has a spymaster.`
-      );
+      await uiAlert(`The ${team} team already has a spymaster.`);
       renderPlayersPanel(players);
       return;
     }
@@ -3601,39 +3602,48 @@ async function setPlayerRole(playerId, team, role) {
   }
 
   let board = room.board;
+  let settings = { ...(room.settings || liveRoomSettings || {}) };
+  let needClueReset = false;
 
-  // Preserve the existing board reset behavior when removing a spymaster.
+  // When a spymaster is removed, randomize the board (existing behaviour)
+  // and also reset the turn so the remaining spymaster(s) get a clean start.
   if (
     previous.role === 'spymaster' &&
     players[playerId].role !== 'spymaster'
   ) {
     if (typeof randomizeBoard === 'function') {
       randomizeBoard();
-  const clueState = resetLiveClueTurn(window.lastRedHasMore);
-  // add clue: clueState to the supabase .update({ players, clue: clueState, ... })
+      board = getLiveBoardSnapshot();
+    }
 
-  // If no spymaster remains on the current turn team, or roles reshuffled,
-  // reset turn to majority team and clear the active clue.
-  const stillHasTurnSpy = Object.values(players).some(
-    p => p.role === 'spymaster' && p.team === (window.liveClueState?.turnTeam)
-  );
-  if (!stillHasTurnSpy) {
+    // Always reset the clue/turn when a spymaster leaves
     const clueState = resetLiveClueTurn(window.lastRedHasMore);
-    // optional: await publish with room update — or fold into the same players update:
-    // include clue: clueState in the .update({ players, clue: clueState })
+    settings = { ...settings, clue: clueState };
+    needClueReset = true;
+  } else {
+    // Also reset if the current turn team no longer has a spymaster
+    const stillHasTurnSpy = Object.values(players).some(
+      p => p.role === 'spymaster' && p.team === (window.liveClueState?.turnTeam)
+    );
+    if (!stillHasTurnSpy) {
+      const clueState = resetLiveClueTurn(window.lastRedHasMore);
+      settings = { ...settings, clue: clueState };
+      needClueReset = true;
+    }
   }
 
-    }
-    board = getLiveBoardSnapshot();
+  const updatePayload = {
+    players,
+    board,
+    updated_at: new Date().toISOString()
+  };
+  if (needClueReset) {
+    updatePayload.settings = settings;
   }
 
   const { data: updated, error: updateError } = await sb
     .from('rooms')
-    .update({
-      players,
-      board,
-      updated_at: new Date().toISOString()
-    })
+    .update(updatePayload)
     .eq('id', liveRoomId)
     .select('players, board, settings')
     .single();
