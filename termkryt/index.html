@@ -1398,7 +1398,7 @@ window.__displayMode = { active: false, showClue: false };
 
 async function enterDisplayMode(opts) {
   const forceClue = !!(opts && opts.forceClue);
-  window.__displayMode = { active: true, showClue: forceClue ? true : (window.__displayMode?.showClue ?? true)
+  window.__displayMode = { active: true, showClue: forceClue ? true : (window.__displayMode?.showClue ?? true) }
   if (!document.getElementById('board')) return;
 
   const showClue = await askChoice(
