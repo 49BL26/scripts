@@ -80,8 +80,8 @@
       opacity: 0.8;
       outline: 2px solid #9e9e9e;
     }
-    body.team-bg-red { background-color: #fff5f5 !important; }
-    body.team-bg-blue { background-color: #f3f8ff !important; }
+    body.team-bg-red { background-color: #ffcdd2 !important; }
+    body.team-bg-blue { background-color: #bbdefb !important; }
     body.team-bg-none { background-color: #ffffff !important; }
 
     /* Revealed / flipped cards */
@@ -1397,21 +1397,27 @@ function updateLiveNameButton(players = {}) {
 window.__displayMode = { active: false, showClue: false };
 
 async function enterDisplayMode(opts) {
-  const forceClue = !!(opts && opts.forceClue);
-  window.__displayMode = { active: true, showClue: forceClue ? true : (window.__displayMode?.showClue ?? true) }
+  const forced = !!(opts && (opts.forceClue || opts.forced));
   if (!document.getElementById('board')) return;
 
-  const showClue = await askChoice(
-    'Display mode',
-    'Do you want to display the clues as well?',
-    [
-      { label: 'No', value: false },
-      { label: 'Yes', value: true, primary: true }
-    ]
-  );
-  if (showClue === null || showClue === undefined) return;
+  let showClue = true;
+  if (!forced) {
+    const choice = await askChoice(
+      'Display mode',
+      'Do you want to display the clues as well?',
+      [
+        { label: 'No', value: false },
+        { label: 'Yes', value: true, primary: true }
+      ]
+    );
+    if (choice === null || choice === undefined) return;
+    showClue = choice === true;
+  } else {
+    // Host "Make display": always on, clue visible, no prompt
+    showClue = true;
+  }
 
-  window.__displayMode = { active: true, showClue: showClue === true };
+  window.__displayMode = { active: true, showClue: showClue };
   document.body.classList.add('display-mode');
 
   const clueBar = document.getElementById('live-clue-bar');
@@ -2117,10 +2123,14 @@ function applyLiveRoomState(state) {
   liveTeam = me?.team ?? null;
 
   // Host forced this bystander into display mode
-  if (me && me.forceDisplay && me.role === 'bystander' && !window.__displayMode?.active) {
+  if (me && me.forceDisplay === true && !window.__displayMode?.active) {
     if (typeof enterDisplayMode === 'function') {
-      enterDisplayMode({ forceClue: true });
+      // Do not await — must not block applyLiveRoomState
+      enterDisplayMode({ forceClue: true, forced: true });
     }
+  } else if (me && me.forceDisplay !== true && window.__displayMode?.active && me.role === 'bystander') {
+    // Host turned Make display off
+    if (typeof exitDisplayMode === 'function') exitDisplayMode();
   }
 
   // Pale team page background
@@ -3478,8 +3488,21 @@ function renderPlayersPanel(players = {}) {
         window.LiveChat.setGuessesRemaining(guessInput.value);
       }
     });
+
     guessRow.appendChild(guessInput);
     advBody.appendChild(guessRow);
+
+    // Drag-to-assign (default ON) — lives in Advanced only
+    const dragAssignLbl = document.createElement('label');
+    const dragAssignCb = document.createElement('input');
+    dragAssignCb.type = 'checkbox';
+    dragAssignCb.checked = hostDragAssignEnabled !== false;
+    dragAssignCb.addEventListener('change', () => {
+      hostDragAssignEnabled = dragAssignCb.checked;
+      renderPlayersPanel(players);
+    });
+    dragAssignLbl.append(dragAssignCb, document.createTextNode(' Drag to assign team / role'));
+    advBody.appendChild(dragAssignLbl);
 
     advanced.appendChild(advBody);
   }
@@ -3507,9 +3530,10 @@ function renderPlayersPanel(players = {}) {
     lbl.style.marginTop = '4px';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
-    cb.checked = !!(window.LiveChat?.getState()?.mutedTeams?.[team]);
+    // Explicit true only — never default muted
+    cb.checked = window.LiveChat?.getState()?.mutedTeams?.[team] === true;
     cb.addEventListener('change', () => {
-      window.LiveChat?.setMuteTeam(team, cb.checked);
+      window.LiveChat?.setMuteTeam(team, cb.checked === true);
     });
     lbl.append(cb, document.createTextNode(` Mute whole ${team} team`));
     chatOpts.appendChild(lbl);
@@ -3527,9 +3551,31 @@ function renderPlayersPanel(players = {}) {
   const roster = document.createElement('div');
   roster.className = 'host-roster-columns';
 
+  function bindDropTarget(el, team, role) {
+    if (!hostDragAssignEnabled || !el) return;
+    el.dataset.dropTeam = team;
+    el.dataset.dropRole = role;
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      el.style.outline = '2px solid #555';
+    });
+    el.addEventListener('dragleave', e => {
+      if (!el.contains(e.relatedTarget)) el.style.outline = '';
+    });
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      el.style.outline = '';
+      const pid = e.dataTransfer.getData('text/player-id');
+      if (!pid) return;
+      if (role === 'bystander') setPlayerRole(pid, 'beige', 'bystander');
+      else setPlayerRole(pid, team, role);
+    });
+  }
+
   function createTeamColumn(team) {
     const section = document.createElement('section');
     section.className = `host-roster-column roster-${team}`;
+    section.style.minHeight = '72px';
 
     const heading = document.createElement('h4');
     heading.textContent =
@@ -3539,25 +3585,10 @@ function renderPlayersPanel(players = {}) {
     list.className = 'host-roster-list';
 
     section.append(heading, list);
+    bindDropTarget(section, team, 'player');
 
     return { section, list };
   }
-
-  // Drag-assign toggle (default ON)
-  const dragAssignLbl = document.createElement('label');
-  dragAssignLbl.style.display = 'flex';
-  dragAssignLbl.style.alignItems = 'center';
-  dragAssignLbl.style.gap = '6px';
-  dragAssignLbl.style.marginBottom = '8px';
-  const dragAssignCb = document.createElement('input');
-  dragAssignCb.type = 'checkbox';
-  dragAssignCb.checked = hostDragAssignEnabled;
-  dragAssignCb.addEventListener('change', () => {
-    hostDragAssignEnabled = dragAssignCb.checked;
-    renderPlayersPanel(players);
-  });
-  dragAssignLbl.append(dragAssignCb, document.createTextNode(' Drag to assign team / role'));
-  content.appendChild(dragAssignLbl);
 
   // --- Spymaster slots (red / blue) ---
   const spyRow = document.createElement('div');
@@ -3580,17 +3611,8 @@ function renderPlayersPanel(players = {}) {
     list.className = 'host-roster-list host-spy-list';
     list.dataset.dropRole = 'spymaster';
     list.dataset.dropTeam = team;
-    box.append(h, list);
-    if (hostDragAssignEnabled) {
-      list.addEventListener('dragover', e => { e.preventDefault(); list.style.outline = '2px solid #666'; });
-      list.addEventListener('dragleave', () => { list.style.outline = ''; });
-      list.addEventListener('drop', e => {
-        e.preventDefault();
-        list.style.outline = '';
-        const pid = e.dataTransfer.getData('text/player-id');
-        if (pid) setPlayerRole(pid, team, 'spymaster');
-      });
-    }
+box.append(h, list);
+    bindDropTarget(box, team, 'spymaster');
     return { box, list };
   }
 
@@ -3614,19 +3636,6 @@ function renderPlayersPanel(players = {}) {
   right.list.dataset.dropRole = 'player';
   left.list.dataset.dropTeam = myTeam;
   right.list.dataset.dropTeam = otherTeam;
-  if (hostDragAssignEnabled) {
-    [left.list, right.list].forEach(list => {
-      list.addEventListener('dragover', e => { e.preventDefault(); list.style.outline = '2px solid #666'; });
-      list.addEventListener('dragleave', () => { list.style.outline = ''; });
-      list.addEventListener('drop', e => {
-        e.preventDefault();
-        list.style.outline = '';
-        const pid = e.dataTransfer.getData('text/player-id');
-        const team = list.dataset.dropTeam;
-        if (pid && team) setPlayerRole(pid, team, 'player');
-      });
-    });
-  }
 
   roster.append(left.section, right.section);
   content.appendChild(roster);
@@ -3654,6 +3663,8 @@ function renderPlayersPanel(players = {}) {
   }
 
   bystanderSection.append(bystanderHeading, bystanderList);
+  bystanderSection.style.minHeight = '64px';
+  bindDropTarget(bystanderSection, 'beige', 'bystander');
   content.appendChild(bystanderSection);
 
   // INDIVIDUAL PLAYER ROW
@@ -3803,29 +3814,56 @@ if (!player.isHost) {
   identity.appendChild(controls);
   row.appendChild(identity);
 
-    // Bystanders: force Display mode (clue on by default)
+    // Bystanders: Make display (default OFF)
     if (isBystanderRole(player.role)) {
       const dispLbl = document.createElement('label');
       dispLbl.style.marginLeft = '6px';
       dispLbl.style.fontSize = '12px';
       const dispCb = document.createElement('input');
       dispCb.type = 'checkbox';
-      dispCb.checked = player.forceDisplay !== false; // default ON
+      dispCb.checked = player.forceDisplay === true; // default OFF
       dispCb.title = 'Force this player into Display mode with clue visible';
       dispCb.addEventListener('change', async () => {
-        // Persist forceDisplay on the player object in the room
         if (!liveRoomId || !liveIsHost) return;
-        const { data: room } = await sb.from('rooms').select('players').eq('id', liveRoomId).single();
-        if (!room?.players?.[id]) return;
-        const next = { ...room.players };
-        next[id] = { ...next[id], forceDisplay: dispCb.checked };
-        await sb.from('rooms').update({ players: next }).eq('id', liveRoomId);
-        if (typeof publishLivePatch === 'function') {
-          // trigger sync for others
-        } else if (typeof broadcastLiveState === 'function') {
-          await broadcastLiveState({ players: next });
+        const { data: room, error } = await sb
+          .from('rooms')
+          .select('players, board, settings')
+          .eq('id', liveRoomId)
+          .single();
+        if (error || !room?.players?.[id]) {
+          console.error('Make display: could not load room', error);
+          return;
         }
-        applyLiveRoomState({ ...(room), players: next, board: room.board, settings: liveRoomSettings });
+        const next = { ...room.players };
+        next[id] = { ...next[id], forceDisplay: !!dispCb.checked };
+        const { error: upErr } = await sb
+          .from('rooms')
+          .update({ players: next, updated_at: new Date().toISOString() })
+          .eq('id', liveRoomId);
+        if (upErr) {
+          console.error('Make display: update failed', upErr);
+          return;
+        }
+        // Sync everyone (same pattern as setPlayerRole)
+        if (typeof publishLivePatch === 'function') {
+          await publishLivePatch({ players: next });
+        } else {
+          applyLiveRoomState({
+            players: next,
+            board: room.board,
+            settings: room.settings || liveRoomSettings
+          });
+          if (liveChannel) {
+            liveChannel.send({
+              type: 'broadcast',
+              event: 'room-state',
+              payload: {
+                state: { players: next, board: room.board, settings: room.settings },
+                sender: livePlayerId
+              }
+            });
+          }
+        }
       });
       dispLbl.append(dispCb, document.createTextNode(' Make display'));
       row.appendChild(dispLbl);
