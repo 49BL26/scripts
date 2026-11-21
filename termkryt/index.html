@@ -5025,25 +5025,27 @@ async function persist() {
     return Object.keys(byPlayer).length;
   }
 
-  /** Call when a card that had votes is flipped (any flip path). */
-  async function consumeGuessForFlip(cellIndex) {
-    const hadVotes = voteCountOnCell(cellIndex) > 0;
-    if (!hadVotes) return;
+  /**
+   * Consume exactly one guess. Pass hadVotes from caller (snapshot before clearing).
+   * Returns true if the turn ended.
+   */
+  async function consumeOneGuess(hadVotes) {
+    if (!hadVotes) return false;
+    if (state.turnLocked) return true;
     if (typeof state.guessesRemaining !== 'number' || state.guessesRemaining >= 99) {
-      // still clear votes via caller
-      return;
+      return false;
     }
-    if (state.turnLocked) return;
     state.guessesRemaining = Math.max(0, state.guessesRemaining - 1);
     if (state.guessesRemaining <= 0) {
       await endGuessTurn();
-    } else {
-      await persist();
-      if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
+      return true;
     }
+    await persist();
+    if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
+    return false;
   }
 
-  /** Reveal a cell on the live board when auto-flip threshold is met */
+	
   async function performAutoFlip(cellIndex) {
     const idx = Number(cellIndex);
     const cell = document.querySelector('#board .cell[data-index="' + idx + '"]');
@@ -5058,32 +5060,36 @@ async function persist() {
       color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
     }
 
+    // Snapshot votes BEFORE clearing (exactly one guess if any votes existed)
+    const hadVotes = voteCountOnCell(idx) > 0;
+
+    // Paint without going through clearReactions consume (paintCell still clears UI votes)
     if (typeof paintCell === 'function') {
+      // Temporarily clear without consume — paintCell may call clearReactionsOnCell
+      clearReactionsOnCell(idx, { consumeGuess: false });
       paintCell(cell, color, true);
     } else {
       cell.classList.add('play-active');
+      clearReactionsOnCell(idx, { consumeGuess: false });
     }
     if (typeof updateStats === 'function') updateStats();
 
-    // Clear votes on this cell (paintCell may already call this)
-    clearReactionsOnCell(idx);
-
-    // Spymaster/host publishes board so everyone sees the flip
+    // Host pushes the revealed board to everyone
     if (typeof window.pushLiveBoard === 'function') {
       try { await window.pushLiveBoard(); } catch (e) { /* ignore */ }
     }
 
     const byTeam = window.liveClueState && window.liveClueState.byTeam;
-    const wrongColor = !!(byTeam && color !== byTeam);
+    // White / black / opponent color → turn over (all remaining guesses gone)
+    const endsTurn = !!(byTeam && color !== byTeam);
 
-    // Strict: wrong color (opponent / bystander / assassin) ends the turn
-    if (state.turnOrderMode === 'strict' && wrongColor) {
+    if (endsTurn) {
       await endGuessTurn();
       return;
     }
 
-    // Guess consumption happens in clearReactionsOnCell when the card had votes.
-    // Wrong-color strict end is handled above.
+    // Correct color: subtract exactly one guess if the card had votes
+    await consumeOneGuess(hadVotes);
   }
 
   async function toggleReaction(cellIndex) {
@@ -5319,10 +5325,33 @@ async function persist() {
       await endGuessTurn();
     }
   }
-
   async function forcePass() {
     if (!window.liveIsHost) return;
     await endGuessTurn();
+  }
+
+  /**
+   * Called from paintCell on reveal. Safe if performAutoFlip already handled it
+   * (reactions already cleared → hadVotes false → no second subtract).
+   * White / opponent / assassin → end turn (guesses wiped via endGuessTurn).
+   */
+  async function onCardRevealed(cellIndex, color) {
+    if (state.turnLocked) return;
+    const byTeam = window.liveClueState && window.liveClueState.byTeam;
+    if (!byTeam || !window.liveClueState?.word) return;
+
+    // performAutoFlip already cleared reactions; hadVotes is only for other paths
+    const hadVotes = voteCountOnCell(cellIndex) > 0;
+
+    // Bystander (white), assassin, or wrong team → end turn entirely
+    if (color && color !== byTeam) {
+      await endGuessTurn();
+      return;
+    }
+
+    if (hadVotes) {
+      await consumeOneGuess(true);
+    }
   }
 
   /** Clear all tile votes (called when a new clue is given) */
@@ -5337,29 +5366,39 @@ async function persist() {
     await persist();
   }
 
-  /** Called when a cell is flipped — clear all reactions on that cell */
-  async function clearReactionsOnCell(cellIndex) {
+  /**
+   * Clear votes on a cell. By default does NOT consume a guess
+   * (guess is consumed once in onCardRevealed / performAutoFlip).
+   */
+  function clearReactionsOnCell(cellIndex, opts) {
+    const consume = !!(opts && opts.consumeGuess);
     const key = String(cellIndex);
     const byPlayer = state.reactions[key] || state.reactions[cellIndex];
-    if (!byPlayer || Object.keys(byPlayer).length === 0) return;
+    const hadVotes = !!(byPlayer && Object.keys(byPlayer).length);
 
-    // Count as a used guess when a voted card is flipped
-    await consumeGuessForFlip(cellIndex);
-
-    for (const pid of Object.keys(byPlayer)) {
-      if (String(state.playerReactionCell[pid]) === key ||
-          state.playerReactionCell[pid] === cellIndex) {
-        delete state.playerReactionCell[pid];
+    if (hadVotes) {
+      for (const pid of Object.keys(byPlayer)) {
+        if (String(state.playerReactionCell[pid]) === key ||
+            state.playerReactionCell[pid] === cellIndex) {
+          delete state.playerReactionCell[pid];
+        }
       }
+      delete state.reactions[key];
+      delete state.reactions[cellIndex];
+      renderReactions();
+      broadcast('chat-reaction', {
+        reactions: state.reactions,
+        playerReactionCell: state.playerReactionCell
+      });
     }
-    delete state.reactions[key];
-    delete state.reactions[cellIndex];
-    renderReactions();
-    broadcast('chat-reaction', {
-      reactions: state.reactions,
-      playerReactionCell: state.playerReactionCell
-    });
-    persist();
+
+    if (consume && hadVotes) {
+      // fire-and-forget single consume
+      consumeOneGuess(true);
+    } else if (hadVotes) {
+      persist();
+    }
+    return hadVotes;
   }
 
   // ---------- public API ----------
@@ -5426,7 +5465,7 @@ async function persist() {
 
     refreshReactions: renderReactions,
     clearReactionsOnCell,
-	consumeGuessForFlip,
+    onCardRevealed,
     clearAllReactions,
     toggleReaction,
     canVoteNow,
@@ -7610,16 +7649,9 @@ async function handleCellClick(cell) {
               if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
                 window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
               }
-              // Strict mode: wrong-color flip ends the guessing turn
-              if (typeof window.LiveChat?.getState === 'function') {
-                const st = window.LiveChat.getState();
-                const clue = window.liveClueState;
-                if (st && st.turnOrderMode === 'strict' && clue && clue.byTeam && !st.turnLocked) {
-                  const color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k));
-                  if (color && color !== clue.byTeam && typeof window.LiveChat.forcePass === 'function') {
-                    window.LiveChat.forcePass();
-                  }
-                }
+              if (typeof window.LiveChat?.onCardRevealed === 'function') {
+                const color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
+                window.LiveChat.onCardRevealed(Number(cell.dataset.index), color);
               }
             }
         } else {
@@ -7666,8 +7698,14 @@ function paintCell(cell, color, reveal) {
     cell.classList.add(color);
     if (reveal) {
       cell.classList.add('play-active');
+      const idx = Number(cell.dataset.index);
+      // Clear vote chips only — guess accounting is handled by performAutoFlip / onReveal
       if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-        window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+        window.LiveChat.clearReactionsOnCell(idx, { consumeGuess: false });
+      }
+      // Non-autoflip reveals (spymaster flip, etc.): one guess if votes existed; white ends turn
+      if (typeof window.LiveChat?.onCardRevealed === 'function') {
+        window.LiveChat.onCardRevealed(idx, color);
       }
     }
 }
