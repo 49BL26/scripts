@@ -79,9 +79,11 @@
     .live-pass-chip.is-passed {
       opacity: 0.8;
       outline: 2px solid #9e9e9e;
-    }
-    body.team-bg-red { background-color: #ffcdd2 !important; }
-    body.team-bg-blue { background-color: #bbdefb !important; }
+	}
+
+/* Slightly fainter than card colours so the board still stands out */
+    body.team-bg-red { background-color: #fff5f5 !important; }
+    body.team-bg-blue { background-color: #f3f9ff !important; }
     body.team-bg-none { background-color: #ffffff !important; }
 
     /* Revealed / flipped cards */
@@ -3607,13 +3609,77 @@ function renderPlayersPanel(players = {}) {
     h.textContent = (team === 'red' ? 'Red' : 'Blue') + ' Spymaster';
     h.style.margin = '0 0 4px';
     h.style.fontSize = '12px';
+
+// TEAM COLUMNS — always Red left, Blue right (matches spymaster row)
+  const roster = document.createElement('div');
+  roster.className = 'host-roster-columns';
+
+  function bindDropTarget(el, team, role) {
+    if (!hostDragAssignEnabled || !el) return;
+    el.dataset.dropTeam = team;
+    el.dataset.dropRole = role;
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      el.style.outline = '2px solid #555';
+    });
+    el.addEventListener('dragleave', e => {
+      if (!el.contains(e.relatedTarget)) el.style.outline = '';
+    });
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      el.style.outline = '';
+      const pid = e.dataTransfer.getData('text/player-id');
+      if (!pid) return;
+      if (role === 'bystander') setPlayerRole(pid, 'beige', 'bystander');
+      else setPlayerRole(pid, team, role);
+    });
+  }
+
+  function createTeamColumn(team) {
+    const section = document.createElement('section');
+    section.className = `host-roster-column roster-${team}`;
+    section.style.minHeight = '72px';
+
+    const heading = document.createElement('h4');
+    heading.textContent =
+      team.charAt(0).toUpperCase() + team.slice(1);
+
+    const list = document.createElement('div');
+    list.className = 'host-roster-list';
+    list.dataset.dropRole = 'player';
+    list.dataset.dropTeam = team;
+
+    section.append(heading, list);
+    bindDropTarget(section, team, 'player');
+
+    return { section, list, team };
+  }
+
+  // --- Spymaster slots (always Red | Blue) ---
+  const spyRow = document.createElement('div');
+  spyRow.className = 'host-spymaster-row';
+  spyRow.style.cssText = 'display:flex; gap:8px; margin-bottom:10px;';
+
+  function createSpymasterSlot(team) {
+    const box = document.createElement('div');
+    box.className = 'host-spymaster-slot roster-' + team;
+    box.dataset.spyTeam = team;
+    box.style.cssText =
+      'flex:1; min-height:52px; border:2px dashed rgba(0,0,0,.25); border-radius:8px; padding:6px;';
+    // Match the softer column tints
+    if (team === 'red') box.style.background = '#fff5f5';
+    if (team === 'blue') box.style.background = '#f3f9ff';
+    const h = document.createElement('h4');
+    h.textContent = (team === 'red' ? 'Red' : 'Blue') + ' Spymaster';
+    h.style.margin = '0 0 4px';
+    h.style.fontSize = '12px';
     const list = document.createElement('div');
     list.className = 'host-roster-list host-spy-list';
     list.dataset.dropRole = 'spymaster';
     list.dataset.dropTeam = team;
-box.append(h, list);
+    box.append(h, list);
     bindDropTarget(box, team, 'spymaster');
-    return { box, list };
+    return { box, list, team };
   }
 
   const spyRed = createSpymasterSlot('red');
@@ -3621,21 +3687,9 @@ box.append(h, list);
   spyRow.append(spyRed.box, spyBlue.box);
   content.appendChild(spyRow);
 
-  const left = createTeamColumn(myTeam);
-  const right = createTeamColumn(otherTeam);
-
-  // Drop targets for normal players (not spymasters)
-  [left, right].forEach(col => {
-    const team = col.section.classList.contains('roster-red') ? 'red'
-      : col.section.classList.contains('roster-blue') ? 'blue'
-      : (col.section.querySelector('h4')?.textContent || '').toLowerCase().includes('red') ? 'red' : 'blue';
-    // Prefer data from createTeamColumn heading text
-  });
-  // Mark lists for drop
-  left.list.dataset.dropRole = 'player';
-  right.list.dataset.dropRole = 'player';
-  left.list.dataset.dropTeam = myTeam;
-  right.list.dataset.dropTeam = otherTeam;
+  // Player columns: fixed Red | Blue (same order as spymaster row)
+  const left = createTeamColumn('red');
+  const right = createTeamColumn('blue');
 
   roster.append(left.section, right.section);
   content.appendChild(roster);
@@ -3902,16 +3956,16 @@ if (!player.isHost) {
     entries.filter(([, p]) => p.role === 'spymaster' && p.team === 'blue')
   );
 
-  // Team columns: players only (no spymasters)
-  const myPlayers = sortPlayers(
+// Team columns: players only (no spymasters), fixed Red | Blue
+  const redPlayers = sortPlayers(
     entries.filter(([, p]) =>
-      p.role === 'player' && p.team === myTeam
+      p.role === 'player' && p.team === 'red'
     )
   );
 
-  const opposingPlayers = sortPlayers(
+  const bluePlayers = sortPlayers(
     entries.filter(([, p]) =>
-      p.role === 'player' && p.team === otherTeam
+      p.role === 'player' && p.team === 'blue'
     )
   );
 
@@ -3921,8 +3975,8 @@ if (!player.isHost) {
 
   addPlayers(spyRed.list, redSpies);
   addPlayers(spyBlue.list, blueSpies);
-  addPlayers(left.list, myPlayers);
-  addPlayers(right.list, opposingPlayers);
+  addPlayers(left.list, redPlayers);   // left  = red
+  addPlayers(right.list, bluePlayers); // right = blue
   addPlayers(bystanderList, bystanders);
 }
 
