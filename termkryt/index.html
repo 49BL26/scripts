@@ -1252,6 +1252,7 @@ body.chat-view-mode .live-chat-messages {
   let liveHasExitedRoom = false;
   let hostPanelMinimized = false;
   let hostAdvancedMinimized = true; // Advanced options collapsed by default
+  let hostDragAssignEnabled = true; // drag players onto team / spymaster slots
 
 let liveRoomSettings = { autoAssign: true };
 
@@ -1395,7 +1396,9 @@ function updateLiveNameButton(players = {}) {
 
 window.__displayMode = { active: false, showClue: false };
 
-async function enterDisplayMode() {
+async function enterDisplayMode(opts) {
+  const forceClue = !!(opts && opts.forceClue);
+  window.__displayMode = { active: true, showClue: forceClue ? true : (window.__displayMode?.showClue ?? true)
   if (!document.getElementById('board')) return;
 
   const showClue = await askChoice(
@@ -1884,19 +1887,25 @@ async function leaveLiveRoomLocal() {
   document.body.classList.remove('chat-view-mode', 'team-bg-red', 'team-bg-blue');
   document.body.classList.add('team-bg-none');
 
+  // Only hide in-game chrome — keep Host/Join/Share (g-host) and pre-game controls
   const hideIds = [
     'live-players-panel',
     'live-roster',
-    'live-self-role-controls',
-    'g-host'
+    'live-self-role-controls'
   ];
   hideIds.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  // Clear host panel DOM if present
+  // Clear host panel contents but do not destroy the ability to host again
   const hostPanel = document.getElementById('live-players-panel');
   if (hostPanel) hostPanel.replaceChildren();
+
+  // Ensure host/join buttons are visible again
+  const gHost = document.getElementById('g-host');
+  if (gHost) gHost.style.display = '';
+  document.getElementById('btn-host-game')?.style.setProperty('display', '');
+  document.getElementById('btn-join-game')?.style.setProperty('display', '');
 
   // Clear reaction chips on board (local only; board colors stay)
   document.querySelectorAll('#board .cell-reactions').forEach(el => {
@@ -2042,11 +2051,20 @@ function applyLiveBoard(board, asSpymaster) {
   }
   lastBoardFingerprint = fp;
 
-  const cells = raw.map(cell =>
-    asSpymaster || cell.isPlayFlipped
-      ? cell
-      : { ...cell, colorClass: 'white' }
-  );
+  // NEVER paint true colors for non-spymasters (prevents URL-join color flash)
+  const cells = raw.map(cell => {
+    if (asSpymaster) return { ...cell };
+    if (cell.isPlayFlipped) {
+      // Revealed cards may show true color
+      return { ...cell };
+    }
+    return {
+      ...cell,
+      colorClass: 'white',
+      // strip any accidental color fields
+      color: undefined
+    };
+  });
 
   // Public totals for Tile Statistics (works for non-spymasters)
   if (typeof board.redHasMore === 'boolean') {
@@ -2066,6 +2084,16 @@ function applyLiveBoard(board, asSpymaster) {
 	
   if (typeof initBoard === 'function') {
     window.isFlipped = !!board.isFlipped;
+    // If not spymaster, ensure DOM cannot briefly show a previous colored board
+    if (!asSpymaster && typeof board !== 'undefined') {
+      const boardEl = document.getElementById('board');
+      if (boardEl) {
+        boardEl.querySelectorAll('.cell').forEach(c => {
+          c.classList.remove('red', 'blue', 'black');
+          if (!c.classList.contains('play-active')) c.classList.add('white');
+        });
+      }
+    }
     initBoard(cells);
   }
 
@@ -2087,6 +2115,13 @@ function applyLiveRoomState(state) {
   const me = state.players?.[livePlayerId];
   liveRole = me?.role ?? null;
   liveTeam = me?.team ?? null;
+
+  // Host forced this bystander into display mode
+  if (me && me.forceDisplay && me.role === 'bystander' && !window.__displayMode?.active) {
+    if (typeof enterDisplayMode === 'function') {
+      enterDisplayMode({ forceClue: true });
+    }
+  }
 
   // Pale team page background
   document.body.classList.remove('team-bg-red', 'team-bg-blue', 'team-bg-none');
@@ -2835,8 +2870,28 @@ function renderLiveClueUI() {
     if (passBtn) {
       passBtn.style.display = showPass ? 'inline-flex' : 'none';
       const iPassed = !!passed[livePlayerId];
-      passBtn.textContent = iPassed ? '⏭️ Undo Pass' : '⏭️ Pass';
+      const me = (window.lastKnownPlayers || {})[livePlayerId] || {};
+      const myEmoji = me.charIcon || '⭐';
+
+      // Same idea as card votes: label stays "Pass"; your emoji shows you voted
+      // Aggregate all pass emojis on the chip (like card reactions)
+      const playersMap = window.lastKnownPlayers || {};
+      const agg = Object.create(null);
+      ids.forEach(id => {
+        if (!passed[id]) return;
+        const p = playersMap[id] || {};
+        const em = p.charIcon || '⭐';
+        if (!agg[em]) agg[em] = 0;
+        agg[em] += 1;
+      });
+      const emojiBits = Object.entries(agg).map(([em, n]) => n > 1 ? em + n : em);
+      passBtn.textContent = emojiBits.length
+        ? ('⏭️ Pass ' + emojiBits.join(''))
+        : '⏭️ Pass';
       passBtn.classList.toggle('is-passed', iPassed);
+      passBtn.title = iPassed
+        ? 'You passed — click to undo'
+        : 'Vote to pass this turn';
       passBtn.onclick = () => {
         if (typeof window.LiveChat?.votePass === 'function') window.LiveChat.votePass();
       };
@@ -3488,8 +3543,90 @@ function renderPlayersPanel(players = {}) {
     return { section, list };
   }
 
+  // Drag-assign toggle (default ON)
+  const dragAssignLbl = document.createElement('label');
+  dragAssignLbl.style.display = 'flex';
+  dragAssignLbl.style.alignItems = 'center';
+  dragAssignLbl.style.gap = '6px';
+  dragAssignLbl.style.marginBottom = '8px';
+  const dragAssignCb = document.createElement('input');
+  dragAssignCb.type = 'checkbox';
+  dragAssignCb.checked = hostDragAssignEnabled;
+  dragAssignCb.addEventListener('change', () => {
+    hostDragAssignEnabled = dragAssignCb.checked;
+    renderPlayersPanel(players);
+  });
+  dragAssignLbl.append(dragAssignCb, document.createTextNode(' Drag to assign team / role'));
+  content.appendChild(dragAssignLbl);
+
+  // --- Spymaster slots (red / blue) ---
+  const spyRow = document.createElement('div');
+  spyRow.className = 'host-spymaster-row';
+  spyRow.style.cssText = 'display:flex; gap:8px; margin-bottom:10px;';
+
+  function createSpymasterSlot(team) {
+    const box = document.createElement('div');
+    box.className = 'host-spymaster-slot roster-' + team;
+    box.dataset.spyTeam = team;
+    box.style.cssText =
+      'flex:1; min-height:52px; border:2px dashed rgba(0,0,0,.25); border-radius:8px; padding:6px;';
+    if (team === 'red') box.style.background = '#ffebee';
+    if (team === 'blue') box.style.background = '#e3f2fd';
+    const h = document.createElement('h4');
+    h.textContent = (team === 'red' ? 'Red' : 'Blue') + ' Spymaster';
+    h.style.margin = '0 0 4px';
+    h.style.fontSize = '12px';
+    const list = document.createElement('div');
+    list.className = 'host-roster-list host-spy-list';
+    list.dataset.dropRole = 'spymaster';
+    list.dataset.dropTeam = team;
+    box.append(h, list);
+    if (hostDragAssignEnabled) {
+      list.addEventListener('dragover', e => { e.preventDefault(); list.style.outline = '2px solid #666'; });
+      list.addEventListener('dragleave', () => { list.style.outline = ''; });
+      list.addEventListener('drop', e => {
+        e.preventDefault();
+        list.style.outline = '';
+        const pid = e.dataTransfer.getData('text/player-id');
+        if (pid) setPlayerRole(pid, team, 'spymaster');
+      });
+    }
+    return { box, list };
+  }
+
+  const spyRed = createSpymasterSlot('red');
+  const spyBlue = createSpymasterSlot('blue');
+  spyRow.append(spyRed.box, spyBlue.box);
+  content.appendChild(spyRow);
+
   const left = createTeamColumn(myTeam);
   const right = createTeamColumn(otherTeam);
+
+  // Drop targets for normal players (not spymasters)
+  [left, right].forEach(col => {
+    const team = col.section.classList.contains('roster-red') ? 'red'
+      : col.section.classList.contains('roster-blue') ? 'blue'
+      : (col.section.querySelector('h4')?.textContent || '').toLowerCase().includes('red') ? 'red' : 'blue';
+    // Prefer data from createTeamColumn heading text
+  });
+  // Mark lists for drop
+  left.list.dataset.dropRole = 'player';
+  right.list.dataset.dropRole = 'player';
+  left.list.dataset.dropTeam = myTeam;
+  right.list.dataset.dropTeam = otherTeam;
+  if (hostDragAssignEnabled) {
+    [left.list, right.list].forEach(list => {
+      list.addEventListener('dragover', e => { e.preventDefault(); list.style.outline = '2px solid #666'; });
+      list.addEventListener('dragleave', () => { list.style.outline = ''; });
+      list.addEventListener('drop', e => {
+        e.preventDefault();
+        list.style.outline = '';
+        const pid = e.dataTransfer.getData('text/player-id');
+        const team = list.dataset.dropTeam;
+        if (pid && team) setPlayerRole(pid, team, 'player');
+      });
+    });
+  }
 
   roster.append(left.section, right.section);
   content.appendChild(roster);
@@ -3503,6 +3640,18 @@ function renderPlayersPanel(players = {}) {
 
   const bystanderList = document.createElement('div');
   bystanderList.className = 'host-roster-list';
+  bystanderList.dataset.dropRole = 'bystander';
+  bystanderList.dataset.dropTeam = 'beige';
+  if (hostDragAssignEnabled) {
+    bystanderList.addEventListener('dragover', e => { e.preventDefault(); bystanderList.style.outline = '2px solid #666'; });
+    bystanderList.addEventListener('dragleave', () => { bystanderList.style.outline = ''; });
+    bystanderList.addEventListener('drop', e => {
+      e.preventDefault();
+      bystanderList.style.outline = '';
+      const pid = e.dataTransfer.getData('text/player-id');
+      if (pid) setPlayerRole(pid, 'beige', 'bystander');
+    });
+  }
 
   bystanderSection.append(bystanderHeading, bystanderList);
   content.appendChild(bystanderSection);
@@ -3515,6 +3664,15 @@ function renderPlayersPanel(players = {}) {
       player.team === 'blue' ? 'team-blue' :
       (player.team === 'beige' || player.role === 'bystander') ? 'team-beige' : '';
     row.className = 'host-player-row' + (teamTint ? ' ' + teamTint : '');
+    row.dataset.playerId = id;
+    if (hostDragAssignEnabled) {
+      row.draggable = true;
+      row.style.cursor = 'grab';
+      row.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/player-id', id);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+    }
 
     // Name and permission share one line.
     const identity = document.createElement('div');
@@ -3645,6 +3803,34 @@ if (!player.isHost) {
   identity.appendChild(controls);
   row.appendChild(identity);
 
+    // Bystanders: force Display mode (clue on by default)
+    if (isBystanderRole(player.role)) {
+      const dispLbl = document.createElement('label');
+      dispLbl.style.marginLeft = '6px';
+      dispLbl.style.fontSize = '12px';
+      const dispCb = document.createElement('input');
+      dispCb.type = 'checkbox';
+      dispCb.checked = player.forceDisplay !== false; // default ON
+      dispCb.title = 'Force this player into Display mode with clue visible';
+      dispCb.addEventListener('change', async () => {
+        // Persist forceDisplay on the player object in the room
+        if (!liveRoomId || !liveIsHost) return;
+        const { data: room } = await sb.from('rooms').select('players').eq('id', liveRoomId).single();
+        if (!room?.players?.[id]) return;
+        const next = { ...room.players };
+        next[id] = { ...next[id], forceDisplay: dispCb.checked };
+        await sb.from('rooms').update({ players: next }).eq('id', liveRoomId);
+        if (typeof publishLivePatch === 'function') {
+          // trigger sync for others
+        } else if (typeof broadcastLiveState === 'function') {
+          await broadcastLiveState({ players: next });
+        }
+        applyLiveRoomState({ ...(room), players: next, board: room.board, settings: liveRoomSettings });
+      });
+      dispLbl.append(dispCb, document.createTextNode(' Make display'));
+      row.appendChild(dispLbl);
+    }
+
     return row;
   }
 
@@ -3671,15 +3857,23 @@ if (!player.isHost) {
       (a[1].name || '').localeCompare(b[1].name || '')
     );
 
+  const redSpies = sortPlayers(
+    entries.filter(([, p]) => p.role === 'spymaster' && p.team === 'red')
+  );
+  const blueSpies = sortPlayers(
+    entries.filter(([, p]) => p.role === 'spymaster' && p.team === 'blue')
+  );
+
+  // Team columns: players only (no spymasters)
   const myPlayers = sortPlayers(
     entries.filter(([, p]) =>
-      !isBystanderRole(p.role) && p.team === myTeam
+      p.role === 'player' && p.team === myTeam
     )
   );
 
   const opposingPlayers = sortPlayers(
     entries.filter(([, p]) =>
-      !isBystanderRole(p.role) && p.team === otherTeam
+      p.role === 'player' && p.team === otherTeam
     )
   );
 
@@ -3687,6 +3881,8 @@ if (!player.isHost) {
     entries.filter(([, p]) => isBystanderRole(p.role))
   );
 
+  addPlayers(spyRed.list, redSpies);
+  addPlayers(spyBlue.list, blueSpies);
   addPlayers(left.list, myPlayers);
   addPlayers(right.list, opposingPlayers);
   addPlayers(bystanderList, bystanders);
@@ -5331,27 +5527,23 @@ async function persist() {
   }
 
   /**
-   * Called from paintCell on reveal. Safe if performAutoFlip already handled it
-   * (reactions already cleared → hadVotes false → no second subtract).
-   * White / opponent / assassin → end turn (guesses wiped via endGuessTurn).
+   * Manual / spymaster reveal. Always counts as one guess on a correct color.
+   * Wrong color (white / black / other team) ends the turn.
+   * opts.hadVotes: optional snapshot taken BEFORE clearing reactions.
    */
-  async function onCardRevealed(cellIndex, color) {
+  async function onCardRevealed(cellIndex, color, opts) {
     if (state.turnLocked) return;
     const byTeam = window.liveClueState && window.liveClueState.byTeam;
     if (!byTeam || !window.liveClueState?.word) return;
 
-    // performAutoFlip already cleared reactions; hadVotes is only for other paths
-    const hadVotes = voteCountOnCell(cellIndex) > 0;
-
-    // Bystander (white), assassin, or wrong team → end turn entirely
+    // Wrong color → end turn (all remaining guesses gone)
     if (color && color !== byTeam) {
       await endGuessTurn();
       return;
     }
 
-    if (hadVotes) {
-      await consumeOneGuess(true);
-    }
+    // Correct team color: always consume one guess (spymaster flip or voted card)
+    await consumeOneGuess(true);
   }
 
   /** Clear all tile votes (called when a new clue is given) */
@@ -7646,12 +7838,18 @@ async function handleCellClick(cell) {
             cell.classList.toggle('play-active', nowRevealed);
             if (nowRevealed) {
               unthink(cell);
+              const idx = Number(cell.dataset.index);
+              // Prefer true color in live games (player view may show white)
+              let color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
+              const trueCells = window.lastTrueBoardCells;
+              if (Array.isArray(trueCells) && trueCells[idx] && trueCells[idx].colorClass) {
+                color = trueCells[idx].colorClass;
+              }
               if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
-                window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+                window.LiveChat.clearReactionsOnCell(idx, { consumeGuess: false });
               }
               if (typeof window.LiveChat?.onCardRevealed === 'function') {
-                const color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
-                window.LiveChat.onCardRevealed(Number(cell.dataset.index), color);
+                window.LiveChat.onCardRevealed(idx, color);
               }
             }
         } else {
