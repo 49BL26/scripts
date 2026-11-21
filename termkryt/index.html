@@ -484,8 +484,10 @@ body.grid-align-open {
 }
 .host-advanced-body {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
   width: 100%;
 }
 .host-advanced-body label {
@@ -496,7 +498,7 @@ body.grid-align-open {
   font-weight: 500;
 }
 .host-advanced-body button {
-  align-self: flex-start;
+  align-self: center;
 }
 .host-swap-teams {
   order: -1;          /* forces it to the far left */
@@ -2720,26 +2722,41 @@ function renderLiveClueUI() {
         left == null ? '' :
         left >= 99 ? 'Guesses left: ∞' :
         ('Guesses left: ' + left);
+
       const passed = (chatState && chatState.passedPlayers) || {};
-      const teamPlayers = Object.values(window.lastKnownPlayers || {}).filter(
-        p => p && p.team === clue.byTeam && p.role === 'player'
-      );
-      const passCount = teamPlayers.filter(p => passed[p.id] || passed[Object.keys(window.lastKnownPlayers || {}).find(k => (window.lastKnownPlayers || {})[k] === p)]).length;
-      // Count passes by player id keys
-      let passN = 0;
-      teamPlayers.forEach(() => {});
       const ids = Object.keys(window.lastKnownPlayers || {}).filter(id => {
         const p = window.lastKnownPlayers[id];
         return p && p.team === clue.byTeam && p.role === 'player';
       });
-      passN = ids.filter(id => passed[id]).length;
+      const passN = ids.filter(id => passed[id]).length;
+
+      // Emoji chips for who passed (reaction-style)
       if (passStatus) {
-        passStatus.textContent = ids.length
-          ? ('Pass votes: ' + passN + ' / ' + ids.length)
-          : '';
+        const players = window.lastKnownPlayers || {};
+        const agg = Object.create(null);
+        ids.forEach(id => {
+          if (!passed[id]) return;
+          const p = players[id] || {};
+          const em = p.charIcon || '✋';
+          if (!agg[em]) agg[em] = { count: 0, names: [] };
+          agg[em].count += 1;
+          agg[em].names.push(p.name || 'Player');
+        });
+        const chips = Object.entries(agg).map(([em, info]) =>
+          info.count > 1 ? em + info.count : em
+        );
+        const titles = Object.values(agg).map(info => info.names.join(', ')).join(' · ');
+        passStatus.textContent = chips.length
+          ? (chips.join(' ') + '  (' + passN + '/' + ids.length + ')')
+          : ('Pass: 0/' + ids.length);
+        passStatus.title = titles || '';
       }
-      passBtn.disabled = !!passed[livePlayerId];
-      passBtn.textContent = passed[livePlayerId] ? 'Passed' : 'Pass';
+
+      // Toggle affordance — not disabled when already passed
+      const iPassed = !!passed[livePlayerId];
+      passBtn.disabled = false;
+      passBtn.textContent = iPassed ? 'Undo Pass' : 'Pass';
+      passBtn.style.opacity = iPassed ? '0.75' : '1';
       passBtn.onclick = () => {
         if (typeof window.LiveChat?.votePass === 'function') {
           window.LiveChat.votePass();
@@ -4937,7 +4954,16 @@ async function persist() {
       try { await window.pushLiveBoard(); } catch (e) { /* ignore */ }
     }
 
-    // Consume one guess; lock turn at 0
+    const byTeam = window.liveClueState && window.liveClueState.byTeam;
+    const wrongColor = !!(byTeam && color !== byTeam);
+
+    // Strict: wrong color (opponent / bystander / assassin) ends the turn
+    if (state.turnOrderMode === 'strict' && wrongColor) {
+      await endGuessTurn();
+      return;async function votePass() {
+    }
+
+    // Guesses = clue number + 1; at 0 auto-pass (end turn)
     if (typeof state.guessesRemaining === 'number' && state.guessesRemaining < 99) {
       state.guessesRemaining = Math.max(0, state.guessesRemaining - 1);
       if (state.guessesRemaining <= 0) {
@@ -5076,17 +5102,74 @@ async function persist() {
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
   }
 
+  function teamPlayerIds(team) {
+    return Object.keys(window.lastKnownPlayers || {}).filter(id => {
+      const p = window.lastKnownPlayers[id];
+      return p && p.team === team && p.role === 'player';
+    });
+  }
+
+  function passEmojiList() {
+    const team = window.liveClueState && window.liveClueState.byTeam;
+    const players = window.lastKnownPlayers || {};
+    const chips = [];
+    for (const id of teamPlayerIds(team)) {
+      if (!state.passedPlayers[id]) continue;
+      const p = players[id] || {};
+      chips.push((p.charIcon || '✋') + (p.name ? '' : ''));
+    }
+    // Aggregate like reactions: emoji + count if duplicates
+    const agg = Object.create(null);
+    for (const id of teamPlayerIds(team)) {
+      if (!state.passedPlayers[id]) continue;
+      const p = players[id] || {};
+      const em = p.charIcon || '✋';
+      if (!agg[em]) agg[em] = { count: 0, names: [] };
+      agg[em].count += 1;
+      agg[em].names.push(p.name || 'Player');
+    }
+    return Object.entries(agg).map(([em, info]) => ({
+      text: info.count > 1 ? em + info.count : em,
+      title: info.names.join(', ')
+    }));
+  }
+
   async function votePass() {
-    if (!canVoteNow()) return;
+    // Allow toggle even if they already passed (toggle off); block if turn locked / wrong role
+    const clue = window.liveClueState;
+    if (!window.liveRoomId || state.turnLocked) return;
+    if (window.liveRole !== 'player') return;
+    if (!clue || !clue.word || !clue.byTeam || window.liveTeam !== clue.byTeam) return;
+
     const pid = window.livePlayerId;
     if (!pid) return;
-    if (state.passedPlayers[pid]) return;
 
-    const ok = window.confirm('Pass this turn? (Needs 100% of your team\'s players.)');
-    if (!ok) return;
+    const team = clue.byTeam;
+    const ids = teamPlayerIds(team);
+    const already = !!state.passedPlayers[pid];
+
+    // Toggle OFF — no confirm
+    if (already) {
+      delete state.passedPlayers[pid];
+      await persist();
+      if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
+      return;
+    }
+
+    // Toggle ON — confirm only if this is the last vote needed for 100%
+    const passN = ids.filter(id => state.passedPlayers[id]).length;
+    const wouldComplete = ids.length > 0 && (passN + 1) >= ids.length;
+    if (wouldComplete) {
+      const ok = window.confirm(
+        'Are you sure you want to pass?\n\n' +
+        'You are the last vote needed — this will end the turn.'
+      );
+      if (!ok) return;
+    }
 
     state.passedPlayers[pid] = true;
-    // Passing removes this player's card vote
+
+    // Passing removes this player's card vote (same as moving a reaction)
     const prevKey = state.playerReactionCell[pid] != null
       ? String(state.playerReactionCell[pid])
       : null;
@@ -5099,17 +5182,11 @@ async function persist() {
     delete state.playerReactionCell[pid];
     renderReactions();
 
-    const team = window.liveClueState && window.liveClueState.byTeam;
-    const ids = Object.keys(window.lastKnownPlayers || {}).filter(id => {
-      const p = window.lastKnownPlayers[id];
-      return p && p.team === team && p.role === 'player';
-    });
-    const passN = ids.filter(id => state.passedPlayers[id]).length;
     await persist();
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
 
-    // 100% of team players passed
-    if (ids.length > 0 && passN >= ids.length) {
+    const passAfter = ids.filter(id => state.passedPlayers[id]).length;
+    if (ids.length > 0 && passAfter >= ids.length) {
       await endGuessTurn();
     }
   }
@@ -7392,6 +7469,17 @@ async function handleCellClick(cell) {
               unthink(cell);
               if (typeof window.LiveChat?.clearReactionsOnCell === 'function') {
                 window.LiveChat.clearReactionsOnCell(Number(cell.dataset.index));
+              }
+              // Strict mode: wrong-color flip ends the guessing turn
+              if (typeof window.LiveChat?.getState === 'function') {
+                const st = window.LiveChat.getState();
+                const clue = window.liveClueState;
+                if (st && st.turnOrderMode === 'strict' && clue && clue.byTeam && !st.turnLocked) {
+                  const color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k));
+                  if (color && color !== clue.byTeam && typeof window.LiveChat.forcePass === 'function') {
+                    window.LiveChat.forcePass();
+                  }
+                }
               }
             }
         } else {
