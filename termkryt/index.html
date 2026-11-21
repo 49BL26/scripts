@@ -4890,8 +4890,8 @@ async function persist() {
   // ---------- reactions (one per player; click toggles) ----------
   function canVoteNow() {
     const clue = window.liveClueState;
-    // byTeam = team that received the clue (guessers). Spymasters cannot vote.
-    // turnLocked after Pass / out of guesses.
+    // Guessing-team players only; blocked after turn ends.
+    // Passed players can still click a card (that clears their pass — see toggleReaction).
     return !!(
       window.liveRoomId &&
       window.liveRole === 'player' &&
@@ -4899,8 +4899,7 @@ async function persist() {
       clue &&
       clue.word &&
       clue.byTeam &&
-      window.liveTeam === clue.byTeam &&
-      !state.passedPlayers[window.livePlayerId]
+      window.liveTeam === clue.byTeam
     );
   }
 
@@ -4960,7 +4959,7 @@ async function persist() {
     // Strict: wrong color (opponent / bystander / assassin) ends the turn
     if (state.turnOrderMode === 'strict' && wrongColor) {
       await endGuessTurn();
-      return;async function votePass() {
+      return;
     }
 
     // Guesses = clue number + 1; at 0 auto-pass (end turn)
@@ -5003,16 +5002,11 @@ async function persist() {
       ? String(state.playerReactionCell[pid])
       : null;
 
-    // Removing own vote — no confirm, no auto-flip check
     const isRemoving = prevKey === key;
 
-    // If this NEW vote would reach threshold and auto-flip is on, confirm first
+    // Confirm only when this vote would hit auto-flip threshold
     if (!isRemoving && state.autoFlipEnabled) {
       const current = voteCountOnCell(idx);
-      // If voter already on another cell, moving vote: count as +1 on new cell
-      const alreadyHere = prevKey === key;
-      const nextCount = alreadyHere ? current : current + (prevKey === key ? 0 : 1);
-      // If they had a vote elsewhere, still +1 on this cell
       const projected = (state.reactions[key] && state.reactions[key][pid])
         ? current
         : current + 1;
@@ -5026,6 +5020,7 @@ async function persist() {
       }
     }
 
+    // One reaction per player: remove from previous cell first
     if (prevKey != null && state.reactions[prevKey]) {
       delete state.reactions[prevKey][pid];
       if (Object.keys(state.reactions[prevKey]).length === 0) {
@@ -5034,8 +5029,13 @@ async function persist() {
     }
 
     if (prevKey === key) {
+      // Toggle off
       delete state.playerReactionCell[pid];
     } else {
+      // Vote on this card; clear personal pass vote (card vote and pass are mutually exclusive)
+      if (state.passedPlayers[pid]) {
+        delete state.passedPlayers[pid];
+      }
       if (!state.reactions[key]) state.reactions[key] = {};
       state.reactions[key][pid] = {
         emoji: emoji,
@@ -5050,8 +5050,8 @@ async function persist() {
       playerReactionCell: state.playerReactionCell
     });
     await persist();
+    if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
 
-    // Auto-flip if enabled and threshold met
     if (state.autoFlipEnabled && !isRemoving) {
       const need = votesNeeded();
       if (voteCountOnCell(idx) >= need) {
