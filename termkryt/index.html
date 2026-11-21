@@ -60,6 +60,30 @@
     .cell.black { background-color:#cfd8dc !important; color:#212121 !important; border-color:#78909c; }
     .cell.white { background-color:#ffffff !important; color:#757575 !important; border-color:#e0e0e0; }
 
+	    /* Pass chip — looks like a neutral board card */
+    .live-pass-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+      background: #ffffff;
+      color: #757575;
+      cursor: pointer;
+      font-family: system-ui, sans-serif;
+      line-height: 1.2;
+    }
+    .live-pass-chip:hover { background: #f5f5f5; }
+    .live-pass-chip.is-passed {
+      opacity: 0.8;
+      outline: 2px solid #9e9e9e;
+    }
+    body.team-bg-red { background-color: #fff5f5 !important; }
+    body.team-bg-blue { background-color: #f3f8ff !important; }
+    body.team-bg-none { background-color: #ffffff !important; }
+
     /* Revealed / flipped cards */
     .cell.play-active.red   { background-color:#d32f2f !important; color:#fff !important; border-color:#b71c1c; }
     .cell.play-active.blue  { background-color:#1976d2 !important; color:#fff !important; border-color:#0d47a1; }
@@ -1097,11 +1121,9 @@ body.chat-view-mode .live-chat-messages {
 	
 <!-- ================= CLUE BANNER ================= -->
 <div id="live-clue-bar" style="display:none; width:100%; max-width:600px; margin:8px auto 0; text-align:center;">
-  <div id="live-clue-banner" style="display:none; padding:10px 14px; border-radius:8px; background:#1a237e; color:#fff; font-family:system-ui; font-weight:600;"></div>
-  <div id="live-guess-row" style="display:none; margin-top:6px; font-size:14px; font-weight:600; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap;">
-    <span id="live-guesses-left"></span>
-    <button type="button" id="btn-pass-turn" style="padding:6px 14px; font-size:13px; font-weight:600; border-radius:8px; border:1px solid #888; background:#fff; cursor:pointer;">Pass</button>
-    <span id="live-pass-status" style="font-size:12px; font-weight:500; opacity:0.85;"></span>
+  <div id="live-clue-banner" style="display:none; padding:10px 12px; border-radius:8px; background:#1a237e; color:#fff; font-family:system-ui; font-weight:600; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap;">
+    <span id="live-clue-text"></span>
+    <button type="button" id="btn-pass-turn" class="live-pass-chip" style="display:none;">⏭️ Pass</button>
   </div>
   <button type="button" id="btn-give-clue" style="display:none; margin-top:6px; padding:8px 16px; font-size:14px; font-weight:600; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer;">🧶 Give Clue</button>
 </div>
@@ -1818,9 +1840,7 @@ window.endLiveGameAsHost = endLiveGameAsHost;
 
 async function leaveLiveRoomLocal() {
   if (typeof window.LiveChat?.reset === 'function') window.LiveChat.reset();
-  const chatPanel = document.getElementById('live-chat-panel');
-  if (chatPanel) chatPanel.style.display = 'none';
-  document.body.classList.remove('chat-view-mode');
+
   liveHasExitedRoom = true;
   liveRole = null;
   liveTeam = null;
@@ -1835,9 +1855,53 @@ async function leaveLiveRoomLocal() {
 
   liveRoomId = null;
 
-  if (typeof window.LiveChat?.reset === 'function') window.LiveChat.reset();
-
   livePlayerId = getOrCreatePlayerId('local');
+
+  // Clear live clue state + hide clue UI
+  window.liveClueState = {
+    word: null,
+    number: null,
+    byTeam: null,
+    turnTeam: null
+  };
+  const clueBar = document.getElementById('live-clue-bar');
+  if (clueBar) clueBar.style.display = 'none';
+  const banner = document.getElementById('live-clue-banner');
+  if (banner) {
+    banner.style.display = 'none';
+    banner.textContent = '';
+  }
+  const passBtn = document.getElementById('btn-pass-turn');
+  if (passBtn) passBtn.style.display = 'none';
+
+  // Hide all online-only chrome (board stays as-is)
+  const chatPanel = document.getElementById('live-chat-panel');
+  if (chatPanel) {
+    chatPanel.style.display = 'none';
+    const box = document.getElementById('live-chat-messages');
+    if (box) box.replaceChildren();
+  }
+  document.body.classList.remove('chat-view-mode', 'team-bg-red', 'team-bg-blue');
+  document.body.classList.add('team-bg-none');
+
+  const hideIds = [
+    'live-players-panel',
+    'live-roster',
+    'live-self-role-controls',
+    'g-host'
+  ];
+  hideIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  // Clear host panel DOM if present
+  const hostPanel = document.getElementById('live-players-panel');
+  if (hostPanel) hostPanel.replaceChildren();
+
+  // Clear reaction chips on board (local only; board colors stay)
+  document.querySelectorAll('#board .cell-reactions').forEach(el => {
+    el.replaceChildren();
+  });
 
   showRoomCode(null);
   document.getElementById('btn-copy-room-link')?.style.setProperty('display', 'none');
@@ -1845,17 +1909,18 @@ async function leaveLiveRoomLocal() {
   const mode = document.getElementById('op1');
   if (mode) mode.value = 'player';
 
-  // Force unlock board / cells after leave or kick
   const board = document.getElementById('board');
   if (board) {
     board.style.pointerEvents = '';
     board.style.filter = '';
+    board.classList.remove('locked-for-player');
   }
   document.querySelectorAll('.cell').forEach(cell => {
     cell.style.pointerEvents = '';
   });
 
   updateLiveAccessUI();
+  if (typeof renderLiveClueUI === 'function') renderLiveClueUI();
   if (typeof uiSync === 'function') uiSync();
 }
 
@@ -2022,6 +2087,12 @@ function applyLiveRoomState(state) {
   const me = state.players?.[livePlayerId];
   liveRole = me?.role ?? null;
   liveTeam = me?.team ?? null;
+
+  // Pale team page background
+  document.body.classList.remove('team-bg-red', 'team-bg-blue', 'team-bg-none');
+  if (liveTeam === 'red') document.body.classList.add('team-bg-red');
+  else if (liveTeam === 'blue') document.body.classList.add('team-bg-blue');
+  else document.body.classList.add('team-bg-none');
 
   // Host kicked this player — leave the room locally
   if (
@@ -2663,14 +2734,43 @@ window.clearLiveClueForNewBoard = async function clearLiveClueForNewBoard() {
   return true;
 };
 
+/** True when assassin is up or all red/blue agents are revealed. */
+function isLiveGameOver() {
+  const cells = document.querySelectorAll('#board .cell');
+  if (!cells.length) return false;
+  let redLeft = 0, blueLeft = 0, blackUp = false;
+  const trueCells = window.lastTrueBoardCells;
+  cells.forEach((cell, i) => {
+    let color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k));
+    if (trueCells && trueCells[i] && trueCells[i].colorClass) {
+      color = trueCells[i].colorClass;
+    }
+    const up = cell.classList.contains('play-active');
+    if (color === 'black' && up) blackUp = true;
+    if (color === 'red' && !up) redLeft++;
+    if (color === 'blue' && !up) blueLeft++;
+  });
+  // Prefer true totals when known
+  if (trueCells && trueCells.length) {
+    redLeft = 0; blueLeft = 0; blackUp = false;
+    trueCells.forEach((c, i) => {
+      const cell = cells[i];
+      const up = cell && cell.classList.contains('play-active');
+      const color = c.colorClass || 'white';
+      if (color === 'black' && up) blackUp = true;
+      if (color === 'red' && !up) redLeft++;
+      if (color === 'blue' && !up) blueLeft++;
+    });
+  }
+  return blackUp || redLeft === 0 || blueLeft === 0;
+}
+window.isLiveGameOver = isLiveGameOver;
+
 function renderLiveClueUI() {
   const bar = document.getElementById('live-clue-bar');
   const banner = document.getElementById('live-clue-banner');
   const btn = document.getElementById('btn-give-clue');
-  const guessRow = document.getElementById('live-guess-row');
-  const guessesEl = document.getElementById('live-guesses-left');
   const passBtn = document.getElementById('btn-pass-turn');
-  const passStatus = document.getElementById('live-pass-status');
   if (!bar || !banner || !btn) return;
 
   if (!liveRoomId || liveHasExitedRoom) {
@@ -2697,72 +2797,55 @@ function renderLiveClueUI() {
   const turnLocked = !!(chatState && chatState.turnLocked);
   const strict = !!(chatState && chatState.turnOrderMode === 'strict');
 
-  if (hasClue) {
-    const teamLabel = (clue.byTeam || '').toUpperCase();
-    banner.style.display = 'block';
-    banner.style.background = clue.byTeam === 'blue' ? '#0d47a1' : '#b71c1c';
-    banner.textContent = `🧶 ${teamLabel}: “${clue.word}” — ${clue.number}`;
-  } else {
-    banner.style.display = 'none';
-    banner.textContent = '';
-  }
+  const clueText = document.getElementById('live-clue-text');
+  const passBtn = document.getElementById('btn-pass-turn');
 
-  // Guesses + Pass (players on byTeam while turn is open)
-  if (guessRow && guessesEl && passBtn) {
-    const showGuessUI =
-      hasClue &&
-      !turnLocked &&
+  // Game-over: all of one color revealed, or assassin (black) revealed → hide banner
+  const gameOver = (typeof window.isLiveGameOver === 'function') && window.isLiveGameOver();
+
+  if (hasClue && !turnLocked && !gameOver) {
+    const teamLabel = (clue.byTeam || '').toUpperCase();
+    const left = chatState && chatState.guessesRemaining;
+    const guessPart =
+      left == null ? '' :
+      left >= 99 ? ' (∞)' :
+      (' (' + left + ')');
+    // Optional: show pass tally in banner text
+    const passed = (chatState && chatState.passedPlayers) || {};
+    const ids = Object.keys(window.lastKnownPlayers || {}).filter(id => {
+      const p = window.lastKnownPlayers[id];
+      return p && p.team === clue.byTeam && p.role === 'player';
+    });
+    const passN = ids.filter(id => passed[id]).length;
+    const passPart = ids.length ? (' (' + passN + '/' + ids.length + ')') : '';
+
+    banner.style.display = 'flex';
+    banner.style.background = clue.byTeam === 'blue' ? '#0d47a1' : '#b71c1c';
+    if (clueText) {
+      clueText.textContent =
+        '🧶 ' + teamLabel + ': “' + clue.word + '” — ' + clue.number + guessPart + passPart;
+    } else {
+      banner.textContent =
+        '🧶 ' + teamLabel + ': “' + clue.word + '” — ' + clue.number + guessPart + passPart;
+    }
+
+    const showPass =
       liveRole === 'player' &&
       liveTeam &&
       clue.byTeam === liveTeam;
-    guessRow.style.display = showGuessUI ? 'flex' : 'none';
-    if (showGuessUI) {
-      const left = chatState && chatState.guessesRemaining;
-      guessesEl.textContent =
-        left == null ? '' :
-        left >= 99 ? 'Guesses left: ∞' :
-        ('Guesses left: ' + left);
-
-      const passed = (chatState && chatState.passedPlayers) || {};
-      const ids = Object.keys(window.lastKnownPlayers || {}).filter(id => {
-        const p = window.lastKnownPlayers[id];
-        return p && p.team === clue.byTeam && p.role === 'player';
-      });
-      const passN = ids.filter(id => passed[id]).length;
-
-      // Emoji chips for who passed (reaction-style)
-      if (passStatus) {
-        const players = window.lastKnownPlayers || {};
-        const agg = Object.create(null);
-        ids.forEach(id => {
-          if (!passed[id]) return;
-          const p = players[id] || {};
-          const em = p.charIcon || '✋';
-          if (!agg[em]) agg[em] = { count: 0, names: [] };
-          agg[em].count += 1;
-          agg[em].names.push(p.name || 'Player');
-        });
-        const chips = Object.entries(agg).map(([em, info]) =>
-          info.count > 1 ? em + info.count : em
-        );
-        const titles = Object.values(agg).map(info => info.names.join(', ')).join(' · ');
-        passStatus.textContent = chips.length
-          ? (chips.join(' ') + '  (' + passN + '/' + ids.length + ')')
-          : ('Pass: 0/' + ids.length);
-        passStatus.title = titles || '';
-      }
-
-      // Toggle affordance — not disabled when already passed
+    if (passBtn) {
+      passBtn.style.display = showPass ? 'inline-flex' : 'none';
       const iPassed = !!passed[livePlayerId];
-      passBtn.disabled = false;
-      passBtn.textContent = iPassed ? 'Undo Pass' : 'Pass';
-      passBtn.style.opacity = iPassed ? '0.75' : '1';
+      passBtn.textContent = iPassed ? '⏭️ Undo Pass' : '⏭️ Pass';
+      passBtn.classList.toggle('is-passed', iPassed);
       passBtn.onclick = () => {
-        if (typeof window.LiveChat?.votePass === 'function') {
-          window.LiveChat.votePass();
-        }
+        if (typeof window.LiveChat?.votePass === 'function') window.LiveChat.votePass();
       };
     }
+  } else {
+    banner.style.display = 'none';
+    if (clueText) clueText.textContent = '';
+    if (passBtn) passBtn.style.display = 'none';
   }
 
   // Give Clue button
@@ -3323,6 +3406,26 @@ function renderPlayersPanel(players = {}) {
     });
     pctRow.appendChild(pctInput);
     advBody.appendChild(pctRow);
+
+    // Manual guesses remaining (host)
+    const guessRow = document.createElement('label');
+    guessRow.appendChild(document.createTextNode('Guesses left '));
+    const guessInput = document.createElement('input');
+    guessInput.type = 'number';
+    guessInput.min = '0';
+    guessInput.max = '99';
+    guessInput.step = '1';
+    const curGuess = window.LiveChat?.getState()?.guessesRemaining;
+    guessInput.value = (typeof curGuess === 'number') ? String(curGuess) : '';
+    guessInput.style.width = '64px';
+    guessInput.title = 'Set remaining guesses for the current turn (synced to everyone)';
+    guessInput.addEventListener('change', () => {
+      if (typeof window.LiveChat?.setGuessesRemaining === 'function') {
+        window.LiveChat.setGuessesRemaining(guessInput.value);
+      }
+    });
+    guessRow.appendChild(guessInput);
+    advBody.appendChild(guessRow);
 
     advanced.appendChild(advBody);
   }
@@ -4923,6 +5026,24 @@ async function persist() {
     return Object.keys(byPlayer).length;
   }
 
+  /** Call when a card that had votes is flipped (any flip path). */
+  async function consumeGuessForFlip(cellIndex) {
+    const hadVotes = voteCountOnCell(cellIndex) > 0;
+    if (!hadVotes) return;
+    if (typeof state.guessesRemaining !== 'number' || state.guessesRemaining >= 99) {
+      // still clear votes via caller
+      return;
+    }
+    if (state.turnLocked) return;
+    state.guessesRemaining = Math.max(0, state.guessesRemaining - 1);
+    if (state.guessesRemaining <= 0) {
+      await endGuessTurn();
+    } else {
+      await persist();
+      if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
+    }
+  }
+
   /** Reveal a cell on the live board when auto-flip threshold is met */
   async function performAutoFlip(cellIndex) {
     const idx = Number(cellIndex);
@@ -4962,16 +5083,8 @@ async function persist() {
       return;
     }
 
-    // Guesses = clue number + 1; at 0 auto-pass (end turn)
-    if (typeof state.guessesRemaining === 'number' && state.guessesRemaining < 99) {
-      state.guessesRemaining = Math.max(0, state.guessesRemaining - 1);
-      if (state.guessesRemaining <= 0) {
-        await endGuessTurn();
-      } else {
-        await persist();
-        if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
-      }
-    }
+    // Guess consumption happens in clearReactionsOnCell when the card had votes.
+    // Wrong-color strict end is handled above.
   }
 
   async function toggleReaction(cellIndex) {
@@ -5052,10 +5165,14 @@ async function persist() {
     await persist();
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
 
+    // Threshold reached: only the HOST flips + pushes board (avoids local flicker)
     if (state.autoFlipEnabled && !isRemoving) {
       const need = votesNeeded();
       if (voteCountOnCell(idx) >= need) {
-        await performAutoFlip(idx);
+        await broadcast('auto-flip-request', { cellIndex: idx });
+        if (window.liveIsHost) {
+          await performAutoFlip(idx);
+        }
       }
     }
   }
@@ -5073,6 +5190,19 @@ async function persist() {
 
   function setTurnOrderMode(mode) {
     state.turnOrderMode = mode === 'strict' ? 'strict' : 'loose';
+    persist();
+    if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
+  }
+
+  function setGuessesRemaining(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v) || v < 0) return;
+    state.guessesRemaining = Math.min(99, Math.floor(v));
+    if (state.guessesRemaining <= 0) {
+      endGuessTurn();
+      return;
+    }
+    state.turnLocked = false;
     persist();
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
   }
@@ -5209,17 +5339,23 @@ async function persist() {
   }
 
   /** Called when a cell is flipped — clear all reactions on that cell */
-  function clearReactionsOnCell(cellIndex) {
-    const byPlayer = state.reactions[cellIndex];
-    if (!byPlayer) return;
+  async function clearReactionsOnCell(cellIndex) {
+    const key = String(cellIndex);
+    const byPlayer = state.reactions[key] || state.reactions[cellIndex];
+    if (!byPlayer || Object.keys(byPlayer).length === 0) return;
+
+    // Count as a used guess when a voted card is flipped
+    await consumeGuessForFlip(cellIndex);
+
     for (const pid of Object.keys(byPlayer)) {
-      if (state.playerReactionCell[pid] === cellIndex) {
+      if (String(state.playerReactionCell[pid]) === key ||
+          state.playerReactionCell[pid] === cellIndex) {
         delete state.playerReactionCell[pid];
       }
     }
+    delete state.reactions[key];
     delete state.reactions[cellIndex];
     renderReactions();
-    // fire-and-forget persist/broadcast
     broadcast('chat-reaction', {
       reactions: state.reactions,
       playerReactionCell: state.playerReactionCell
@@ -5291,12 +5427,14 @@ async function persist() {
 
     refreshReactions: renderReactions,
     clearReactionsOnCell,
+	consumeGuessForFlip,
     clearAllReactions,
     toggleReaction,
     canVoteNow,
     setAutoFlipEnabled,
     setAutoFlipPercent,
     setTurnOrderMode,
+	setGuessesRemaining,
     startGuessRound,
     votePass,
     forcePass,
@@ -5315,14 +5453,17 @@ async function persist() {
           state.playerReactionCell = payload.playerReactionCell;
         }
         renderReactions();
-        // Host/spymaster applies auto-flip if threshold already met
-        if (state.autoFlipEnabled && (window.liveIsHost || window.liveRole === 'spymaster')) {
-          const need = votesNeeded();
-          for (const key of Object.keys(state.reactions || {})) {
-            if (voteCountOnCell(key) >= need) {
-              await performAutoFlip(Number(key));
-            }
-          }
+        if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
+      });
+      window.liveChannel.on('broadcast', { event: 'auto-flip-request' }, async ({ payload }) => {
+        if (!window.liveIsHost) return;
+        if (payload?.sender === window.livePlayerId) return;
+        const idx = Number(payload?.cellIndex);
+        if (!Number.isFinite(idx)) return;
+        if (!state.autoFlipEnabled) return;
+        const need = votesNeeded();
+        if (voteCountOnCell(idx) >= need) {
+          await performAutoFlip(idx);
         }
       });
       window.liveChannel.__chatAttached = true;
