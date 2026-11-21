@@ -2798,7 +2798,6 @@ function renderLiveClueUI() {
   const strict = !!(chatState && chatState.turnOrderMode === 'strict');
 
   const clueText = document.getElementById('live-clue-text');
-  const passBtn = document.getElementById('btn-pass-turn');
 
   // Game-over: all of one color revealed, or assassin (black) revealed → hide banner
   const gameOver = (typeof window.isLiveGameOver === 'function') && window.isLiveGameOver();
