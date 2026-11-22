@@ -5036,7 +5036,8 @@ function randomPlayerId() {
       turnOrderMode: 'loose',
       guessesRemaining: null,
       passedPlayers: Object.create(null),
-      turnLocked: false
+      turnLocked: false,
+      guessConsumedCells: Object.create(null)
     };
   }
 
@@ -5248,11 +5249,18 @@ async function persist() {
    * Consume exactly one guess. Pass hadVotes from caller (snapshot before clearing).
    * Returns true if the turn ended.
    */
-  async function consumeOneGuess(hadVotes) {
+  async function consumeOneGuess(hadVotes, cellIndex) {
     if (!hadVotes) return false;
     if (state.turnLocked) return true;
     if (typeof state.guessesRemaining !== 'number' || state.guessesRemaining >= 99) {
       return false;
+    }
+    // One guess per cell index per turn
+    if (cellIndex != null && cellIndex !== '') {
+      const ck = String(cellIndex);
+      if (!state.guessConsumedCells) state.guessConsumedCells = Object.create(null);
+      if (state.guessConsumedCells[ck]) return false;
+      state.guessConsumedCells[ck] = true;
     }
     state.guessesRemaining = Math.max(0, state.guessesRemaining - 1);
     if (state.guessesRemaining <= 0) {
@@ -5263,7 +5271,6 @@ async function persist() {
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
     return false;
   }
-
 	
   async function performAutoFlip(cellIndex) {
     const idx = Number(cellIndex);
@@ -5279,37 +5286,7 @@ async function persist() {
       color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
     }
 
-    // Snapshot votes BEFORE clearing (exactly one guess if any votes existed)
-    const hadVotes = voteCountOnCell(idx) > 0;
-
-    // Paint without going through clearReactions consume (paintCell still clears UI votes)
-    if (typeof paintCell === 'function') {
-      // Temporarily clear without consume — paintCell may call clearReactionsOnCell
-      clearReactionsOnCell(idx, { consumeGuess: false });
-      paintCell(cell, color, true);
-    } else {
-      cell.classList.add('play-active');
-      clearReactionsOnCell(idx, { consumeGuess: false });
-    }
-    if (typeof updateStats === 'function') updateStats();
-
-    // Host pushes the revealed board to everyone
-    if (typeof window.pushLiveBoard === 'function') {
-      try { await window.pushLiveBoard(); } catch (e) { /* ignore */ }
-    }
-
-    const byTeam = window.liveClueState && window.liveClueState.byTeam;
-    // White / black / opponent color → turn over (all remaining guesses gone)
-    const endsTurn = !!(byTeam && color !== byTeam);
-
-    if (endsTurn) {
-      await endGuessTurn();
-      return;
-    }
-
-    // Correct color: subtract exactly one guess if the card had votes
-    await consumeOneGuess(hadVotes);
-  }
+const hadVotes = voteCountOnCell(idx) > 0;
 
   async function toggleReaction(cellIndex) {
     if (!canVoteNow()) {
@@ -5437,6 +5414,7 @@ async function persist() {
     state.guessesRemaining = (!Number.isFinite(n) || n === 0) ? 99 : (n + 1);
     state.passedPlayers = Object.create(null);
     state.turnLocked = false;
+    state.guessConsumedCells = Object.create(null);
     await persist();
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
   }
@@ -5444,6 +5422,7 @@ async function persist() {
   async function endGuessTurn() {
     state.turnLocked = true;
     state.passedPlayers = Object.create(null);
+    state.guessConsumedCells = Object.create(null);
     // Clear card votes when the turn ends
     state.reactions = Object.create(null);
     state.playerReactionCell = Object.create(null);
@@ -5565,8 +5544,8 @@ async function persist() {
       return;
     }
 
-    // Correct team color: always consume one guess (spymaster flip or voted card)
-    await consumeOneGuess(true);
+    // Correct team color: exactly one guess (guarded per cell)
+    await consumeOneGuess(true, cellIndex);
   }
 
   /** Clear all tile votes (called when a new clue is given) */
@@ -5608,8 +5587,7 @@ async function persist() {
     }
 
     if (consume && hadVotes) {
-      // fire-and-forget single consume
-      consumeOneGuess(true);
+      consumeOneGuess(true, cellIndex);
     } else if (hadVotes) {
       persist();
     }
