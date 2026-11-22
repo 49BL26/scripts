@@ -5271,7 +5271,7 @@ async function persist() {
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
     return false;
   }
-	
+
   async function performAutoFlip(cellIndex) {
     const idx = Number(cellIndex);
     const cell = document.querySelector('#board .cell[data-index="' + idx + '"]');
@@ -5286,7 +5286,38 @@ async function persist() {
       color = ['red', 'blue', 'white', 'black'].find(k => cell.classList.contains(k)) || 'white';
     }
 
-const hadVotes = voteCountOnCell(idx) > 0;
+    // Snapshot votes BEFORE clearing
+    const hadVotes = voteCountOnCell(idx) > 0;
+
+    // Paint with accounting disabled so onCardRevealed does NOT also consume
+    clearReactionsOnCell(idx, { consumeGuess: false });
+    if (typeof paintCell === 'function') {
+      window.__liveSkipRevealAccounting = true;
+      try {
+        paintCell(cell, color, true);
+      } finally {
+        window.__liveSkipRevealAccounting = false;
+      }
+    } else {
+      cell.classList.add('play-active');
+    }
+    if (typeof updateStats === 'function') updateStats();
+
+    if (typeof window.pushLiveBoard === 'function') {
+      try { await window.pushLiveBoard(); } catch (e) { /* ignore */ }
+    }
+
+    const byTeam = window.liveClueState && window.liveClueState.byTeam;
+    const endsTurn = !!(byTeam && color !== byTeam);
+
+    if (endsTurn) {
+      await endGuessTurn();
+      return;
+    }
+
+    // Exactly one guess for this flip
+    await consumeOneGuess(true, idx);
+  }
 
   async function toggleReaction(cellIndex) {
     if (!canVoteNow()) {
@@ -5346,7 +5377,7 @@ const hadVotes = voteCountOnCell(idx) > 0;
       // Toggle off
       delete state.playerReactionCell[pid];
     } else {
-      // Vote on this card; clear personal pass vote (card vote and pass are mutually exclusive)
+      // Vote on this card; clear personal pass vote
       if (state.passedPlayers[pid]) {
         delete state.passedPlayers[pid];
       }
@@ -5366,7 +5397,7 @@ const hadVotes = voteCountOnCell(idx) > 0;
     await persist();
     if (typeof window.renderLiveClueUI === 'function') window.renderLiveClueUI();
 
-    // Threshold reached: only the HOST flips + pushes board (avoids local flicker)
+    // Threshold reached: host flips (voters only request)
     if (state.autoFlipEnabled && !isRemoving) {
       const need = votesNeeded();
       if (voteCountOnCell(idx) >= need) {
